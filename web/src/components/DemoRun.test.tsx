@@ -33,7 +33,7 @@ describe("a demo run on the dashboard", () => {
 	it("offers to start one, saying what happens", () => {
 		const api = { start: async () => ({ id: "x", repo: "ada/x" }), runs: async () => ({ running: null }) };
 		const text = visibleText(renderToStaticMarkup(<DemoCard api={api} />));
-		expect(text).toContain("Watch a hive build Honeycomb");
+		expect(text).toContain("Watch a hive build Honeycomb (Demo Game)");
 		expect(text).toContain("Nothing assigns the work");
 		expect(text).toContain("Start a demo run");
 	});

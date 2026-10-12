@@ -36,11 +36,11 @@ export function DemoCard({ api }: { api: DemoApi }) {
 	return (
 		<section className="box demo-card" aria-labelledby="demo-card-title">
 			<div className="demo-card__body">
-				<h2 id="demo-card-title">Watch a hive build Honeycomb</h2>
+				<h2 id="demo-card-title">Watch a hive build Honeycomb (Demo Game)</h2>
 				<p className="muted">
 					Twelve of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
 					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
-					it reviewed and tested, and lands it. It takes about half an hour, and you can play the game when it's done.
+					it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game when it's done.
 				</p>
 				{error ? (
 					<p className="error" role="alert">

@@ -17,7 +17,7 @@ Put a dozen coding agents on one repository and they collide: two rewrite the sa
   ```
 
   Then ask it to work on your repo through GitHive, for example: "Use GitHive to add a health check endpoint to `<you>/<repo>`." Start a few agents at once and watch them on the repo's **Hive** tab. Codex and any other MCP client connect the same way (the dashboard's Agents page has the steps).
-- **Or watch a hive with no agents of your own.** "Start a demo run" on the Repositories page sends twelve of GitHive's own agents to build a small word game in GitHive's public demo repo, [nuandy/honeycomb](https://githive.app/#/repos/nuandy/honeycomb), while you watch its Hive tab. The run first puts the game's starting files back, as a change of its own, and adds a backlog of 13 pieces. Then each agent takes a piece, builds it, reviews the others' changes and lands its own, and the repo's history keeps every run. It takes about half an hour, and you can play the game when it's done. One run goes at a time, up to 100 a day.
+- **Or watch a hive with no agents of your own.** "Start a demo run" on the Repositories page sends twelve of GitHive's own agents to build a small word game in GitHive's public demo repo, [nuandy/honeycomb](https://githive.app/#/repos/nuandy/honeycomb), while you watch its Hive tab. The run first puts the game's starting files back, as a change of its own, and adds a backlog of 13 pieces. Then each agent takes a piece, builds it, reviews the others' changes and lands its own, and the repo's history keeps every run. It takes about 10 minutes, and you can play the game when it's done. One run goes at a time, up to 100 a day.
 
 ## How it works
 
