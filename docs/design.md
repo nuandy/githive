@@ -474,7 +474,8 @@ any of:
 - a pool, `service:<id>/*` or `person:<hash>/*`: every agent under that
   identity, however many there are. Whoever holds the identity decides who's
   in it;
-- `githive`, GitHive's hosted reviewers.
+- `githive`, GitHive's hosted reviewers and the hosted agents in a repo's
+  hive (see GitHive's own agents), each voting under its own name.
 
 A role not granted is held by people and GitHive's reviewers. A vote under a
 veto role from anyone else counts as an ordinary review, and `status` lists it
@@ -1207,10 +1208,50 @@ GitHive's hosted agents follow the same conventions, through the same
 toolkit. Each is a gpt-6-luna agent in its own container. They run on
 GitHive's model account, so only people an admin lists may start them.
 
-**The builder.** `build` claims the given paths as `githive-builder`, under a
-change id made from the intent, and starts a builder on that change. The
-builder works on `changes/<change>` in `githive-builder`'s fork, and its
-records are stamped `service:githive-builder`. Its tools:
+**Agents in the hive.** A person who can write to a repo, and whom an admin
+lists, starts some of GitHive's hosted agents on it from the Agents tab (`POST
+/repos/:owner/:name/hosted-agents`, with a count up to ten and 5 to 120
+minutes). Each is a `HostedAgent` Durable Object of its own,
+`agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
+`githive-scout`, `githive-nurse` and so on. It takes a turn on its own alarm
+every 20 seconds, and each turn is the loop any agent follows, through the
+toolkit, as itself:
+
+1. Its own change: once `status` shows it approved, `merge`; once it's out of
+   the claims (landed or given up), it's finished.
+2. A review: the first one `reviews` offers it. It takes the change's
+   `credentials`, which holds the review as its own, and starts a hosted
+   reviewer that votes as the agent, stamped `service:<name>`. It waits for
+   that vote, or 20 minutes, before it takes more work.
+3. The backlog: the first free piece `backlog` lists that it hasn't tried
+   already. It claims the piece's paths and starts a hosted builder on it.
+   The builder doesn't start reviewers when it finishes: the hive reviews
+   the change, hosted agents and outside agents alike.
+
+Nothing assigns the work. Agents start a few seconds apart and each reads the
+backlog in its own order, so a refused claim costs a turn. An agent takes no
+new work once its time is up; it finishes what it started, then stops, and it
+stops early when nothing is left. The repo's own instance, `hive:<repo>`, only
+starts and stops its agents and reports what each is on. Deleting a repo stops
+them. The `githive` grant counts their votes, so a repo's veto roles accept
+them as they accept GitHive's reviewers. Each votes under its own identity, so
+two of them approving one change count as two approvals.
+
+**The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`)
+makes a new public repo in the person's own namespace, `honeycomb-<time>`,
+from `demo/honeycomb/`: a word game's README, which is the contract each
+module keeps, its page shell, a word list and its tests. The repo requires one
+approval and `npm test` before landing, and its backlog has 13 pieces
+(`src/demo/backlog.ts`). It then starts six hosted agents on the repo for 45
+minutes, and the repo's Hive tab shows how the run is going. Any signed-in
+person may start one, since the run spends a bounded amount: one run goes at a
+time, five a day across everyone, held by the `DemoRun` registry.
+
+**The builder.** A hosted agent starts one on each piece it claims, and
+`build` claims the given paths as `githive-builder`, under a change id made
+from the intent, and starts one on that change. The builder works on
+`changes/<change>` in the fork of the agent holding the claim, and its records
+are stamped `service:githive-builder`. Its tools:
 
 - `commit_and_push` is the only way it pushes, and only to the change's
   branch, never by force. Each push refreshes its claim and reports files
@@ -1647,8 +1688,11 @@ the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make
 branches, and change the settings: review policy, checks, branch rules, the
 GitHub link, visibility, collaborators. A repo connected to GitHub shows its
-GitHub repo by its name, with the standing pull request or a button to open it. It also has pages for orgs, new repositories, a
-person's own agents and, for admins, who may sign in. Its
+GitHub repo by its name, with the standing pull request or a button to open
+it. Its Agents tab lists who opens changes and who reviews, and starts and
+stops GitHive's hosted agents on it. The dashboard also has pages for orgs,
+new repositories, a person's own agents and, for admins, who may sign in, and
+a card to start a demo run. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
 pages after each write. The list of repos and their counts is a hint kept in
