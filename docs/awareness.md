@@ -72,6 +72,10 @@ Each object reply carries `news`: what others landed since the agent was last to
   notice about a change into a feature branch reaches its agent too. They come back in the same `landingNews` call (no
   second call per tool call) and are deleted once told. Each agent keeps at most 50, for at most 24 hours. Unlike
   landed news, notices reach an agent on its first call.
+- **GitHive's hosted builder** hears them too. Its toolkit calls aren't the agent's own, so they bring no news;
+  before each turn it takes the notices about the change it builds (`RepoCache.changeNotices`) and tells its model
+  in a few lines, with an interface change's next step worded for its own clone (`src/builder-news.ts`). When it
+  pushes into a conflict, it's told who changed those files on the branch, from `status`'s `touchedBy`.
 - **Landed news** starts at the agent's first call, even when nothing has landed yet, so the first landings on a new
   repo reach it. Its cursor is the newest outcome's time. News goes only to the verified caller, so a person merging
   from the dashboard doesn't use up the change agent's news.

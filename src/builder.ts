@@ -3,6 +3,11 @@ import { tool, type AgentTool } from "./agent";
 import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { ENVIRONMENT, SandboxAgent, WORKDIR, changeContext, clip, type AgentState, type ChangeJob } from "./sandbox";
 import { gitGuidance } from "./git-guidance";
+import { noticesMessage } from "./builder-news";
+import { rpc } from "./rpc";
+import type { Notice } from "./repo-cache";
+import type { TouchedBy } from "./toolkit/batch-reads";
+import { conflictWords } from "./toolkit/landing";
 import { builderCredentials, toolContextFor, startHostedReviewers } from "./toolkit/env";
 import { callTool } from "./toolkit/mcp";
 import { inLane } from "./claim-paths";
@@ -122,6 +127,16 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		await this.save(state);
 		await this.ctx.storage.setAlarm(Date.now());
 		return "revising";
+	}
+
+	/** Heads-ups and interface news about the change, from other agents' pushes and landings, told once. */
+	protected override async heard(job: BuildJob, state: BuilderState) {
+		const cache = this.env.REPO_CACHE.getByName(`repo:${job.project}`);
+		const notices = (await rpc(cache.changeNotices(job.agent, job.change))) as Notice[];
+		const message = noticesMessage(notices, job.branch);
+		if (!message) return [];
+		this.note(state, `heard ${notices.map((notice) => notice.kind).join(", ")}`);
+		return [message];
 	}
 
 	protected override staleKeys() {
@@ -344,16 +359,17 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		this.note(state, `pushed: ${message.slice(0, 120)}`);
 		await this.refreshClaim(job, state);
 		const outOfLane = await this.outOfLane(job);
-		const conflicts = await this.conflicts(job);
+		const { conflicts, touchedBy } = await this.conflicts(job);
 		state.lastReport = { outOfLane, conflicts };
 		const report = outOfLane.length
 			? `Pushed to ${job.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim ` +
 				"(extend_claim) if you need them, or revert them."
 			: `Pushed to ${job.ref}. Everything is inside your claim.`;
 		if (!conflicts.length) return report;
+		const where = conflictWords(conflicts, [], touchedBy);
 		return [
 			report,
-			`Your change conflicts with ${job.branch} in ${conflicts.join(", ")}: fetch_base, merge what ` +
+			`Your change conflicts with ${job.branch} in ${where}: fetch_base, merge what ` +
 				"it fetched, resolve inside your claim, and push.",
 		].join("\n");
 	}
@@ -381,12 +397,13 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 			.filter((file) => file && !inLane(file, job.claim));
 	}
 
-	/** The files where the change conflicts with the project's branch, from status's merge section. */
+	/** Where the change conflicts with the project's branch, and who changed those files there, from status. */
 	private async conflicts(job: BuildJob) {
 		const status = (await callTool("status", { repo: job.project, change: job.change }, this.toolContext()).catch(
 			() => null,
-		)) as { merge?: { clean?: boolean; conflicts?: string[] } } | null;
-		return status?.merge?.clean === false ? (status.merge.conflicts ?? []) : [];
+		)) as { merge?: { clean?: boolean; conflicts?: string[]; touchedBy?: TouchedBy[] } } | null;
+		if (status?.merge?.clean !== false) return { conflicts: [], touchedBy: [] };
+		return { conflicts: status.merge.conflicts ?? [], touchedBy: status.merge.touchedBy ?? [] };
 	}
 
 	private async unpushed() {

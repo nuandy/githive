@@ -151,6 +151,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 	/** Runs once when the agent fails, for example to give its claim back. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
+	/** What GitHive has to tell the model before its next turn, such as news about its change. */
+	protected async heard(_job: J, _state: S): Promise<string[]> {
+		return [];
+	}
 
 	protected async load() {
 		const [job, state] = await Promise.all([this.ctx.storage.get<J>("job"), this.ctx.storage.get<S>("state")]);
@@ -448,11 +452,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
 		const inbox = await this.peekInbox();
+		// Advice: a turn goes on without it.
+		const heard = await this.heard(job, state).catch(() => []);
 		// The first turn opens with the kickoff. Later turns send what the previous one left pending.
 		const opening: ResponseInputItem[] = state.previousResponseId
 			? (state.pending ?? [])
 			: [{ role: "user", content: this.kickoff(job) }];
-		const input: ResponseInputItem[] = [...opening, ...inbox.map((content) => ({ role: "user" as const, content }))];
+		const told = [...inbox, ...heard].map((content) => ({ role: "user" as const, content }));
+		const input: ResponseInputItem[] = [...opening, ...told];
 		const response = await client.responses.create({
 			model: MODEL,
 			instructions: this.instructions(job),

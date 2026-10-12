@@ -528,6 +528,18 @@ export class RepoCache extends DurableObject<Env> {
 			.slice(-NOTICES_KEPT);
 	}
 
+	/**
+	 * `agent`'s notices about `change`, told once and taken from the rest: how GitHive's hosted builder hears about the
+	 * change it builds, since its toolkit calls aren't the agent's own and bring no news.
+	 */
+	async changeNotices(agent: string, change: string): Promise<Notice[]> {
+		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
+		const about = kept.filter(([, notice]) => notice.change === change);
+		if (!about.length) return [];
+		await this.deleteKeys(about.map(([key]) => key));
+		return about.map(([, notice]) => notice).filter((notice) => !expired(notice));
+	}
+
 	/** Notes an attempt of `change`'s to land, such as a conflict or a failed check, for its merge commit's story. */
 	async noteAttempt(change: string, line: string) {
 		const key = `${ATTEMPTS}${change}`;
