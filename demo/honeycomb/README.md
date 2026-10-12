@@ -83,6 +83,14 @@ The board and yesterday's panel draw the same shape: seven flat-topped hexagons,
 - `puzzle.center` (which is `letters[0]`) is always the middle cell. The board's `W` is at least 64px, so each cell is a comfortable tap target on a phone; yesterday's may be smaller.
 - Don't build it from rows of a grid: the outer cells sit half a cell up or down from each other, which rows can't do.
 
+So that the shape can be tested without a browser, `src/ui/board.js` and `src/ui/yesterday.js` each export `combLayout(width)`, a pure function: given `W` in pixels, it returns `{ width, height, cells }`, the comb's box and its seven cells in the order center, `outer[0]` to `outer[5]`, each `{ left, top, width, height }` in pixels from the box's top-left corner. Each module imports without a DOM (it touches `document` only inside functions), and draws exactly what `combLayout` says:
+
+- the comb is `position: relative` with the box's `width` and `height`;
+- each cell is `position: absolute` with its `left`, `top`, `width` and `height` set as inline styles, and no margin, transform, grid or flex that moves it;
+- each cell is a `<button>` that isn't clipped, with the hexagon drawn by an element inside it that carries the `clip-path` and the colors. The button's `:focus-visible` ring (`outline: 3px solid var(--focus); outline-offset: 2px`) goes on the button, never on the clipped hexagon, which would cut it off.
+
+Their tests (`test/board.test.js`, `test/yesterday.test.js`) check `combLayout` for a few widths: the center cell is in the middle of the box; every outer cell's center is `1.06 × H` from the center cell's, in the direction above; no two cells' centers are closer than `H`, so no hexagons overlap; and every cell lies inside the box.
+
 ### Keyboard
 
 `bindInput` listens for `keydown` on `document`, and the game is fully playable from the keyboard:

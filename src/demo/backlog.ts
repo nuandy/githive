@@ -83,8 +83,11 @@ export const BACKLOG: DemoPiece[] = [
 			"DOM code, no framework or dependencies, working in current browsers without a build step; import " +
 			"other modules with relative paths ending in .js. Make it accessible: real buttons, labels, focus " +
 			"states, and keyboard use. Keep its styles in its own stylesheet, using only the theme colors " +
-			"README.md lists (Colors and contrast), always in their text-and-background pairs.",
-		paths: ["src/ui/board.js", "styles/board.css"],
+			"README.md lists (Colors and contrast), always in their text-and-background pairs. Export combLayout " +
+			"and draw the comb from it, as README.md (The honeycomb) says, and test it in its test file with " +
+			"node:test: no overlapping cells, every outer cell touching the center one. Run `npm test` before " +
+			"pushing.",
+		paths: ["src/ui/board.js", "styles/board.css", "test/board.test.js"],
 	},
 	{
 		id: "input",
@@ -158,8 +161,11 @@ export const BACKLOG: DemoPiece[] = [
 			"DOM code, no framework or dependencies, working in current browsers without a build step; import " +
 			"other modules with relative paths ending in .js. Make it accessible: real buttons, labels, focus " +
 			"states, and keyboard use. Keep its styles in its own stylesheet, using only the theme colors " +
-			"README.md lists (Colors and contrast), always in their text-and-background pairs.",
-		paths: ["src/ui/yesterday.js", "styles/yesterday.css"],
+			"README.md lists (Colors and contrast), always in their text-and-background pairs. Export combLayout " +
+			"and draw the comb from it, as README.md (The honeycomb) says, and test it in its test file with " +
+			"node:test: no overlapping cells, every outer cell touching the center one. Run `npm test` before " +
+			"pushing.",
+		paths: ["src/ui/yesterday.js", "styles/yesterday.css", "test/yesterday.test.js"],
 	},
 	{
 		id: "theme",
