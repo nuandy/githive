@@ -165,6 +165,9 @@ export class HostedAgent extends DurableObject<Env> {
 			console.error(`${state.name} on ${state.repo}: a turn failed (${state.failing} in a row)`, statusOf(err).message);
 			if (state.failing >= FAILING_MOST) state.done = true;
 		}
+		// A stop can arrive while the turn waits on the toolkit; the turn mustn't write over it.
+		const stopped = (await this.ctx.storage.get<HostedAgentState>("agent"))?.done;
+		if (stopped) state.done = true;
 		await this.ctx.storage.put("agent", state);
 		if (!state.done) await this.ctx.storage.setAlarm(Date.now() + AGENT_TICK_MS);
 	}

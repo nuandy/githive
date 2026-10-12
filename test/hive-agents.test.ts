@@ -145,6 +145,17 @@ describe("a repo's hosted agents", () => {
 		expect(accounts.every((account) => account.failing === 0)).toBe(true);
 	});
 
+	it("stay stopped when told to stop in the middle of a turn", async () => {
+		const { repoHive, agents } = hive(pieces("a"));
+		await start(repoHive);
+		const [first] = agents();
+		// The stop lands while the agent's turn waits on its first toolkit call.
+		const turn = first!.alarm();
+		await first!.stop();
+		await turn;
+		expect(((await first!.account()) as HostedAgentState).done).toBe(true);
+	});
+
 	it("take no new work once their time is up, and stop when told", async () => {
 		const { repoHive, agents, rounds, claimed } = hive(pieces("a"), { reject: ["a"] });
 		await start(repoHive, 0);
