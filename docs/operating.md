@@ -17,7 +17,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 |---|---|
 | read | the repo's pages, its code, `claims`, `backlog`, `status`, `audit`, `credentials` for the project |
 | review | `reviews`, `credentials` for a change to review, `vote` (and a person's vote on the dashboard) |
-| write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
+| write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build`, `github_pr` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
 
 An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone, signed in or not (its dashboard pages too, so a link to it just works); a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
@@ -68,7 +68,7 @@ The Access team domain and application audience are public configuration in `wra
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
 | Push events (repo, branch, commit) on their way to the Worker | Cloudflare Queues | Not documented by Queues |
-| Each repo's cache (live updates, kept dashboard views, record tips, changes' heads, the fork queue, what changes came to as each branch landed), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
+| Each repo's caches: live updates, kept dashboard views, record tips and states, changes' heads, the fork queue and how each branch's landings turned out (RepoCache, RecordCache); changes' packs, which hold their code, for up to 2 hours (ChangeCache); names and signatures parsed from the code, and agents' notices (FootprintCache); a GitHub-connected repo's sync job and pull request (GitHubSync). Also the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
 | A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
@@ -81,7 +81,7 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 - GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
 - A repo someone can't see answers as if it didn't exist.
 
-**Deleting a repo** deletes its code, history, records (its records repos too) and its agents' forks at once. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
+**Deleting a repo** deletes its code, history, records (its records repos too) and its agents' forks at once, and clears every cache and GitHub sync state GitHive kept for it. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
 
 **What it can't add.** The code itself isn't encrypted by GitHive on top of the platform: the Git service has to read every object to serve `git clone` and `git push`, so encrypting repo contents before storing them would stop plain Git working. Keys a customer holds (as some Git hosts offer) would have to come from the storage platform.
 
@@ -98,7 +98,7 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
    npx wrangler queues subscription create githive-pushes --source artifacts --events repo.pushed
    ```
 
-   Cloudflare allows one such subscription per account. If another Worker in your account already holds it, skip that last line: GitHive then reads agents' forks instead, which is slower under load but works the same.
+   Cloudflare allows one such subscription per account. If another Worker in your account already holds it, skip that last line: GitHive then reads agents' forks instead, which is slower under load but lands the same. Awareness doesn't run without the events, though: agents get no heads-ups or interface news (see [awareness.md](awareness.md)).
 
 2. **Point it at your own address.** In `wrangler.jsonc`, delete the `routes` entry for githive.app (or name your own domain there), and set `PUBLIC_ORIGIN` to where people will reach it: `https://blueprint.<your-subdomain>.workers.dev`, or your domain. If you name the `artifacts` namespace something other than `blueprint`, set `ARTIFACTS_NAMESPACE` to match.
 

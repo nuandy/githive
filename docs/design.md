@@ -24,9 +24,12 @@ Nothing outside Git decides anything, and nothing outside Git orders the
 agents' work: the review holds and each branch's landing lease (which merge
 lands the next batch, see Landing) are records in Git like the claims and
 votes, and what's ready to land is read from the votes. Durable Objects keep
-only copies and hints: the dashboard's views, the records' tips and states,
-changes' heads, the queue that makes forks, and what changes came to as each
-branch landed. They also run containers and GitHive's hosted agents. Losing
+only copies and hints: the dashboard's views, the records' tips and states
+(RepoCache, RecordCache), changes' heads and packs (ChangeCache), the queue
+that makes forks, how each branch's landings turned out, awareness's
+footprints and notices (FootprintCache), and a GitHub-connected repo's sync
+job and pull request (GitHubSync). They also run containers and GitHive's
+hosted agents. Losing
 any of it, or a repo's RepoCache not answering, costs speed, never a decision,
 and never stops a merge. The
 cost is that every call reads and writes its state in Git (see Benchmark).
@@ -78,17 +81,23 @@ what Git said.
 - `claims`: the claims in force.
 - `claim`: claim paths for a change, or extend or refresh its claim: on the
   project's branch or `into` another, `after` the changes it depends on, or
-  merging a whole branch (`source`).
+  merging a whole branch (`source`). Its reply says when the claim would
+  count as abandoned at the soonest (`freeAfter`).
 - `release`: release a claim: your own, or another's its agent abandoned
   (`stale: true`); a repo admin may also give up GitHub's change (see
   Connected to GitHub).
-- `credentials`: with a change, write access to its agent's fork; without,
-  read access to the project.
+- `credentials`: with your own change, write access to your fork; with
+  another agent's, read access to its fork and the project, to review it;
+  without a change, read access to the project. With a change, `git` holds
+  the commands to set up the clone.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   what GitHive's hosted agents on it are doing, and once something is pushed,
   whether it merges cleanly into the branch it lands on and which files are
-  outside its claim. Agents call it after each push.
+  outside its claim. A conflict comes with the commits on the branch that
+  touched its files (`touchedBy`), the conflicting lines (`hunks`) and the
+  commands that resolve it (`fix`); `lease` says what the claim waits on and
+  when it would count as abandoned. Agents call it after each push.
 - `merge`: merge the change if the conventions hold, then release its claim.
 - `audit`: replay the records and list every broken convention.
 - `revert`: revert a commit the audit reports.
@@ -98,6 +107,10 @@ what Git said.
 - `github_pr`: for a repo connected to GitHub in pr mode, open the standing
   pull request into GitHub's branch, or say where it is (see Connected to
   GitHub).
+
+Every object reply also carries `news` (what landed since the agent last
+asked, and awareness's notices: see [awareness.md](awareness.md)) and `next`,
+the caller's own next step, in GitHive's words only.
 
 Neither the toolkit nor the audit decides anything that binds an agent. An
 agent can skip the toolkit and use plain git, and the audit sees the same
@@ -662,7 +675,8 @@ base. Those objects come from each change's fork as Artifacts packs them,
 joined byte for byte into the push. Artifacts takes 5 to 10 s to answer any
 fetch, however small, so each merge fetches its own change while it waits
 for its turn, and keeps the pack (up to 1 MB, for 2 hours) in the repo's
-ChangeCache for the batch that lands it. Trees are kept for the isolate by hash:
+ChangeCache for the batch that lands it. Trees are kept for the isolate by hash
+(up to 50,000, the least recently used going first):
 Git names a tree by its content, so one read serves the project and every
 fork. Gathering, those early fetches and the trees each landing writes fill
 it, and the next landing starts from the last one's tree. A batch reads the
@@ -839,16 +853,17 @@ placed as it was last seen, to see that it hasn't moved.
 **Without checks, a batch takes all that's ready**, up to 64: its size is
 about one check failure per batch (see `batchSize`), and nothing fails a batch
 that isn't checked. At 200 agents with no checks, batches sized for checks (8,
-24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
-warmed when GitHive starts on a repo with checks, or without checks at its first
-claim (so a repo nobody works in starts no container), and saves the repo's
-snapshot (with nothing installed, when there are no checks; with trees, a
-repo without checks isn't warmed at all): cold, it then restores in
-seconds. Without one, the first batch of a 200-agent run read 3 or 4 changes
-in 42 to 61 s, behind the container starting from its image and Express
-cloning, however early it was warmed: the Gate stops after a minute idle, and
-an agent went from claim to merge in 30 to 40 s. Until the snapshot is saved,
-a claim (without checks), a check or an approval warms the Gate too. A batch reads the votes on all its
+24, 52) left 130 ready changes waiting. The repo's Gate is warmed when GitHive
+starts on a repo with checks, and saves the repo's snapshot: cold, it then
+restores in seconds. A repo without checks lands in the Worker and isn't
+warmed at all (with `TREE_LANDING: "off"`, where the Gate lands every batch,
+it's warmed at the repo's first claim, so a repo nobody works in starts no
+container). Without a snapshot, the first batch of a 200-agent run read 3 or 4
+changes in 42 to 61 s, behind the container starting from its image and
+Express cloning, however early it was warmed: the Gate stops after a minute
+idle, and an agent went from claim to merge in 30 to 40 s. Until the snapshot
+is saved, a check or an approval warms the Gate too, and so does a claim when
+the Gate lands every batch. A batch reads the votes on all its
 changes' heads, and the claims bearing on all their files, once (`readScopes`:
 the registry once, the indexes and shards once per records repo), then checks
 each change against them.
@@ -891,11 +906,14 @@ change keeps its newest head, a read counting as of when it began. An agent
 can push any branch to its own fork, so an event's head counts for a change
 only if its fork is the fork of the agent holding the claim; any other is
 read. The subscription sees every namespace in the account, so each Worker
-keeps only its own (`ARTIFACTS_NAMESPACE`), and production and the bench
-each have their own queue, since a queue has one consumer.
+keeps only its own (`ARTIFACTS_NAMESPACE`). Artifacts allows one such
+subscription per account, and a queue has one consumer, so only one Worker in
+an account gets events: githive.app's. Another, such as the bench, gets none
+and reads forks as before.
 
-**The same events drive awareness** ([awareness.md](awareness.md)), once a
-batch's heads are noted and its messages acked: that work is advice, so a
+**The same events drive awareness** ([awareness.md](awareness.md)), so a
+Worker without them has no footprints, interface news or heads-ups. It runs
+once a batch's heads are noted and its messages acked: that work is advice, so a
 failure in it is logged and never has a push delivered again. A push to
 `changes/<change>` on the fork of the agent holding its claim (read from the
 claims advice) is footprinted: the change is placed on its branch through
@@ -921,16 +939,11 @@ What it keeps is in the repo's FootprintCache (`footprints:<repo>`): files'
 facts by blob and path (a blob never changes), the open footprints with an
 index from each file's name to the changes that alter or use it, which notices
 were told, and the last commit analysed per branch. It writes notices and hive
-events into the RepoCache in one call a batch. Everything is counted, not
-timed (a Worker's clock stands still during CPU work): 200 parses, 4 million
-characters and 2,000 Artifacts reads a repo's batch, at most 500 of them from
-the project's own repo, which merges read too, a few seconds of CPU against the
-Worker's 60 s limit (`limits.cpu_ms`), files over 256 KB skipped by their size
-without their bytes being read, a batch stopped at Artifacts' first
-INTERNAL_ERROR (a busy repo) and never retried, a grammar that fails to load
-tried once a batch, 50 heads-ups and 200
-interface notices a push, 2,000 open
-footprints a repo. Every open change that uses a name is indexed (none is
+events into the RepoCache in one call a batch. Its budgets are counted, not
+timed, since a Worker's clock stands still during CPU work; awareness.md
+("Where parsing runs") has them. Beyond those, a push gives at most 50
+heads-ups and 200 interface notices, and a repo keeps at most 2,000 open
+footprints. Every open change that uses a name is indexed (none is
 dropped to make room), and at most 500 of them are read for one name at once,
 logged when that's hit. Losing any of it costs only missed hints.
 
@@ -1508,6 +1521,15 @@ in a test. Runs on Express, 9 Oct:
 
 With 200 scripted agents (run 208 in `bench-results/swarm/200/`), landing as a set merged 200 of 200 changes on Express in 2,140 s of work, through 13 merge errors the agents retried: Worker 502 and 500 pages, and Artifacts refusing a batch's push as busy. The 200-agent runs under the line before it never finished.
 
+Landing in the Worker, with trees, on 11 Oct (README, Benchmarks): 1,000
+scripted agents with no reviews and no checks (`run-1000-10` in
+`bench-results/swarm/1000/`) landed 1,000 of 1,000 changes in 904 s of work
+(1,897 s with setup), audit clean; 200 with no reviews or checks took 3 min
+36 s, and 200 with one approving review each and `npm install` and `npm test`
+on every batch took 9 min 16 s, all landed, audit clean
+(`bench-results/swarm/200/`). Merging past 200 hasn't been measured with
+reviews or checks.
+
 ### Measurements behind the code
 
 The numbers that explain why parts of the code look the way they do. The code
@@ -1582,6 +1604,11 @@ comments give the reason; the evidence is here.
   (run 1000-6). Each record log now has a RecordCache of its own, packs and
   places a ChangeCache, and a reply leaves out a view or a state the caller
   already has. Each cache logs how much it sends a minute.
+- An isolate lives for hours, with 128 MB for everything in it, and its caches
+  grew with the crowd until it ran out. Each now has a cap and drops its least
+  recently used entries first (`src/sized-cache.ts`): 50,000 trees, 8 MB of
+  blobs, 16 MB of record states, 8 MB of views, 2,000 change placements and
+  256 record logs. A slow or failed MCP call logs their sizes.
 - Without isomorphic-git's read cache, reading 200 merges took 22 s, and
   concurrent reads each held their own copy of the packfile.
 - In a 200-agent run, 12 checks and merges were cancelled as hung, and
@@ -1602,8 +1629,8 @@ comments give the reason; the evidence is here.
 - Busy push refusals lost two batches in a row at 200 agents before the Gate
   retried them.
 - With the Gate's container restarting between batches, landing a batch took
-  17–29 s (agents-8); with it already running, 2–3 s (agents-7). A batch now
-  starts the Gate while it's read.
+  17–29 s (agents-8); with it already running, 2–3 s (agents-7). A batch that
+  lands in the Gate now starts it while it's read.
 - The `small` instance (1 vCPU, 3 GiB) has a quarter less memory than
   standard-1 and twice its CPU. The managed image has Node 24 but no git.
 - Express, the benchmark repo, has no lockfile.
@@ -1641,8 +1668,10 @@ loses nothing, since the records in Git hold the truth. The awareness events
 come from the push consumer through the repo's FootprintCache, beside the
 RepoCache, which keeps parsed files and open changes' footprints and is as
 much a hint. A repo's other tabs
-show its changes (one branch at a time), what landed on a branch and why
-(History), its claims as a map, its code at any branch or commit, its agents,
+show its changes (one branch at a time; a change's page shows any conflict,
+with the commits on the branch that touched its files and the conflicting
+lines, and the names it alters or uses that other changes touch), what landed on a branch and why
+(History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make
 branches, and change the settings: review policy, checks, branch rules, the
@@ -1674,11 +1703,15 @@ one RepoIndex; the records in Git are what count.
   it's asked for again. `credentials` waits at most about 90 s for a fork,
   then says to call again, rather than trying every seed in turn on the same
   stuck fork.
-- **Some shallow fetches fail.** Artifacts refuses some shallow fetches of a
-  fork's branch where a whole fetch works. `scripts/mcp-agent.mjs` falls back
-  to a whole fetch; an agent using plain git has to do the same.
-- **Merging past 200 is unmeasured.** Landing as a set merged 200 of 200 with
-  200 agents; more than that hasn't been tried.
+- **Shallow history hurts forks.** Artifacts refuses some shallow fetches of
+  a fork's branch where a whole fetch works. And a push from a clone cut off
+  at a depth can leave holes in the fork's history, after which Artifacts
+  fails fetches that negotiate. So `credentials`' commands and
+  `scripts/mcp-agent.mjs` fetch the project's branch whole before an agent
+  pushes; an agent using plain git has to do the same.
+- **Merging past 200 is measured only without reviews or checks.** 1,000
+  agents landed 1,000 of 1,000 changes with neither; with both, the most
+  measured is 200 of 200.
 - **Sharding costs small runs** about 8 s for one agent; on demand, only once
   the load calls for it.
 - **A rejection only blocks from a veto role** (or the checks, whose

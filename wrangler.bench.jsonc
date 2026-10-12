@@ -62,10 +62,10 @@
 	],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "adf3d5a6fa5247f6849af337c4236193" }],
-	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
-	//   wrangler queues create githive-bench-pushes
+	// Artifacts allows one push-event subscription per account, and production's queue holds it, so this queue
+	// gets no events: the bench reads agents' forks, and runs no awareness. To move the events here, delete
+	// production's subscription and run:
 	//   wrangler queues subscription create githive-bench-pushes --source artifacts --events repo.pushed
-	// A queue has one consumer, so production and the bench each have their own.
 	"queues": {
 		"consumers": [{ "queue": "githive-bench-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }],
 	},

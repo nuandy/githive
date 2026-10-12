@@ -1,6 +1,7 @@
 # GitHub pull requests: GitHive's work reaches GitHub through a PR
 
-Status: built, 2026-10-11, on branch `github-pr`. This adds to [design.md](design.md), "Connected to GitHub".
+Merged on 12 October 2026 ([#2](https://github.com/nuandy/githive/pull/2)). This adds to [design.md](design.md),
+"Connected to GitHub".
 
 ## Why
 
@@ -11,7 +12,7 @@ collect on GitHive and reach GitHub through a pull request, merged the normal Gi
 ## Settings
 
 `settings { github: "owner/name", github_sync: "mirror" | "pr", github_trust: true | false }`.
-- **A link made before modes keeps today's behaviour exactly.** It has no `sync` recorded: it mirrors `main` after
+- **A link made before modes keeps the behaviour it had exactly.** It has no `sync` recorded: it mirrors `main` after
   each landing, brings nothing of GitHub's back, and trusts nothing. Inbound, and trust, apply only to a link whose
   `github_sync` is set, to `"pr"` or `"mirror"`, through `settings` or the dashboard's Settings tab (which offers it
   for such a link, and saves it only once someone chose there). Setting `github_trust` alone sets no mode.
@@ -152,7 +153,7 @@ is a fast-forward again.
   - the repo's GitHub trust is on, connected to the GitHub repo the import came from: for the merge path, in the
     registry it's checked against; for the audit, in the registry state the merge cites.
 
-  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. Only the repo's
+  Anything else that skips a vote is refused by the merge, and reported by the audit, as any other is. Only the repo's
   `GitHubSync`, verified as `service:githive-github`, may act as `githive-github`: other hosted agents, which act
   under the other `githive-` names, are refused (`mayActAs`). Were one to get a record written anyway, it would
   get no trust: its records are stamped as itself.

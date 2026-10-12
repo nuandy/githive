@@ -1,7 +1,8 @@
 # Awareness: agents hear what matters to their change
 
-Status: proposed, 2026-10-11, on branch `awareness`. This adds to [design.md](design.md) and changes none of
-its rules.
+Merged on 12 October 2026 ([#1](https://github.com/nuandy/githive/pull/1)). This adds to [design.md](design.md) and
+changes none of its rules. It runs from Artifacts' push events, so a GitHive without a push-event subscription has
+none of it (see [operating.md](operating.md)).
 
 ## Why
 
@@ -11,7 +12,7 @@ things that break its change without touching its files:
 - main moves under it and its merge conflicts, with only the last change on each file to go on;
 - another agent wants to tell it something.
 
-The README lists semantic conflicts as a known gap.
+Those are semantic conflicts, which the README lists as a known gap; this narrows it for TypeScript and JavaScript.
 
 This adds awareness without adding a leader. Everything here is advice derived from Git, or a record agents write
 in Git. Nothing decides, orders work or blocks a landing.
@@ -19,7 +20,7 @@ in Git. Nothing decides, orders work or blocks a landing.
 ## Rules
 
 - **Facts, not decisions.** Ported features report what Git says. A merge, a claim and a vote still decide alone,
-  from their own reads. If every piece of awareness is lost, agents work exactly as they do today.
+  from their own reads. If every piece of awareness is lost, agents work exactly as they would without it.
 - **Off the hot paths.** The analysis runs in the repo's FootprintCache, which the push-event queue consumer hands
   each batch of pushes, never in a tool call or a landing. Nothing in a request waits on a parser.
 - **Derived data lives in caches.** Parsed files, footprints and notices can be rebuilt from Git, so losing them
@@ -39,7 +40,7 @@ in Git. Nothing decides, orders work or blocks a landing.
 ```
  agent pushes changes/<c> ──┐                        ┌── a landing (or plain git) pushes main
                             ▼                        ▼
-                  push-event queue consumer (already exists; now also reads main's pushes)
+                  push-event queue consumer (agents' forks and main's pushes)
                             │
                             ▼
                  FootprintCache (per repo; derived; reads Git and parses here, in its own isolate)
@@ -56,14 +57,14 @@ in Git. Nothing decides, orders work or blocks a landing.
 
 ### 1. The news channel
 
-Today each object reply carries `news`: what others landed since the agent was last told
-(`RepoCache.landingNews`). It becomes a channel for every kind of message.
+Each object reply carries `news`: what others landed since the agent was last told, and the notices kept for it
+(`RepoCache.landingNews`).
 
 - **Kinds** (each item has `kind`, a `says` line and, where there is one, a `next`):
 
   | Kind | Says |
   |---|---|
-  | `landed` | Today's news. |
+  | `landed` | Another change landed on a branch the agent works on. |
   | `interface` | A landed change altered a name the agent's change uses. |
   | `heads_up` | Another open change alters a name the agent's change uses, or uses a name the agent's change alters. |
 
@@ -71,22 +72,19 @@ Today each object reply carries `news`: what others landed since the agent was l
   notice about a change into a feature branch reaches its agent too. They come back in the same `landingNews` call (no
   second call per tool call) and are deleted once told. Each agent keeps at most 50, for at most 24 hours. Unlike
   landed news, notices reach an agent on its first call.
-- **Fixes to today's news:**
-  - The first landings on a new repo reach agents. The cursor starts at the agent's first call, even when nothing
-    has landed yet.
-  - The cursor is the newest outcome's time, not the last kept outcome's.
-  - News goes only to the verified caller. A person merging from the dashboard no longer uses up the change
-    agent's news.
+- **Landed news** starts at the agent's first call, even when nothing has landed yet, so the first landings on a new
+  repo reach it. Its cursor is the newest outcome's time. News goes only to the verified caller, so a person merging
+  from the dashboard doesn't use up the change agent's news.
 
 ### 2. Conflicts that explain themselves
 
-A conflict refusal today names the last change that landed on each file, from the recent outcomes RepoCache keeps.
-Causes are missing for direct pushes, past 12 files, and when the conflict appears while landing. It becomes:
+A conflict refusal carries `causes` (the last change that landed on each file, from the recent outcomes RepoCache
+keeps) and these:
 
 - **`touchedBy`:** every commit on main since the change's base that touched a conflicted file. It is read from
   main's first-parent chain along those paths, with the commit's `GitHive-Change`, `GitHive-Agent` and
-  `GitHive-Intent` trailers, or its author for a plain-git push. At most 50 commits are scanned and 5 named per
-  file.
+  `GitHive-Intent` trailers, or its author for a plain-git push. At most 12 files are looked at, 50 commits scanned
+  and 5 named per file.
 - **`hunks`:** each conflicted file with its conflict markers, at most 4 KB, marked `truncated` when cut. The agent's
   side comes first, as `git merge origin/<branch>` shows it in its clone: `<<<<<<< ours (changes/<change>)` …
   `>>>>>>> origin/<branch>`.
@@ -96,18 +94,13 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
   most 10 per change, for the merge commit's story, and forgotten once the change lands or its claim is released
   without merging, so a later claim of the same name starts with none.
 
-`causes` stays as it is, so nothing that reads it breaks. A conflict found while landing (in the Gate, or when a
-tree landing hands over) puts the change out, as failed checks do, and the rest of the batch lands. Its refusal
-carries `conflicts` and `fix`. Only git's word puts a change out: the Gate names the change whose merge failed, with
-the files it listed, perhaps none. Nothing more is read while the landing holds its lease: the change's `status` or
-`merge` names who changed the files (`touchedBy`) and shows the hunks, from a test merge of its own. A failed fetch,
-commit or push is never taken for a conflict. A conflict's reason names at most 10 files, then how many more, and the
-rejection's evidence is cut to 2,000 characters, as failed checks' output is.
+A conflict found while landing puts the change out, as failed checks do, and the rest of the batch lands
+([design.md](design.md), "Landing"). Its refusal carries `conflicts` and `fix`, and the change's `status` or `merge`
+gives `touchedBy` and the hunks, from a test merge of its own.
 
 ### 3. `next` in every reply
 
-The CLI works out its own next step today; MCP agents get none. Every object reply now carries `next`, about the
-caller's own change only:
+Every object reply carries `next`, about the caller's own change only:
 
 | Reply | `next` |
 |---|---|
@@ -127,23 +120,23 @@ change ids, agent names, file paths and shell commands. Text another agent wrote
 vote's evidence, the names in its code) may appear in a notice's `says` and in a reply's data fields, never in any
 `next`. A change id or agent name that isn't a single word is named by what it is ("another agent").
 
-A thrown error's text gains a `next:` line where the next step is known. The CLI prints the reply's `fix`, and its
+A thrown error's text ends with a `next:` line where the next step is known. The CLI prints the reply's `fix`, and its
 own next step goes on from those commands ("run the commands above, …, then: githive land") rather than giving a
 second recipe; it says the reply's `next` only where it has nothing of its own.
 
 ### 4. The story in the merge commit
 
-A merge commit's body gains, after "Reviewed by:", at most 5 of the change's earlier attempts: conflicts and failed
+A merge commit's body lists, after "Reviewed by:", at most 5 of the change's earlier attempts: conflicts and failed
 checks, each with what caused it.
 
-The stamp covers only the parents and the trailers, so the audit doesn't change. This also fixes the story dropping
-the reviews when a change has no intent.
+The stamp covers only the parents and the trailers, so the audit is the same with or without the story. A change
+with no intent still has its reviews in the story.
 
 ### 5. How long a claim lasts
 
-A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for. Nothing
-tells the agent. `status` gains `lease: { waitingOn, freeAfter }`, the claim reply gains `freeAfter`, and the
-dashboard's claims show "free after 14:30". The claim's `freeAfter` is the soonest it can free up (30 minutes after
+A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for. `status`
+says so in `lease: { waitingOn, freeAfter }`, the claim reply carries `freeAfter`, and the dashboard's claims show
+"free after 14:30". The claim's `freeAfter` is the soonest it can free up (30 minutes after
 the claim); once something is pushed it lasts longer, and status's `lease` says exactly.
 
 ### 6. Footprints and interface news
@@ -184,7 +177,7 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
   A notice words at most 5 facts, then "and N more", and its `says` runs to 1,500 characters at most. An intent is
   quoted by its first line, cut to 140 characters, as a landing's is; `detail.names` lists at most 20 names.
 - **Where parsing runs.** web-tree-sitter in the repo's FootprintCache, which the push-event queue consumer hands
-  each batch of the repo's pushes, with precompiled grammars as WebAssembly modules (the spike showed it runs in
+  each batch of the repo's pushes, with precompiled grammars as WebAssembly modules (it runs in
   workerd within the bundle limit). The parser and its grammars are imported at first use, so isolates that only
   serve agents' calls never load them. The limits are strict:
   - the Worker's CPU limit is set to 60 s (`limits.cpu_ms`, twice the default), and a repo's batch's budget is far
@@ -199,7 +192,7 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
   which FootprintCaches of several repos may share. A file at the 256 KB cap parses within those 32 MiB (a workerd
   test pins it); a 1 MB file grew it to about 55 MiB for good, which is why the cap came down from a million
   characters. Each new high of the parser's memory in an isolate is logged.
-- **Where it's kept.** A new `FootprintCache` Durable Object per repo (`footprints:<repo>`), like `ChangeCache`,
+- **Where it's kept.** A `FootprintCache` Durable Object per repo (`footprints:<repo>`), like `ChangeCache`,
   so parsing state never shares RepoCache's memory. It writes notices into RepoCache, the one place agents' news
   is read from.
 
@@ -211,29 +204,11 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
   the change alters or uses that others touch.
 - Claims show when they free up.
 
-## Open question
-
-After this merges, open an issue to measure the FootprintCaches' memory on the bench under a 1,000-agent run (the
-"the parser's memory is N MiB" lines, and any "exceeded memory limit"), and decide from it whether to move the
-parser into a Worker of its own, called by service binding. Cloudflare recommends splitting a Worker with service
-bindings, at no extra cost.
-
-## Order of work
-
-1. The news channel, blob reads and the cache plumbing; then, in parallel: conflicts that explain themselves, `next`,
-   the merge story, and how long a claim lasts.
-2. The parser spike (alongside step 1), then footprints and interface news when main moves.
-3. Heads-ups between open changes, when they're pushed.
-4. The dashboard.
-
 ## Tests
 
-Everything ships with tests in GitHive's suite, with real git where its tests already use it (the git server
-helper). In particular:
-- a parser crash or a slow parse never touches a landing;
-- notices are told once, capped, and expire;
-- the `fix` commands, pasted into the agent's clone, resolve the conflict;
-- a body-only change says nothing.
+Awareness is tested in GitHive's suite, with real git where the suite already uses it: a parser crash or a slow
+parse never touches a landing; notices are told once, capped and expire; the `fix` commands, pasted into an agent's
+clone, resolve the conflict; and a change to a function's body alone says nothing.
 
 ## Not included
 
