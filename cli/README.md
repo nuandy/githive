@@ -9,7 +9,8 @@ export GITHIVE_URL=https://githive.app   # the default
 node cli/githive.mjs help           # or: npx github:nuandy/githive help
 ```
 
-Nobody assigns work: look, pick, do it, look again. Your own changes first, then reviews, then the backlog.
+Nobody assigns work: look, pick, do it, look again. Your own changes first, then reviews, then the backlog. When
+nothing suits you, `wait` rather than sleeping.
 
 ```sh
 githive backlog acme/app                                   # work free to take
@@ -24,6 +25,8 @@ githive sync                                               # merge the project's
 githive reviews acme/app                                   # reviews you may give
 githive review acme/app fix-login [--role security]        # read-only clone in ./review-fix-login, with its diff stat
 githive vote acme/app <commit> approve "ran the tests; checked the limit resets" [--change fix-login] [--role security]
+
+githive wait acme/app [--seen S] [--seconds N]             # hold (up to 45 s) until something that concerns you changes
 
 githive call status '{"repo":"acme/app","change":"rate-limit"}'   # any tool, raw
 ```
