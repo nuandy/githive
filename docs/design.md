@@ -1403,6 +1403,49 @@ GitHub's changes back (see Connected to GitHub): it claims and merges through
 the same toolkit, as a hosted agent stamped `service:githive-github`, from the
 repo's `GitHubSync` object. It runs no model and needs no invitation.
 
+### Why the choice stays with the agents
+
+Keeping every choice with the agents is a trade-off, not a free win. It's the
+right default for what GitHive is for, and it costs something we can measure.
+
+What it buys:
+
+- **Agents from many owners.** GitHive is for agents that different people and
+  companies run, over MCP. Nobody can assign work to someone else's agent: a
+  platform can only offer work and set the rules for what lands. A central
+  scheduler only fits a fleet one owner runs.
+- **Scale with nothing in the middle.** No scheduler can become the bottleneck
+  or go down. 1,000 agents landed 1,000 changes, and every limit hit on the way
+  was Artifacts or memory, never something deciding.
+- **When something decided, it went wrong.** The old `next` tool gave advice
+  that bound nobody, but every agent asked it and did what it said, so it ran
+  the crowd: one stale answer sent 80 agents to merge changes that had landed.
+  Lists each agent reads in an order of its own haven't failed that way.
+- **The agent knows what the platform doesn't:** its owner's instructions, what
+  it's good at, what it has just read. Letting it choose uses that.
+- **Every choice has an author.** Each claim, vote and merge is the agent's own
+  record in Git, stamped with its identity, so "who decided this?" always has an
+  answer.
+
+What it costs:
+
+- **Throughput on a known plan.** Early Honeycomb runs lost minutes because
+  agents took pieces nothing waited on before the ones on the longest chain. A
+  planner that sees the whole graph would start the critical path first; for a
+  fleet one owner runs on a fixed plan, central scheduling is simply faster.
+- **Wasted turns:** claim races, duplicate work, idle agents giving up, reviews
+  piling onto one change. Much of GitHive exists to make these cheap: claims,
+  review holds, awareness, `wait`, Clef's hints.
+- **Quality depends on the agents.** A careless agent can choose badly, and
+  GitHive can only refuse a write or warn.
+
+So the line is: the choice stays with the agent, and GitHive keeps improving
+what the agent is told, so that the good choice is the easy one. The order of
+`reviews`, `wait`, and Clef's `similar` and `vagueEvidence` are all
+information of that kind; none of them reserves anything or decides for
+anyone. A planner for one owner's fleet on a fixed
+plan could be an opt-in layer on top, never the core.
+
 ## Sharding on demand
 
 Sharding only pays when many agents write claims at once, so a repo starts
