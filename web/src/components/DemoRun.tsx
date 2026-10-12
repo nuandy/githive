@@ -12,7 +12,7 @@ import "./DemoRun.css";
 
 export interface DemoApi {
 	start(): Promise<{ id: string; repo: string }>;
-	runs(): Promise<{ running: { fullName: string } | null; recent?: { fullName: string }[] }>;
+	runs(): Promise<{ running: { fullName: string } | null; newest?: DemoRunStatus | null }>;
 }
 
 /** Starts a demo run and opens its repo's Hive tab; or says a run is going, or why one can't start. */
@@ -21,7 +21,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const running = runs.data?.running;
-	const latest = runs.data?.recent?.[0];
+	const newest = runs.data?.newest;
 	const start = async () => {
 		setBusy(true);
 		setError(null);
@@ -58,10 +58,20 @@ export function DemoCard({ api }: { api: DemoApi }) {
 						{busy ? "Setting up the repo…" : "Start a demo run"}
 					</button>
 				)}
-				{latest ? <PlayLink repo={latest.fullName} /> : null}
+				{newest && gameLanded(newest) ? <PlayLink repo={newest.fullName} /> : null}
 			</div>
 		</section>
 	);
+}
+
+/**
+ * Whether a run built the whole game: it finished with every piece landed. While a run is going, or after one was
+ * stopped, the repo holds part of a game, so there's nothing to play.
+ */
+export function gameLanded(run: Pick<DemoRunStatus, "status" | "agents" | "pieces">) {
+	if (run.status !== "done") return false;
+	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
+	return finished >= run.pieces;
 }
 
 /** What a demo run is doing, in a sentence, for the banner. */
@@ -106,16 +116,17 @@ export function DemoBanner({
 	return (
 		<p className={`callout demo-banner demo-banner--${run.data.status}`} role="status">
 			{runWords(run.data)} Twelve of GitHive's agents, each named for a job in a hive, work on their own: they review
-			one another's changes and take pieces of the backlog, and nothing assigns the work. <PlayLink repo={repo} />
+			one another's changes and take pieces of the backlog, and nothing assigns the work.{" "}
+			{gameLanded(run.data) ? <PlayLink repo={repo} /> : null}
 		</p>
 	);
 }
 
-/** The game as the demo repo's main branch has it, served from its files (see src/routes/site.ts). */
+/** The game the last run built, served from the demo repo's files (see src/routes/site.ts). */
 function PlayLink({ repo }: { repo: string }) {
 	return (
 		<a className="demo-play" href={href.site(repo)} target="_blank" rel="noopener noreferrer">
-			Play the game as it stands
+			Play the game
 		</a>
 	);
 }

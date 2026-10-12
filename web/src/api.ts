@@ -655,7 +655,8 @@ export interface DemoRunSlot {
 export const demo = {
 	start: () => call<{ id: string; repo: string }>("POST", "/demo/runs"),
 	/** The run going now, if any, and the latest ones. */
-	runs: () => call<{ running: DemoRunSlot | null; recent: DemoRunSlot[] }>("GET", "/demo/runs"),
+	runs: () =>
+		call<{ running: DemoRunSlot | null; recent: DemoRunSlot[]; newest: DemoRunStatus | null }>("GET", "/demo/runs"),
 	run: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
 };
 

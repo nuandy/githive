@@ -45,7 +45,8 @@ export function demoRoutes(app: Hono<AppEnv>) {
 		const registry = await rpc(c.env.DEMO_RUN.getByName("registry").runs());
 		const newest = registry.recent[0];
 		const run = newest ? await rpc(c.env.DEMO_RUN.getByName(`run:${newest.id}`).status()) : null;
-		return c.json({ running: registry.running ?? null, recent: registry.recent, newest: run });
+		const newestRun = run ? { ...run, pieces: BACKLOG.length } : null;
+		return c.json({ running: registry.running ?? null, recent: registry.recent, newest: newestRun });
 	});
 
 	// The latest run on a repo, for its Hive tab's banner: none unless it's the demo repo and a run has started.

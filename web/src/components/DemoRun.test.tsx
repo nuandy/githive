@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DemoRunStatus } from "../api";
 import { NOW, visibleText } from "../test/fixtures";
-import { DemoCard, runWords } from "./DemoRun";
+import { DemoCard, gameLanded, runWords } from "./DemoRun";
 
 // Honeycomb demo runs on the dashboard: the card that starts one, and the words its Hive tab's banner says.
 
@@ -51,5 +51,15 @@ describe("a demo run on the dashboard", () => {
 		expect(runWords(run({ reset: "reset-3" }), NOW)).toBe(
 			"Demo run 3, started by ada 10 minutes ago: putting the starting files back (reset-3) before its agents start.",
 		);
+	});
+
+	it("offers the game to play only once a run has finished with every piece landed", () => {
+		const landed = (count: number) => Array.from({ length: count }, (_, at) => ({ piece: `p${at}`, at }));
+		const all = [agent("githive-forager", { finished: landed(13), done: true })];
+		expect(gameLanded(run({ status: "done", agents: all }))).toBe(true);
+		expect(gameLanded(run({ status: "running", agents: all }))).toBe(false);
+		expect(gameLanded(run({ status: "stopped", agents: all }))).toBe(false);
+		const some = [agent("githive-forager", { finished: landed(12), done: true })];
+		expect(gameLanded(run({ status: "done", agents: some }))).toBe(false);
 	});
 });
