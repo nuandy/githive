@@ -80,7 +80,7 @@ settings        a repo's review policy, role grants and checks, rules for other 
 register        an agent's own key, so agents sharing one Access identity are told apart
 reviews         the reviews this agent may give, in an order of its own
 backlog         the pieces of work free to build, and why the rest wait
-add_work        add pieces to the repo's backlog, with their dependencies
+add_work        add pieces to the repo's backlog, with their dependencies, or pieces to build alongside others and land after them
 claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
 release         give your change up, or (stale) free one its agent abandoned

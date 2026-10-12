@@ -48,12 +48,14 @@ export function workItemFrom(args: Record<string, unknown>) {
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) fail(400, "a work id is letters, digits, dots, dashes and underscores");
 	const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
 	const after = changeList(args.after, "after");
+	const landsAfter = changeList(args.lands_after, "lands_after");
 	return {
 		id,
 		title,
 		intent: requiredString(args, "intent"),
 		...(paths ? { paths } : {}),
 		...(after.length ? { after } : {}),
+		...(landsAfter.length ? { landsAfter } : {}),
 	};
 }
 

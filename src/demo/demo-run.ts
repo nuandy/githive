@@ -54,7 +54,7 @@ export class DemoRun extends DurableObject<Env> {
 	// A run.
 
 	/** Starts a run on a repo that's set up already: its agents now, or once its reset has landed. */
-	async begin(input: Pick<RunState, "id" | "number" | "repo" | "fullName" | "by" | "reset" | "required">) {
+	async begin(input: Pick<RunState, "id" | "number" | "repo" | "fullName" | "by" | "reset" | "restore">) {
 		const startedAt = Date.now();
 		const run: RunState = { ...input, startedAt, status: "running" };
 		await this.ctx.storage.put("run", run);
@@ -109,8 +109,7 @@ export class DemoRun extends DurableObject<Env> {
 	/** Stops a run past its time: its agents, and a reset that never landed, giving the repo its approvals back. */
 	private async stopRun(run: RunState) {
 		await this.hiveOf(run.repo).stopAll();
-		if (run.reset && run.required !== undefined)
-			await this.callTool("settings", { repo: run.repo, required: run.required });
+		if (run.reset && run.restore) await this.callTool("settings", { repo: run.repo, ...run.restore });
 	}
 
 	/**
@@ -125,9 +124,9 @@ export class DemoRun extends DurableObject<Env> {
 				await this.callTool("merge", { repo: run.repo, change });
 				return run;
 			}
-			if (run.required !== undefined) await this.callTool("settings", { repo: run.repo, required: run.required });
+			if (run.restore) await this.callTool("settings", { repo: run.repo, ...run.restore });
 			await this.startAgents(run);
-			const { reset: _, required: __, ...rest } = run;
+			const { reset: _, restore: __, ...rest } = run;
 			return rest;
 		} catch (err) {
 			console.error(`demo ${run.id}: settling its reset failed`, statusOf(err).message);

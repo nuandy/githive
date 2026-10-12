@@ -50,14 +50,14 @@ describe("the demo registry", () => {
 });
 
 describe("starting a run over in the one demo repo", () => {
-	it("gives each run's pieces ids of their own, dependencies too, so an earlier run's merges don't count", () => {
+	it("gives each run's pieces ids of their own, and the ones they land after too", () => {
 		const pieces = [
 			{ id: "words", title: "Words", intent: "w", paths: ["src/words.js"] },
-			{ id: "board", title: "Board", intent: "b", paths: ["src/board.js"], after: ["words"] },
+			{ id: "app", title: "App", intent: "a", paths: ["src/main.js"], landsAfter: ["words"] },
 		];
 		expect(runBacklog(pieces, 3)).toEqual([
 			{ id: "words-3", title: "Words", intent: "w", paths: ["src/words.js"] },
-			{ id: "board-3", title: "Board", intent: "b", paths: ["src/board.js"], after: ["words-3"] },
+			{ id: "app-3", title: "App", intent: "a", paths: ["src/main.js"], lands_after: ["words-3"] },
 		]);
 	});
 
@@ -144,7 +144,7 @@ describe("a demo run", () => {
 			fullName: "ada/honeycomb",
 			by: "ada",
 			reset: "reset-2",
-			required: 1,
+			restore: { required: 1, verify: ["npm test"] },
 		});
 		// The last run's agents, all stopped, don't end this one.
 		agents.push({ name: "githive-forager", done: true });
@@ -154,7 +154,7 @@ describe("a demo run", () => {
 		expect((await run.status())?.status).toBe("running");
 		expect(started).toEqual([]);
 		await run.alarm();
-		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", required: 1 }]);
+		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", required: 1, verify: ["npm test"] }]);
 		expect(started).toHaveLength(1);
 		expect((await run.status())?.reset).toBeUndefined();
 	});
@@ -163,9 +163,10 @@ describe("a demo run", () => {
 		const { run, storage, reset, stopped } = demo();
 		await begin(run, "reset-1");
 		const state = (await storage.get("run")) as { startedAt: number };
-		await storage.put("run", { ...state, required: 2, startedAt: state.startedAt - RUN_GIVES_UP_MS - 1 });
+		const restore = { required: 2, verify: ["npm test"] };
+		await storage.put("run", { ...state, restore, startedAt: state.startedAt - RUN_GIVES_UP_MS - 1 });
 		await run.alarm();
 		expect(stopped()).toBe(true);
-		expect(reset.settings).toContainEqual({ repo: "ada--honeycomb", required: 2 });
+		expect(reset.settings).toContainEqual({ repo: "ada--honeycomb", ...restore });
 	});
 });

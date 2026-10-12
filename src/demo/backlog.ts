@@ -1,13 +1,13 @@
 // The pieces a Honeycomb demo run's agents build, in the backlog each agent picks from (see demo-run.ts). Every
-// piece keeps to the contract in the template's README, so they can be built at once and fit together. `after` names
-// the pieces a piece needs merged first.
+// piece keeps to the contract in the template's README, so they can be built at once and fit together. `landsAfter`
+// names the pieces one merges after, though it's built alongside them.
 
 export interface DemoPiece {
 	id: string;
 	title: string;
 	intent: string;
 	paths: string[];
-	after?: string[];
+	landsAfter?: string[];
 }
 
 export const BACKLOG: DemoPiece[] = [
@@ -186,13 +186,14 @@ export const BACKLOG: DemoPiece[] = [
 		intent:
 			"src/main.js: put the game together as README.md describes: today's puzzle, progress loaded and " +
 			"saved after every word, the board, typing and controls, feedback messages, rank and words found, " +
-			"the help (opened on a first visit), the share button, and yesterday's answers. Read every module " +
-			"first, and fix any mismatch between them in src/main.js rather than in other pieces. Check the page " +
-			"loads without errors by importing every module under node where you can, and walk through the code " +
-			"paths carefully. Keep to the contract in README.md (How the code fits together), which other agents " +
-			"build against at the same time.",
+			"the help (opened on a first visit), the share button, and yesterday's answers. It's built while the " +
+			"other pieces are, so write it against the contract, not against their code. Before you finish, " +
+			"fetch main: for every module that has landed by then, read it and check src/main.js uses it as it " +
+			"is, fixing any mismatch in src/main.js rather than in other pieces. It merges only once every other " +
+			"piece has. Keep to the contract in README.md (How the code fits together), which other agents build " +
+			"against at the same time.",
 		paths: ["src/main.js", "index.html"],
-		after: [
+		landsAfter: [
 			"puzzle",
 			"scoring",
 			"game",

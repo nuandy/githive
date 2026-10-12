@@ -9,15 +9,15 @@ import { callTool } from "../toolkit/mcp";
 import type { Registry } from "../toolkit/claims";
 import { HOSTED_PREFIX, claimsRef, recordLog, workRef } from "../toolkit/tools/repo";
 import { type Work, withdrawWork } from "../toolkit/work";
-import { resetChange } from "./run";
+import { type Gates, resetChange } from "./run";
 import { TEMPLATE_FILES } from "./template-files";
 
 // The one public repo every demo run builds Honeycomb in, named by DEMO_REPO (owner/name). The first run makes it
 // with the game's starting files. Every later run starts over on top of the last: it stops the last run's agents,
 // releases the claims they left, takes the last run's pieces out of the backlog, and puts the starting files back as
 // a change of the demo's own, so nothing is force-pushed and the history keeps every run. Those are the files the repo
-// began with, so the reset lands without a review, through the checks: the run sets the approvals required to none
-// while it lands, and puts them back before its agents start.
+// began with, all reviewed and checked once already, so the reset lands without a review or the checks: the run
+// sets the repo's approvals and checks to none while it lands, and puts them back before its agents start.
 
 /** The demo's own agent: it sets the repo up, adds the backlog and lands each run's reset. */
 export const DEMO_AGENT = "githive-demo";
@@ -70,8 +70,9 @@ export async function clearLastRun(env: Env, repo: string, number: number) {
 }
 
 /**
- * Puts the starting files back for run `number`, as a change claiming the whole repo, with no approvals required while
- * it lands. Returns its id and the approvals to put back once it has, or nothing when main holds just those files.
+ * Puts the starting files back for run `number`, as a change claiming the whole repo, with no approvals or checks while
+ * it lands. Returns its id and the approvals and checks to put back once it has, or nothing when main holds just those
+ * files.
  */
 export async function startReset(env: Env, repo: string, number: number) {
 	const ctx = demoContext(env);
@@ -82,8 +83,8 @@ export async function startReset(env: Env, repo: string, number: number) {
 	const intent =
 		`Start demo run ${number} over: remove every file the last run built and put Honeycomb's starting files back, ` +
 		"as the repo began.";
-	const required = await requiredApprovals(env, repo);
-	await setRequired(env, repo, 0);
+	const restore = await gatesOf(env, repo);
+	await setGates(env, repo, { required: 0, verify: [] });
 	try {
 		const claim = { repo, agent: DEMO_AGENT, change, paths: reset.paths, intent };
 		const claimed = (await callTool("claim", claim, ctx)) as { ok?: boolean; reason?: string };
@@ -96,21 +97,21 @@ export async function startReset(env: Env, repo: string, number: number) {
 			await full!.workspace.pushAs("refs/heads/main", to, fork);
 		});
 	} catch (err) {
-		await setRequired(env, repo, required).catch(() => undefined);
+		await setGates(env, repo, restore).catch(() => undefined);
 		throw err;
 	}
-	return { change, required };
+	return { change, restore };
 }
 
-/** How many approvals the repo's changes need now. */
-async function requiredApprovals(env: Env, repo: string) {
-	const registry = await recordLog<Registry>(demoContext(env), repo, claimsRef(repo)).read();
-	return registry?.commit.state.policy?.required ?? 0;
+/** What the repo's changes need now to land: approvals, and the checks they pass. */
+async function gatesOf(env: Env, repo: string): Promise<Gates> {
+	const state = (await recordLog<Registry>(demoContext(env), repo, claimsRef(repo)).read())?.commit.state;
+	return { required: state?.policy?.required ?? 0, verify: state?.verify ?? [] };
 }
 
-/** Sets how many approvals the repo's changes need, leaving the rest of its settings as they are. */
-export async function setRequired(env: Env, repo: string, required: number) {
-	await callTool("settings", { repo, agent: DEMO_AGENT, required }, demoContext(env));
+/** Sets the approvals and checks the repo's changes need, leaving the rest of its settings as they are. */
+export async function setGates(env: Env, repo: string, gates: Gates) {
+	await callTool("settings", { repo, agent: DEMO_AGENT, ...gates }, demoContext(env));
 }
 
 /** Main with the starting files in place of whatever is there, committed; nothing when that changes no file. */

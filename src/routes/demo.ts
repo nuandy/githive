@@ -1,14 +1,6 @@
 import type { Hono } from "hono";
 import { BACKLOG } from "../demo/backlog";
-import {
-	DEMO_AGENT,
-	clearLastRun,
-	demoContext,
-	demoRepo,
-	demoRepoName,
-	setRequired,
-	startReset,
-} from "../demo/demo-repo";
+import { DEMO_AGENT, clearLastRun, demoContext, demoRepo, demoRepoName, setGates, startReset } from "../demo/demo-repo";
 import { runBacklog } from "../demo/run";
 import { fail, statusOf } from "../errors";
 import { rpc } from "../rpc";
@@ -63,7 +55,7 @@ export function demoRoutes(app: Hono<AppEnv>) {
 /** The demo repo ready for run `number`: the last run cleared and its reset pushed, then this run's backlog. */
 async function setUpRun(env: Env, number: number) {
 	const repo = await demoRepo(env);
-	let reset: { change: string; required: number } | undefined;
+	let reset: Awaited<ReturnType<typeof startReset>>;
 	if (!repo.made) {
 		await clearLastRun(env, repo.id, number);
 		reset = await startReset(env, repo.id, number);
@@ -71,8 +63,8 @@ async function setUpRun(env: Env, number: number) {
 	const items = runBacklog(BACKLOG, number);
 	await callTool("add_work", { repo: repo.id, agent: DEMO_AGENT, items }, demoContext(env)).catch(async (err) => {
 		// The run won't start, so give the repo its approvals back; the next run releases the reset's claim.
-		if (reset) await setRequired(env, repo.id, reset.required).catch(() => undefined);
+		if (reset) await setGates(env, repo.id, reset.restore).catch(() => undefined);
 		throw err;
 	});
-	return { repo: repo.id, reset: reset ? { reset: reset.change, required: reset.required } : {} };
+	return { repo: repo.id, reset: reset ? { reset: reset.change, restore: reset.restore } : {} };
 }

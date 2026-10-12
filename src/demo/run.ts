@@ -33,8 +33,8 @@ export interface RunState {
 	number: number;
 	/** The change that puts the starting files back, until it lands; a repo's first run needs none. */
 	reset?: string;
-	/** The approvals the repo required before the reset, put back once it lands, before the agents start. */
-	required?: number;
+	/** The approvals and checks the repo had before the reset, put back once it lands, before the agents start. */
+	restore?: Gates;
 	repo: string;
 	fullName: string;
 	/** Who started it, as the dashboard names them. */
@@ -42,6 +42,12 @@ export interface RunState {
 	startedAt: number;
 	status: "running" | "done" | "stopped";
 	endedAt?: number;
+}
+
+/** What a repo's changes need to land: this many approvals, and these checks passed. */
+export interface Gates {
+	required: number;
+	verify: string[];
 }
 
 export interface RunSlot {
@@ -103,12 +109,12 @@ export const resetChange = (number: number) => `reset-${number}`;
  */
 export function runBacklog(pieces: DemoPiece[], number: number) {
 	const own = (id: string) => `${id}-${number}`;
-	return pieces.map(({ id, title, intent, paths, after }) => ({
+	return pieces.map(({ id, title, intent, paths, landsAfter }) => ({
 		id: own(id),
 		title,
 		intent,
 		paths,
-		...(after ? { after: after.map(own) } : {}),
+		...(landsAfter ? { lands_after: landsAfter.map(own) } : {}),
 	}));
 }
 

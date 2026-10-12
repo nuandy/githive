@@ -233,7 +233,8 @@ export class HostedAgent extends DurableObject<Env> {
 		const piece = backlog.open.find((open) => !state.tried.includes(open.id));
 		if (!piece) return;
 		const intent = piece.intent ? `${piece.title}\n\n${piece.intent}` : piece.title;
-		const claim = { change: piece.id, paths: piece.paths ?? [], intent };
+		const after = piece.landsAfter ?? [];
+		const claim = { change: piece.id, paths: piece.paths ?? [], intent, ...(after.length ? { after } : {}) };
 		// Another agent may have claimed it since the backlog was read: then it tries again next turn.
 		const claimed = (await call("claim", claim).catch((err) => {
 			if (statusOf(err).status === 409) return { ok: false };

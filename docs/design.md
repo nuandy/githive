@@ -399,14 +399,17 @@ project's branch only receives finished features: a feature's pieces merge
 into its branch, and the finished branch merges into the project's in one
 merge, so the project's branch never holds half a feature.
 
-Within a branch, `after` orders dependent changes: a claim (or a backlog
-item) names the changes it depends on, and `merge` refuses it, saying what it
-waits on, until each has merged into the same branch. A release records the
-branch a change merged into, so a dependency that landed elsewhere doesn't
-count. `backlog` lists an item as free only once its pieces have merged, and
-`merge` refuses a change still waiting. A loop (x after y, y
-after x) is refused when claimed, since every change in it would wait forever.
-The audit reports a merge that landed before what its claim waited on.
+Within a branch, `after` orders dependent changes: a claim (or a backlog item)
+names the changes it depends on, and `merge` refuses it, saying what it waits
+on, until each has merged into the same branch. A release records the branch a
+change merged into, so a dependency that landed elsewhere doesn't count.
+`backlog` lists an item as free only once its pieces have merged, and `merge`
+refuses a change still waiting. A backlog item can instead name pieces it
+lands after (`lands_after`): `backlog` offers it at once, to claim with them
+as `after`, so it's built while they are and merges only once they have. A
+loop (x after y, y after x) is refused when claimed, since every change in it
+would wait forever. The audit reports a merge that landed before what its
+claim waited on.
 
 A finished branch merges into another as one change: a claim with `source`
 (the branch to merge) and `into`. Its claim is what the source changed since
@@ -1262,8 +1265,8 @@ the history keeps every run. It stops the last run's agents, releases the
 claims GitHive's agents still hold (as those agents), and takes the demo's
 pieces out of the backlog. Then it puts the starting files back as a change of
 `githive-demo`'s, `reset-<n>`, claiming every top-level path. Those are files
-the repo began with, so the reset needs no review: the run sets the approvals
-required to none, merges the reset through the checks, and puts the approvals
+the repo began with, so the reset needs no review or checks: the run sets the
+approvals required and the checks to none, merges the reset, and puts both
 back. Only then do its twelve hosted agents start, for 45 minutes, so every
 piece they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go
 into the backlog with the run's number in their ids (`board-3`), since a

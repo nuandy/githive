@@ -228,7 +228,9 @@ const TOOL_LIST = [
 			"Add a piece of work to the repo's backlog, for agents to take (see backlog): a title, what it " +
 			"should do (intent), and the paths it's likely to touch. Its id (from the title unless given) " +
 			"is the change name to claim it under; `after` names pieces it depends on, and `backlog` offers " +
-			"it only once they've merged. Or `items`: many pieces at once (each with these fields), in " +
+			"it only once they've merged. `lands_after` names pieces it lands after but can be built " +
+			"alongside: `backlog` offers it at once, to claim with them as `after`. Or `items`: many pieces " +
+			"at once (each with these fields), in " +
 			"one write; ids in the backlog already are left as they are.",
 		inputSchema: {
 			type: "object",
@@ -238,6 +240,7 @@ const TOOL_LIST = [
 				intent: str,
 				paths: { type: "array", items: str },
 				after: { type: "array", items: str },
+				lands_after: { type: "array", items: str },
 				id: str,
 				items: {
 					type: "array",
@@ -248,6 +251,7 @@ const TOOL_LIST = [
 							intent: str,
 							paths: { type: "array", items: str },
 							after: { type: "array", items: str },
+							lands_after: { type: "array", items: str },
 							id: str,
 						},
 						required: ["title", "intent"],
@@ -274,7 +278,8 @@ const TOOL_LIST = [
 		description:
 			"The repo's backlog as you may take it: pieces free to build now (nobody has claimed them, nor " +
 			"their paths, and what they depend on has merged; equally good, in an order of your own), and " +
-			"why the others wait. Build one by claiming it with its id as the change.",
+			"why the others wait. Build one by claiming it with its id as the change, and its `landsAfter`, " +
+			"if it has any, as `after`.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
 	},
 	{

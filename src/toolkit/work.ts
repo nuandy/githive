@@ -17,6 +17,11 @@ export interface WorkItem {
 	paths?: string[];
 	/** Items it depends on. It's handed out only once each has merged (see ClaimRecord.after). */
 	after?: string[];
+	/**
+	 * Items it lands after, though it's handed out at once: it's claimed with them as `after`, so it's built while they
+	 * are and merges only once they have.
+	 */
+	landsAfter?: string[];
 	by: string;
 	at: string;
 }

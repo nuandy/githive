@@ -10,7 +10,7 @@ const { HostedAgent } = await import("../src/hosted-agents");
 
 const SIX = 6;
 
-type Piece = { id: string; title: string; intent: string; paths: string[] };
+type Piece = { id: string; title: string; intent: string; paths: string[]; landsAfter?: string[] };
 type Offer = { change: string; head: string; role: string };
 
 /**
@@ -24,6 +24,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const votes = new Map<string, { reviewer: string; verdict: string }[]>();
 	const merged = new Set<string>();
 	const log: string[] = [];
+	const claimedAfter = new Map<string, string[]>();
 	const approved = (change: string) =>
 		(votes.get(change) ?? []).some((vote) => vote.verdict === "approve" && vote.reviewer !== claimed.get(change));
 	const tools = (name: string, args: Record<string, unknown>): unknown => {
@@ -61,6 +62,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 			case "claim":
 				if (claimed.has(change)) return { ok: false };
 				claimed.set(change, agent);
+				if (args.after) claimedAfter.set(change, args.after as string[]);
 				return { ok: true };
 			case "release":
 				claimed.delete(change);
@@ -104,7 +106,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const rounds = async (turns: number) => {
 		for (let round = 0; round < turns; round++) for (const agent of agents()) await agent.alarm();
 	};
-	return { repoHive, agents, rounds, log, claimed, merged, votes };
+	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter };
 }
 
 const pieces = (...ids: string[]) => ids.map((id) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] }));
@@ -154,6 +156,14 @@ describe("a repo's hosted agents", () => {
 		await first!.stop();
 		await turn;
 		expect(((await first!.account()) as HostedAgentState).done).toBe(true);
+	});
+
+	it("claim a piece that lands after others with them as after, so it's built alongside them", async () => {
+		const wiring = { id: "app", title: "app", intent: "wire", paths: ["src/main.js"], landsAfter: ["a"] };
+		const { repoHive, rounds, claimedAfter } = hive([...pieces("a"), wiring]);
+		await start(repoHive);
+		await rounds(1);
+		expect(claimedAfter.get("app")).toEqual(["a"]);
 	});
 
 	it("take no new work once their time is up, and stop when told", async () => {

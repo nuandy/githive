@@ -111,4 +111,29 @@ describe("backlog work that waits on other pieces", () => {
 			waiting: [],
 		});
 	});
+
+	it("built alongside them when it only lands after them: offered at once, and its claim merges after", async () => {
+		await call("add_work", { id: "api", title: "api", intent: "the field", paths: ["api/"], agent: "a" }, "a");
+		const wiring = { id: "app", title: "app", intent: "wire it", paths: ["app/"], lands_after: ["api"], agent: "a" };
+		await call("add_work", wiring, "a");
+		expect(await call("backlog", { agent: "b" }, "b")).toMatchObject({
+			open: expect.arrayContaining([
+				{
+					id: "app",
+					title: "app",
+					intent: "wire it",
+					paths: ["app/"],
+					landsAfter: ["api"],
+					by: "a",
+					at: expect.any(String),
+				},
+			]),
+			waiting: [],
+		});
+		await approved("app", "b", ["app/"], { "app/x.js": "uses the field\n" }, { after: ["api"] });
+		expect(await call("merge", { change: "app", agent: "b" }, "b")).toMatchObject({
+			ok: false,
+			reasons: ["waits on api, which hasn't merged yet"],
+		});
+	});
 });
