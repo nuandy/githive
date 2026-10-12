@@ -104,4 +104,4 @@ A piece is done when:
 - the page loads with no errors in the console, with the files served from a folder of their own: every URL is relative (`src/...`, never `/src/...`);
 - it works with storage blocked and in a sandboxed page;
 - it follows Keyboard, Colors and contrast, and, for anything drawn, The honeycomb;
-- motion respects `prefers-reduced-motion`.
+- motion respects `prefers-reduced-motion`, and leaves nothing behind: an animation (a shuffle, a message fading) doesn't keep its last frame applied (no `animation-fill-mode: forwards` or `both` on an element that has other transitions or animations), and a class that starts one is removed on `animationend`, so the next effect on that element (a cell's press) still plays.
