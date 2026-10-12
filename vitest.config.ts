@@ -23,8 +23,8 @@ export default defineConfig({
 	// node:sqlite stands in for D1 in tests; Node 22 still keeps it behind a flag.
 	test: {
 		// test/workerd runs in workerd, through its own config (npm run test:workerd). .claude/ holds agents' own
-		// worktrees, whose copies of the tests aren't this checkout's.
-		exclude: ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "test/workerd/**"],
+		// worktrees, whose copies of the tests aren't this checkout's; demo/ holds the demo game's own node:test tests.
+		exclude: ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "demo/**", "test/workerd/**"],
 		execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],
 		// Run through Vite, so its cloudflare:workers import gets the stand-in above, and a package's .wasm (the
 		// parser's core) gets the plugin above instead of Node instantiating it as a module.

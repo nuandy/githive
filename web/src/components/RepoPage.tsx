@@ -3,6 +3,7 @@ import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
 import type {
 	BranchHistory,
+	DemoRunStatus,
 	LandingStretch,
 	ChangeHistory,
 	GiveUpAnswer,
@@ -54,6 +55,8 @@ export type RepoPageApi = CodeApi &
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 		/** The hive's recent events, for the Hive tab's live feed (stand-ins may leave it out). */
 		events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
+		/** The demo run that made a repo, for the Hive tab's banner (stand-ins may leave it out). */
+		demoRun?: (repo: string) => Promise<DemoRunStatus>;
 		/** The changes landed on a branch, for the History tab (stand-ins may leave it out). */
 		history?: (repo: string, branch: string) => Promise<BranchHistory>;
 		/** People who can write: make a branch, merge a change. */

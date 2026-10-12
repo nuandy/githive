@@ -10,6 +10,7 @@ import { awarenessHandOff } from "./footprint-cache";
 import { countingRequests, describeCounts } from "./git-http";
 import { adminRoutes } from "./routes/admin";
 import { dashboardRoutes } from "./routes/dashboard";
+import { demoRoutes } from "./routes/demo";
 import { mcpResponse, mcpRoutes } from "./routes/mcp";
 import { repoRoutes } from "./routes/repos";
 import type { AppEnv } from "./routes/shared";
@@ -26,6 +27,7 @@ export { ChangeCache } from "./change-cache";
 export { TokenCache } from "./token-cache";
 export { FootprintCache } from "./footprint-cache";
 export { GitHubSync } from "./github-sync";
+export { DemoRun } from "./demo/demo-run";
 
 const app = new Hono<AppEnv>();
 
@@ -120,6 +122,7 @@ app.get("/api", (c) =>
 
 repoRoutes(app);
 dashboardRoutes(app);
+demoRoutes(app);
 mcpRoutes(app);
 adminRoutes(app);
 

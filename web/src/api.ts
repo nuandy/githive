@@ -549,6 +549,8 @@ export const api = {
 	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
+	/** The demo run that made a repo, for its Hive tab's banner (404 when none did). */
+	demoRun: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	history: (repo: string, branch: string) =>
 		call<BranchHistory>("GET", `/repos/${repoPath(repo)}/history?branch=${encodeURIComponent(branch)}`),
@@ -595,6 +597,30 @@ export const api = {
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */
+/** A Honeycomb demo run, as GET /demo/runs/:owner/:name answers (see the server's src/demo/run.ts). */
+export interface DemoRunStatus {
+	id: string;
+	fullName: string;
+	by: string;
+	startedAt: number;
+	status: "running" | "done" | "stopped" | "failed";
+	workers: { name: string; change?: string }[];
+	finished: { piece: string; worker: string; at: number }[];
+	/** How many pieces the backlog has. */
+	pieces: number;
+	endedAt?: number;
+	note?: string;
+}
+
+/** Demo runs: GitHive's hosted agents build Honeycomb in a new public repo of the caller's own. */
+export const demo = {
+	start: () => call<{ id: string; repo: string }>("POST", "/demo/runs"),
+	/** The run going now, if any, and the latest ones. */
+	runs: () =>
+		call<{ running: { id: string; fullName: string; since: number } | null; recent: unknown[] }>("GET", "/demo/runs"),
+	run: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
+};
+
 export const manage = {
 	/** Every repo the caller can see, by full name. */
 	repos: () => call<{ name: string; id: string; visibility: "private" | "public" }[]>("GET", "/repos"),

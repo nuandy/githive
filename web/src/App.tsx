@@ -7,6 +7,7 @@ import {
 	admin,
 	api,
 	type ChangeHistory,
+	demo,
 	type LandingStretch,
 	fetchMe,
 	manage,
@@ -236,6 +237,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				rows={summaries.data ? buildRepoRows(summaries.data) : []}
 				loaded={summaries.loaded}
 				canCreate={me.kind === "user"}
+				{...(me.kind === "user" ? { demo } : {})}
 			/>
 		);
 	} else if (repoName !== null && view) {

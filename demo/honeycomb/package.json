@@ -1,0 +1,11 @@
+{
+  "name": "honeycomb",
+  "version": "0.1.0",
+  "description": "A daily word game played on a honeycomb of seven letters.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
