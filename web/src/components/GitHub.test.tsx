@@ -60,7 +60,7 @@ describe("the GitHub link by a repo's name", () => {
 				})}
 			/>,
 		);
-		expect(text(stuck)).toContain("GitHub's changes need a person: it conflicts");
+		expect(text(stuck)).toContain("Syncing with GitHub needs a person: it conflicts");
 		expect(stuck).toContain("github-c");
 	});
 
@@ -70,8 +70,8 @@ describe("the GitHub link by a repo's name", () => {
 		});
 		const again = async () => ({});
 		const writer = text(renderToStaticMarkup(<GitHubLink repo="acme/web" github={givenUp} again={again} />));
-		expect(writer).toContain("GitHub's changes were given up: given up by ana");
-		expect(writer).toContain("Bring them in again");
+		expect(writer).toContain("Syncing with GitHub stopped: given up by ana");
+		expect(writer).toContain("Sync again");
 		expect(text(renderToStaticMarkup(<GitHubLink repo="acme/web" github={givenUp} />))).not.toContain("Bring them");
 		// Nothing to ask again while it's done.
 		const done = github({ fromGitHub: { step: "done", commit: "c", at: "" } });

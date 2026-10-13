@@ -40,7 +40,7 @@ export interface RepoGitHub {
 	inbound: boolean;
 	/** The standing pull request as GitHive last saw it: open then, it may have been merged since. */
 	pull: { number: number; url: string } | null;
-	/** Bringing GitHub's changes back, as GitHive last did it. */
+	/** Syncing with GitHub: landing GitHub's new commits here, as GitHive last did it. */
 	fromGitHub?: {
 		step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "given up" | "failed";
 		commit: string;

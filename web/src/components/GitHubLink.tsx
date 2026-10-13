@@ -6,16 +6,26 @@ import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Button } from "./ui/button";
 
-/** Where bringing GitHub's changes back stands, in words, when it needs anyone to know. */
+const SYNCING = "Syncing with GitHub…";
+
+/** Where landing GitHub's new commits (a pull request's merge, say) stands, in words, when anyone needs to know. */
 export function fromGitHubWords(github: RepoGitHub): string | null {
 	const job = github.fromGitHub;
 	if (!job) return null;
-	if (job.step === "needs a person") return `GitHub's changes need a person: ${job.reason ?? "they were sent back"}`;
-	if (job.step === "given up") return `GitHub's changes were given up: ${job.reason ?? "their claim was released"}`;
-	if (job.step === "waiting") return `GitHub's changes ${job.reason ?? "wait"}`;
-	if (job.step === "failed") return `Bringing GitHub's changes back failed: ${job.reason ?? "no reason given"}`;
-	if (job.step === "import" || job.step === "claim" || job.step === "merge") return "Bringing GitHub's changes back…";
+	if (job.step === "needs a person") return `Syncing with GitHub needs a person: ${job.reason ?? "it was sent back"}`;
+	if (job.step === "given up") return `Syncing with GitHub stopped: ${job.reason ?? "its claim was released"}`;
+	// Its reasons read on from the subject: "waits for review: …".
+	if (job.step === "waiting") return `Syncing with GitHub ${job.reason ?? "waits for its turn"}`;
+	if (job.step === "failed") return `Syncing with GitHub failed: ${job.reason ?? "no reason given"}`;
+	if (job.step === "import" || job.step === "claim" || job.step === "merge") return SYNCING;
 	return null;
+}
+
+/** The note's color: plain while under way, a warning once it stops or waits, and a person's when one's needed. */
+function noteTone(step: string | undefined, underWay: boolean) {
+	if (underWay) return "text-muted-foreground";
+	if (step === "needs a person") return "text-needs";
+	return "text-warn";
 }
 
 /**
@@ -65,7 +75,7 @@ export function GitHubLink({
 			setAsked(true);
 		});
 	const job = github.fromGitHub;
-	const note = asked ? "Bringing GitHub's changes back…" : fromGitHubWords(github);
+	const note = asked ? SYNCING : fromGitHubWords(github);
 	const stopped = !asked && (job?.step === "given up" || job?.step === "needs a person" || job?.step === "failed");
 	const mode =
 		github.sync === "pr"
@@ -95,13 +105,13 @@ export function GitHubLink({
 			) : null}
 			{github.sync === "mirror" ? <span className="text-muted-foreground">mirrored</span> : null}
 			{note ? (
-				<span className={cn("max-w-[48ch] wrap-anywhere", job?.step === "needs a person" ? "text-needs" : "text-warn")}>
+				<span className={cn("max-w-[48ch] wrap-anywhere", noteTone(job?.step, note === SYNCING))}>
 					{job?.change && job.step !== "failed" ? <a href={href.change(repo, job.change)}>{note}</a> : note}
 				</span>
 			) : null}
 			{stopped && again ? (
 				<Button size="sm" className="gap-1 py-0.5" onClick={tryAgain} disabled={busy}>
-					{busy ? "Asking…" : "Bring them in again"}
+					{busy ? "Asking…" : "Sync again"}
 				</Button>
 			) : null}
 			{error ? <span className="basis-full animate-appear text-bad">{error}</span> : null}
