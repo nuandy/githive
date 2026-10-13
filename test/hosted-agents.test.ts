@@ -35,8 +35,10 @@ vi.mock("../src/toolkit/mcp", () => ({
 		if (name === "status") return hosted.status;
 		return { ok: true };
 	}),
-	// The repo's votes: wherever they're kept, a vote is recorded once.
-	votesFor: () => ({ vote: vi.fn(async (input: unknown) => void hosted.votes.push(input)) }),
+}));
+// The repo's votes: wherever they're kept, a vote is recorded once.
+vi.mock("../src/toolkit/hosted-vote", () => ({
+	castHostedVote: vi.fn(async (_ctx: unknown, _repo: string, input: unknown) => void hosted.votes.push(input)),
 }));
 
 const { Builder } = await import("../src/builder");

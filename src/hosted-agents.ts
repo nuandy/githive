@@ -198,12 +198,12 @@ export class HostedAgent extends DurableObject<Env> {
 		return callTool(name, args, toolContextFor(this.env, hiveIdentity(agent), { hosted: true }));
 	}
 
-	/** Starts GitHive's hosted builder on the agent's claimed change, which the hive reviews (tests note it instead). */
 	/** Which of `changes` GitHive's builder is still at (tests answer it instead). */
 	protected buildersAtWork(repo: string, changes: string[]): Promise<Set<string>> {
 		return buildersAtWork(this.env, repo, changes);
 	}
 
+	/** Starts GitHive's hosted builder on the agent's claimed change, which the hive reviews (tests note it instead). */
 	protected startBuilder(repo: string, change: string): Promise<unknown> {
 		return startHostedBuilder(this.env, { repo, change, hiveReviews: true });
 	}

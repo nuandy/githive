@@ -11,6 +11,7 @@
 		"typecheck": "tsc && tsc -p web && tsc -p web/visual",
 		"test": "vitest run",
 		"test:workerd": "vitest run --config vitest.workerd.config.ts",
+		"test:soak": "vitest run --config vitest.soak.config.ts",
 		"build:web": "vite build --config web/vite.config.ts",
 		"dev:web": "vite --config web/vite.config.ts",
 		"dev:web:fixtures": "GITHIVE_API=fixtures vite --config web/vite.config.ts",

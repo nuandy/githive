@@ -10,7 +10,8 @@ import {
 } from "./sandbox";
 import { gitGuidance } from "./git-guidance";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
-import { callTool, votesFor } from "./toolkit/mcp";
+import { castHostedVote } from "./toolkit/hosted-vote";
+import { callTool } from "./toolkit/mcp";
 import { makeStamper } from "./toolkit/stamp";
 import { GITHUB_AGENT } from "./toolkit/github-settings";
 import { HOSTED_PREFIX } from "./toolkit/tools/repo";
@@ -111,10 +112,10 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 
 	/** Vote on the commit, stamped as this reviewer when a stamp key is configured. */
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
-		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
+		const ctx = toolContextFor(this.env, undefined, { hosted: true });
 		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, identityOf(job)) : undefined;
 		const vote = { commit: job.head, change: job.change, reviewer: voterOf(job), role: job.role, verdict, evidence };
-		await votes.vote(vote, stamper);
+		await castHostedVote(ctx, job.project, vote, job.agent, stamper);
 	}
 
 	protected instructions(job: ReviewJob) {

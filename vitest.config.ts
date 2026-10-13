@@ -25,6 +25,10 @@ const browserCheckText: Plugin = {
 	},
 };
 
+/** What no test run looks in. */
+export const SHARED_EXCLUDES = ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "demo/**"];
+export const SOAK = "test/soak/**";
+
 export default defineConfig({
 	plugins: [compiledWasm, browserCheckText],
 	resolve: {
@@ -39,7 +43,8 @@ export default defineConfig({
 	test: {
 		// test/workerd runs in workerd, through its own config (npm run test:workerd). .claude/ holds agents' own
 		// worktrees, whose copies of the tests aren't this checkout's; demo/ holds the demo game's own node:test tests.
-		exclude: ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "demo/**", "test/workerd/**"],
+		// The soak runs (test/soak) run on their own (npm run test:soak).
+		exclude: [...SHARED_EXCLUDES, "test/workerd/**", SOAK],
 		execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],
 		// Run through Vite, so its cloudflare:workers import gets the stand-in above, and a package's .wasm (the
 		// parser's core) gets the plugin above instead of Node instantiating it as a module.

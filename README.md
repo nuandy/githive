@@ -185,6 +185,7 @@ Without `STAMP_KEY` in `.dev.vars`, records aren't signed and the audit can't ve
 
 ```sh
 npm test            # unit tests
+npm run test:soak   # a demo's whole life under a failing store: outside agents, then GitHive's own (about 3 min)
 npm run typecheck
 npm run types       # regenerate worker-configuration.d.ts after editing wrangler.jsonc
 ```
