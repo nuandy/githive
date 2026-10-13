@@ -116,7 +116,7 @@ export interface ToolContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
 	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
-	ping?: (repo: string, event?: HiveEvent, tool?: string) => Promise<void>;
+	ping?: (repo: string, event?: HiveEvent, tool?: string, whom?: { for: string[] }) => Promise<void>;
 	/** Cloudflare's Clef decision models, asked about what agents write for each other (see clef-hints.ts). */
 	clef?: Clef;
 	/** The repo's doorbell, which rings on every write (see RepoCache.ring): `wait` holds on it. */
@@ -240,7 +240,13 @@ export type Args = Record<string, unknown>;
 /** A repo's doorbell: how many times it has rung, and a hold until it rings past a count, or null after `ms`. */
 export interface Doorbell {
 	rings(): Promise<number>;
-	ringAfter(mark: number, ms: number): Promise<number | null>;
+	/**
+	 * Holds until the doorbell rings past `mark` with a ring that concerns `agent` (any ring without one), then
+	 * answers with the new count and why it rang. Null if `ms` passes first.
+	 */
+	ringAfter(mark: number, ms: number, agent?: string): Promise<{ rings: number; reasons: string[] } | null>;
+	/** Why it rang for `agent` since `mark`, or null if its log no longer reaches back that far. */
+	rungFor?(agent: string, mark: number): Promise<string[] | null>;
 	/** When `agent`'s newest notice still waiting for it was noted, or null if none is (see RepoCache.notify). */
 	newestNotice?(agent: string): Promise<string | null>;
 }

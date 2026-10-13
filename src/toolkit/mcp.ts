@@ -3,6 +3,7 @@ import { toolEvent } from "../hive-events";
 import { projectBranch } from "../project-branch";
 import type { NewsItem } from "../repo-cache";
 import type { Registry } from "./claims";
+import { concernsOf } from "./ring-concerns";
 import { type Args, openCall, presentedKey, type ToolContext, type ToolHandlers, verifiedAgent } from "./tools/context";
 import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
@@ -69,7 +70,10 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 	const result = withNext(name, args, ctx, await withNews(name, args, ctx, await runTool(name, args, ctx)));
 	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
 	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
-	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, name).catch(() => undefined);
+	if (wrote) {
+		const whom = await concernsOf(name, args, ctx).catch(() => undefined);
+		await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, name, whom).catch(() => undefined);
+	}
 	if (ctx.summarize && wrote) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "merge";

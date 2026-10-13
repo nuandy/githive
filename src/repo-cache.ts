@@ -133,6 +133,10 @@ const RECORD_CACHE = "record-cache:";
 const HIVE = "hive";
 /** How many times the doorbell has rung, so a waiting agent can tell whether it missed one (see ringAfter). */
 const RINGS = "rings";
+/** Each ring, by its count, with whom it concerns, so a `wait` can tell what rang for it between two calls. */
+const RING = "ring:";
+/** How many rings the log keeps: a `seen` older than that looks at once instead. */
+export const RINGS_KEPT = 500;
 /** The longest one call holds, well inside the 60 s MCP clients commonly allow a call. */
 export const LONGEST_HOLD_MS = 45_000;
 
@@ -150,13 +154,41 @@ interface Published {
 	kind?: string;
 	/** Why the doorbell rings, for the hosted agents (see HostedAgent.ring); absent when no agent is concerned. */
 	ring?: string;
+	/** Whom the ring concerns, for held `wait` calls; every agent when absent. */
+	whom?: Concerns;
 }
+
+/** Whom a ring concerns: the agents named, so a held `wait` of anyone else sleeps on. */
+export interface Concerns {
+	for: string[];
+}
+
+/** A ring as a held `wait` hears it: the count it brought the doorbell to, and why it rang. */
+export interface Rung {
+	rings: number;
+	reasons: string[];
+}
+
+interface LoggedRing {
+	reason: string;
+	for?: string[];
+}
+
+interface Listener {
+	agent?: string;
+	wake(rung: Rung | null): void;
+}
+
+const ringKey = (rings: number) => `${RING}${String(rings).padStart(12, "0")}`;
+
+// A ring without `for` concerns everyone, and so does every ring to a listener that named no agent.
+const concerns = (ring: LoggedRing, agent: string | undefined) => !ring.for || !agent || ring.for.includes(agent);
 
 export class RepoCache extends DurableObject<Env> {
 	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
 	private eventWrites = 0;
 	/** Calls held in ringAfter, each woken by the next ring. */
-	private readonly listening = new Set<(rings: number) => void>();
+	private readonly listening = new Set<Listener>();
 
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
@@ -169,9 +201,9 @@ export class RepoCache extends DurableObject<Env> {
 	 * Tell watching pages that something changed, and what for the hive's feed. A write makes the views stale, and
 	 * rings the repo's hosted agents with the tool that made it.
 	 */
-	async ping(kind: string, write = true, events: HiveEvent[] = [], tool?: string) {
+	async ping(kind: string, write = true, events: HiveEvent[] = [], tool?: string, whom?: Concerns) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
-		await this.publish({ events, kind, ...(write ? { ring: tool ?? kind } : {}) });
+		await this.publish({ events, kind, ...(write ? { ring: tool ?? kind } : {}), ...(whom ? { whom } : {}) });
 	}
 
 	/** How many times the doorbell has rung. */
@@ -180,21 +212,42 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
-	 * Holds the call until the doorbell rings past `mark` (from rings), then answers with the new count: at once if
-	 * it already has. Null if `ms` passes first. The caller decides whether what changed concerns it.
+	 * Holds the call until the doorbell rings past `mark` (from rings) with a ring that concerns `agent`, or any ring
+	 * when no agent is named, then answers with the new count and why it rang: at once if it already has. Null if `ms`
+	 * passes first. The caller decides whether what changed matters to it.
 	 */
-	async ringAfter(mark: number, ms: number): Promise<number | null> {
+	async ringAfter(mark: number, ms: number, agent?: string): Promise<Rung | null> {
 		const rings = await this.rings();
-		if (rings > mark) return rings;
+		if (rings > mark) {
+			const reasons = await this.rungFor(agent, mark);
+			// A mark older than the log can't be checked, so it counts as rung.
+			if (reasons === null) return { rings, reasons: [] };
+			if (reasons.length) return { rings, reasons };
+		}
 		return new Promise((resolve) => {
-			const done = (answer: number | null) => {
+			const wake = (answer: Rung | null) => {
 				clearTimeout(giveUp);
-				this.listening.delete(done);
+				this.listening.delete(listener);
 				resolve(answer);
 			};
-			const giveUp = setTimeout(() => done(null), Math.min(Math.max(ms, 0), LONGEST_HOLD_MS));
-			this.listening.add(done);
+			const listener: Listener = { ...(agent ? { agent } : {}), wake };
+			const giveUp = setTimeout(() => wake(null), Math.min(Math.max(ms, 0), LONGEST_HOLD_MS));
+			this.listening.add(listener);
 		});
+	}
+
+	/**
+	 * Why the doorbell rang for `agent` (for anyone when absent) after `mark`, oldest first: empty if nothing that
+	 * concerned it rang. Null if the log no longer reaches back to `mark`.
+	 */
+	async rungFor(agent: string | undefined, mark: number): Promise<string[] | null> {
+		const rings = await this.rings();
+		if (rings <= mark) return [];
+		if (rings - mark > RINGS_KEPT) return null;
+		const range = { prefix: RING, start: ringKey(mark + 1), end: ringKey(rings + 1) };
+		const logged = await this.ctx.storage.list<LoggedRing>(range);
+		if (logged.size < rings - mark) return null;
+		return [...logged.values()].filter((ring) => concerns(ring, agent)).map((ring) => ring.reason);
 	}
 
 	/** The repo's hosted agents want to hear when something changes, until none of them is running. */
@@ -564,7 +617,7 @@ export class RepoCache extends DurableObject<Env> {
 			notices: told,
 			events,
 			...(events.length ? { kind: "awareness" } : {}),
-			...(notices.length ? { ring: "notice" } : {}),
+			...(notices.length ? { ring: "notice", whom: { for: [...new Set(notices.map(({ agent }) => agent))] } } : {}),
 		});
 	}
 
@@ -583,7 +636,7 @@ export class RepoCache extends DurableObject<Env> {
 		await this.keepNotices(published.notices ?? []);
 		await this.keepEvents(published.events ?? []);
 		if (published.kind) this.broadcast(published.kind);
-		if (published.ring) await this.ring(published.ring);
+		if (published.ring) await this.ring(published.ring, published.whom);
 	}
 
 	/** Each agent keeps its newest NOTICES_KEPT, for a day at most. */
@@ -691,10 +744,13 @@ export class RepoCache extends DurableObject<Env> {
 	// Wakes the repo's hosted agents (see HostedAgent.ring), without holding up the write that rang. Ringing is a hint:
 	// one lost costs only the agents' fallback turn. Once none is running, the repo stops ringing.
 	// Counted first, so a call that read the count just before this can't miss it.
-	private async ring(reason: string) {
+	private async ring(reason: string, whom?: Concerns) {
 		const rings = (await this.rings()) + 1;
-		await this.ctx.storage.put(RINGS, rings);
-		for (const wake of [...this.listening]) wake(rings);
+		const logged: LoggedRing = { reason, ...(whom ? { for: whom.for } : {}) };
+		await this.ctx.storage.put({ [RINGS]: rings, [ringKey(rings)]: logged });
+		if (rings > RINGS_KEPT) await this.ctx.storage.delete(ringKey(rings - RINGS_KEPT));
+		for (const listener of [...this.listening])
+			if (concerns(logged, listener.agent)) listener.wake({ rings, reasons: [reason] });
 		this.ringHive(reason);
 	}
 

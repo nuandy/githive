@@ -1,23 +1,30 @@
 import { sha256Hex } from "../../auth/digest";
 import { fail, optionalString } from "../../errors";
 import { backlogFor } from "../work";
-import { openCall, type ToolCall, type ToolHandlers } from "./context";
+import { type Doorbell, openCall, type ToolCall, type ToolHandlers } from "./context";
 import { reviewOptions } from "./work-tools";
 
 // `wait`: the repo's doorbell for agents outside GitHive. It holds the call until something that concerns the caller
 // changes: its own changes (a vote, a landing), the reviews it may give, the backlog free to it, or a notice left for
 // it (a heads-up, interface news, a hint about its push), which the reply's news then carries. It reads what the
-// caller would read itself, and only when the doorbell rings, so nothing is decided for the agent: it is woken, then
-// looks and chooses as it always does.
+// caller would read itself, and only when the doorbell rings for it (a ring for another agent, or one that only takes
+// work away, sleeps on), so nothing is decided for the agent: it is woken, then looks and chooses as it always does.
 
 /** The longest hold, and the default: well inside the 60 s that many MCP clients allow one call. */
 export const LONGEST_WAIT_SECONDS = 45;
 
 /**
  * What `seen` is made of, in order: one value per part (a digest, or for notices a time), so a reply can say which
- * part changed. `notices` is last, so a `seen` from before it was added still compares part by part.
+ * part changed. `notices` is last, so a `seen` from before it was added still compares part by part. After the parts
+ * comes the doorbell's count when they were read, so a call can tell whether anything rang for it since.
  */
 export const WAIT_PARTS = ["yours", "reviews", "backlog", "notices"] as const;
+
+/**
+ * Room left for a look when the call hasn't looked yet, so the whole call still keeps within `seconds`: at most a
+ * quarter of the hold.
+ */
+const FIRST_LOOK_MS = 1_000;
 
 interface YourChange {
 	change: string;
@@ -27,7 +34,8 @@ interface YourChange {
 }
 
 interface Look {
-	seen: string;
+	/** The parts' values, joined as `seen` holds them. */
+	state: string;
 	yours: YourChange[];
 	reviews: number;
 	backlog: number;
@@ -38,27 +46,32 @@ export const waitTools: ToolHandlers = {
 		const { args, ctx, repo, actAs } = call;
 		const agent = actAs("agent");
 		const doorbell = ctx.doorbell?.(repo) ?? fail(501, "wait needs the repo's doorbell, which this GitHive lacks");
-		const until = Date.now() + holdSeconds(args.seconds) * 1000;
-		const given = optionalString(args, "seen");
-		const known = given?.split(".")[NOTICES] ?? "";
+		const holdMs = holdSeconds(args.seconds) * 1000;
+		const until = Date.now() + holdMs;
+		const given = seenOf(optionalString(args, "seen"));
+		const known = given?.state.split(".")[NOTICES] ?? "";
 		// Read the count before looking, so a ring during the look still wakes the hold.
 		let mark = await doorbell.rings();
-		let looked = Date.now();
-		let look = await lookFor(call, agent, known);
-		let lookMs = Date.now() - looked;
-		const before = given ?? look.seen;
-		while (!changedParts(before, look.seen).length) {
+		let look: Look | undefined;
+		let lookMs = Math.min(FIRST_LOOK_MS, holdMs / 4);
+		if (!(await quietSince(doorbell, agent, given?.rings))) {
+			const looked = Date.now();
+			look = await lookFor(call, agent, known);
+			lookMs = Date.now() - looked;
+		}
+		const before = given?.state ?? look!.state;
+		while (!look || !changedParts(before, look.state).length) {
 			// The whole call keeps within `seconds`: the hold leaves room for one more look, as long as the last.
 			const left = until - Date.now() - lookMs;
-			const rung = left > 0 ? await doorbell.ringAfter(mark, left) : null;
+			const rung = left > 0 ? await doorbell.ringAfter(mark, left, agent) : null;
 			if (rung === null) break;
-			mark = rung;
-			looked = Date.now();
+			mark = rung.rings;
+			const looked = Date.now();
 			// A fresh call, since one call reads the claims only once.
 			look = await lookFor(await openCall(args, ctx, call.run), agent, known);
 			lookMs = Date.now() - looked;
 		}
-		return answer(look, before);
+		return look ? answer(look, before, mark) : { changed: false, seen: seenAt(before, mark) };
 	},
 };
 
@@ -73,6 +86,28 @@ function holdSeconds(value: unknown) {
 }
 
 const NOTICES = WAIT_PARTS.indexOf("notices");
+
+/** A `seen` split into its parts' values and the doorbell's count after them, which older ones lack. */
+function seenOf(seen: string | undefined) {
+	if (!seen) return undefined;
+	const values = seen.split(".");
+	if (values.length <= WAIT_PARTS.length) return { state: seen, rings: undefined };
+	const rings = parseInt(values[WAIT_PARTS.length]!, 36);
+	return { state: values.slice(0, WAIT_PARTS.length).join("."), rings: Number.isNaN(rings) ? undefined : rings };
+}
+
+const seenAt = (state: string, rings: number) => `${state}.${rings.toString(36)}`;
+
+/**
+ * Whether nothing that concerns `agent` rang since `rings`, the count its `seen` was read at. Then what it saw still
+ * holds, and the call holds without reading anything first. Unknown (no count, or one older than the doorbell's log)
+ * isn't quiet.
+ */
+async function quietSince(doorbell: Doorbell, agent: string, rings: number | undefined) {
+	if (rings === undefined || !doorbell.rungFor) return false;
+	const reasons = await doorbell.rungFor(agent, rings);
+	return reasons !== null && reasons.length === 0;
+}
 
 // What concerns `agent` now, and a digest of it per part. `known` is the notices part of the `seen` the caller brought.
 async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent: string, known: string): Promise<Look> {
@@ -101,7 +136,7 @@ async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent:
 	];
 	const digests = await Promise.all(parts.map(digestOf));
 	const notices = noticesPart(known, await ctx.doorbell?.(repo).newestNotice?.(agent));
-	return { seen: [...digests, notices].join("."), yours, reviews: reviews.length, backlog: free.length };
+	return { state: [...digests, notices].join("."), yours, reviews: reviews.length, backlog: free.length };
 }
 
 /**
@@ -128,14 +163,14 @@ async function digestOf(part: unknown[]) {
 	return (await sha256Hex(lines.join("\n"))).slice(0, 12);
 }
 
-function answer(look: Look, before: string) {
-	const what = changedParts(before, look.seen);
+function answer(look: Look, before: string, rings: number) {
+	const what = changedParts(before, look.state);
 	return {
 		changed: what.length > 0,
 		...(what.length ? { what } : {}),
 		yours: look.yours,
 		reviews: look.reviews,
 		backlog: look.backlog,
-		seen: look.seen,
+		seen: seenAt(look.state, rings),
 	};
 }

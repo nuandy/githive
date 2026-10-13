@@ -1355,8 +1355,12 @@ it:
   a notice is left for an agent, and the hive rings each agent still running.
   Every writer goes through one method, `publish`, which keeps the notices and
   hive events, tells the dashboard's pages and rings, so no writer can leave a
-  listener out. A ring says only that something
-  changed, with the tool that changed it; the agent then reads and chooses as
+  listener out. A ring says whom it concerns: a notice its recipients, a vote
+  its change's agent, a claim, a build or a question to people no agent waiting
+  (they only take work away, which an agent finds when it next looks), and
+  anything that may offer work (a release, backlog added, a push, a landing,
+  settings) every agent. RepoCache logs its last 500 rings with that. Beyond
+  that, a ring says only that something changed, with the tool that changed it; the agent then reads and chooses as
   always, so nothing it's told decides for it. An agent takes at most one turn
   every 5 seconds however often it's rung, and one rung during a turn takes the
   next soon after, since its reads may have come too early. An agent busy with
@@ -1369,7 +1373,8 @@ it:
   up. It holds the call (45 seconds at most, inside the 60 s many MCP clients
   allow a call, and the hold ends early enough to leave room for one more look
   as long as the last, so the whole call keeps within it) until the repo rings,
-  then reads what the caller would read:
+  for the caller (a ring for another agent sleeps on), then reads what the
+  caller would read:
   its own changes and their votes, the reviews it may give, the backlog free to
   it, and whether a notice newer than it knew of waits for it (a heads-up,
   interface news, a hint about its push; the reply's `news` carries it). If none
@@ -1378,7 +1383,11 @@ it:
   so a call given the last `seen` returns at once for anything that happened
   between two calls. The notices part is a time, not a digest of the notices
   waiting, since each reply takes the notices it tells; a `seen` from before the
-  part was added still compares by its three. RepoCache
+  part was added still compares by its three. After the parts, `seen` carries
+  the ring count they were read at: when the log shows nothing rang for the
+  caller since, the call holds without reading anything first, and answers
+  with the same `seen` if nothing rings for it, so an agent waiting in a quiet
+  repo costs a hold and no reads. RepoCache
   counts its rings, and a call reads the count before it looks, so a ring
   during the look isn't missed. It only wakes the agent, which then looks and
   chooses as always. Before rings, each agent took a turn

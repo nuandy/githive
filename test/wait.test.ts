@@ -20,12 +20,12 @@ function memoryDoorbell(): Doorbell & { ring(): void } {
 	return {
 		rings: async () => rings,
 		ringAfter: async (mark, ms) => {
-			if (rings > mark) return rings;
+			if (rings > mark) return { rings, reasons: ["write"] };
 			return new Promise((resolve) => {
 				const done = (answer: number | null) => {
 					clearTimeout(giveUp);
 					listening.delete(done);
-					resolve(answer);
+					resolve(answer === null ? null : { rings: answer, reasons: ["write"] });
 				};
 				const giveUp = setTimeout(() => done(null), ms);
 				listening.add(done);
@@ -128,20 +128,24 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 	const setUpCache = async () => {
 		const { RepoCache } = await import("../src/repo-cache");
 		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		// Each look asks for the newest notice once, so counting those counts the looks.
+		const looks = { count: 0 };
 		const doorbell: Doorbell = {
 			rings: () => cache.rings(),
-			ringAfter: (mark, ms) => cache.ringAfter(mark, ms),
-			newestNotice: (agent) => cache.newestNotice(agent),
+			ringAfter: (mark, ms, agent) => cache.ringAfter(mark, ms, agent),
+			rungFor: (agent, mark) => cache.rungFor(agent, mark),
+			newestNotice: (agent) => ((looks.count += 1), cache.newestNotice(agent)),
 		};
 		const tools = toolCalls(() => server, {
 			doorbell: () => doorbell,
 			news: (_repo, branch, agent) => cache.landingNews(branch, agent),
-			ping: (_repo, event, tool) => cache.ping("records", true, event ? [event] : [], tool),
+			ping: (_repo, event, tool, whom) => cache.ping("records", true, event ? [event] : [], tool, whom),
+			keptClaims: (_repo, read) => read(),
 		});
 		await tools.call("settings", { required: 1 });
 		await tools.register("author", "other");
 		await tools.call("claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" }, "author");
-		return { ...tools, cache };
+		return { ...tools, cache, looks };
 	};
 
 	it("ends the hold of the agent a notice is for, with the notice in the reply's news", async () => {
@@ -166,7 +170,7 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		const { call, cache } = await setUpCache();
 		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
 		const started = Date.now();
-		const held = call("wait", { agent: "author", seen: quiet.seen, seconds: 2 }, "author");
+		const held = call("wait", { agent: "author", seen: quiet.seen, seconds: 3 }, "author");
 		await new Promise((resolve) => setTimeout(resolve, 300));
 		await cache.notify("main", [{ agent: "other", notice: notice("for someone else") }]);
 		expect(await held).toMatchObject({ changed: false });
@@ -177,6 +181,28 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		const caught = await call("wait", { agent: "author", seen: quiet.seen, seconds: 5 }, "author");
 		expect(caught).toMatchObject({ changed: true, what: ["notices"] });
 		expect(caught.news).toEqual([expect.objectContaining({ says: "left between two calls" })]);
+	});
+
+	it("holds with a seen, reading nothing, through writes for others, until one for its agent", async () => {
+		const { call, cache, looks } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		looks.count = 0;
+		const held = call("wait", { agent: "author", seen: quiet.seen, seconds: 20 }, "author");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		// Another agent's claim only takes work away, so it wakes no one waiting.
+		await call("claim", { change: "o-1", agent: "other", paths: ["src/o/"], intent: "o" }, "other");
+		await cache.notify("main", [{ agent: "other", notice: notice("for someone else") }]);
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(looks.count).toBe(0);
+		await cache.notify("main", [{ agent: "author", notice: notice("for the author") }]);
+		expect(await held).toMatchObject({ changed: true, what: ["notices"] });
+		expect(looks.count).toBe(1);
+		// Nothing rang for it since, so the next call holds without a look, and answers with the same seen.
+		const woken = await held;
+		looks.count = 0;
+		const again = await call("wait", { agent: "author", seen: woken.seen, seconds: 1 }, "author");
+		expect(again).toEqual(expect.objectContaining({ changed: false, seen: woken.seen }));
+		expect(looks.count).toBe(0);
 	});
 
 	it("still compares a seen from before notices were part of it", async () => {

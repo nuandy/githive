@@ -254,14 +254,15 @@ function repoCacheParts(env: Env) {
 	return {
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
-		ping: async (repo, event, tool) =>
-			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records", true, event ? [event] : [], tool)),
+		ping: async (repo, event, tool, whom) =>
+			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records", true, event ? [event] : [], tool, whom)),
 		buildersAtWork: (repo, changes) => buildersAtWork(env, repo, changes),
 		doorbell: (repo) => {
 			const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
 			return {
 				rings: () => cache.rings(),
-				ringAfter: (mark, ms) => cache.ringAfter(mark, ms),
+				ringAfter: (mark, ms, agent) => rpc(cache.ringAfter(mark, ms, agent)),
+				rungFor: (agent, mark) => rpc(cache.rungFor(agent, mark)),
 				newestNotice: (agent) => cache.newestNotice(agent),
 			};
 		},

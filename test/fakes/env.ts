@@ -23,8 +23,10 @@ export class FakeStorage {
 			for (const [k, v] of Object.entries(key)) this.data.set(k, structuredClone(v));
 		}
 	}
-	async list<T>(options: { prefix?: string; reverse?: boolean; limit?: number } = {}) {
-		const keys = [...this.data.keys()].filter((k) => k.startsWith(options.prefix ?? "")).sort();
+	async list<T>(options: { prefix?: string; start?: string; end?: string; reverse?: boolean; limit?: number } = {}) {
+		// As a Durable Object's storage: `start` is inclusive, `end` exclusive.
+		const inRange = (k: string) => (!options.start || k >= options.start) && (!options.end || k < options.end);
+		const keys = [...this.data.keys()].filter((k) => k.startsWith(options.prefix ?? "") && inRange(k)).sort();
 		if (options.reverse) keys.reverse();
 		return new Map(keys.slice(0, options.limit ?? keys.length).map((k) => [k, structuredClone(this.data.get(k)) as T]));
 	}

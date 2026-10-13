@@ -49,7 +49,7 @@ describe("ringing a repo's hive", () => {
 		const held = cache.ringAfter(mark, 5_000);
 		const at = new Date().toISOString();
 		await cache.notify("main", [{ agent: "bee", notice: { kind: "heads_up", at, says: "a heads-up", change: "c" } }]);
-		expect(await held).toBe(mark + 1);
+		expect(await held).toEqual({ rings: mark + 1, reasons: ["notice"] });
 		await vi.waitFor(() => expect(rings).toEqual([["hive:ada--honeycomb", "notice"]]));
 		// Waiting reads when the newest notice came without taking it: the agent's next reply tells it.
 		expect(await cache.newestNotice("bee")).toBe(at);

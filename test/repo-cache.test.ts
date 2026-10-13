@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
-const { RepoCache } = await import("../src/repo-cache");
+const { RepoCache, RINGS_KEPT } = await import("../src/repo-cache");
 const { toolContextFor } = await import("../src/toolkit/env");
 type Notice = import("../src/repo-cache").Notice;
 
@@ -346,11 +346,41 @@ describe("the doorbell's hold", () => {
 		expect(await live.ringAfter(0, 50)).toBeNull();
 		const held = live.ringAfter(0, 5_000);
 		await live.ping("records");
-		expect(await held).toBe(1);
+		expect(await held).toEqual({ rings: 1, reasons: ["records"] });
 		// A ring before the hold began still counts: the caller read the count before it.
-		expect(await live.ringAfter(0, 5_000)).toBe(1);
+		expect(await live.ringAfter(0, 5_000)).toEqual({ rings: 1, reasons: ["records"] });
 		// Reads ring nothing.
 		await live.ping("records", false);
 		expect(await live.rings()).toBe(1);
+	});
+
+	it("wakes a hold only for a ring that concerns its agent, and every hold for one that concerns everyone", async () => {
+		const { live } = feed();
+		const at = new Date().toISOString();
+		const x = live.ringAfter(0, 5_000, "x");
+		const y = live.ringAfter(0, 5_000, "y");
+		await live.notify("main", [{ agent: "x", notice: { kind: "heads_up", at, says: "for x", change: "c" } }]);
+		expect(await x).toEqual({ rings: 1, reasons: ["notice"] });
+		await live.ping("records", true, [], "claim", { for: [] });
+		await live.ping("records", true, [], "release");
+		// y slept through the notice for x and the claim, and woke for the release, which may offer it work.
+		expect(await y).toEqual({ rings: 3, reasons: ["release"] });
+		// Between two calls: what rang for each since a mark, from the log.
+		expect(await live.rungFor("y", 0)).toEqual(["release"]);
+		expect(await live.rungFor("x", 0)).toEqual(["notice", "release"]);
+		expect(await live.rungFor("x", 3)).toEqual([]);
+		// A hold whose mark is already behind a ring for it answers at once; one behind only others' sleeps.
+		expect(await live.ringAfter(1, 5_000, "x")).toEqual({ rings: 3, reasons: ["release"] });
+		await live.notify("main", [{ agent: "x", notice: { kind: "heads_up", at, says: "for x again", change: "c" } }]);
+		expect(await live.ringAfter(3, 50, "y")).toBeNull();
+	});
+
+	it("keeps the last rings in its log, and says when a mark is older than that", async () => {
+		const { live } = feed();
+		for (let ring = 0; ring < RINGS_KEPT + 2; ring++) await live.ping("records", true, [], "claim", { for: [] });
+		expect(await live.rungFor("x", 1)).toBeNull();
+		expect(await live.rungFor("x", 2)).toEqual([]);
+		// A hold with a mark that old can't be checked, so it answers as rung.
+		expect(await live.ringAfter(0, 5_000, "x")).toEqual({ rings: RINGS_KEPT + 2, reasons: [] });
 	});
 });
