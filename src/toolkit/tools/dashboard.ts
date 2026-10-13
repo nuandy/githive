@@ -1,11 +1,13 @@
 import git from "isomorphic-git";
+import { diffCommits } from "../../change-diff";
 import { type Remote, Workspace } from "../../git";
+import { fetchCommits } from "../../git-fetch";
 import { projectBranch } from "../../project-branch";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
-import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
+import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
@@ -181,6 +183,51 @@ async function ownCommits(
 }
 
 /**
+ * A change's files for its page's Files tab (see change-diff.ts). Open, or released without landing: its pushed head
+ * against its merge base with the branch it lands on, each file outside its claim flagged. Landed: the commit it
+ * landed as against that commit's first parent, the branch before it, which is what it brought. Nothing pushed (or its
+ * branch gone): no files.
+ */
+export async function changeDiff(ctx: ToolContext, repo: string, change: string) {
+	const timing = ctx.timing ?? new Timing();
+	const registry = (await timing.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
+		.state;
+	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
+	const { claim: record, released } = await timing.time("change", () =>
+		storeFor(ctx, repo, registry).readChange(change),
+	);
+	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
+	const landed = released.find((release) => release.mergedAs);
+	if (!record && landed?.mergedAs) {
+		const mergedAs = landed.mergedAs;
+		// The merge and its parents, with their trees, in one fetch.
+		const project = await ctx.remote(repo, "read");
+		const held = await timing.time("fetch", () => fetchCommits(project, [mergedAs], "/landed", { depth: 2 }));
+		const { commit } = await git.readCommit({ ...held, oid: mergedAs });
+		const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
+		return { change, of: "landed" as const, ...(await timing.time("diff", () => diffCommits(held, before, mergedAs))) };
+	}
+	const agent = record?.agent ?? released.at(-1)!.agent;
+	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+	const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
+	const workspace = await timing
+		.time("clone", async () =>
+			Workspace.clone(await changeSourceFor(ctx, repo)(agent, "read", change, record?.since), `changes/${change}`, {
+				depth: 8,
+			}),
+		)
+		.catch(() => null);
+	if (!workspace) return { change, of: "head" as const, base: null, head: null, files: [], total: 0 };
+	const head = await workspace.head();
+	const projectHead = await timing.time("project", async () =>
+		workspace.fetch("project", await ctx.remote(repo, "read"), branch),
+	);
+	const base = await timing.time("base", () => workspace.mergeBase(projectHead, head));
+	const diff = await timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed }));
+	return { change, of: "head" as const, ...diff };
+}
+
+/**
  * A person's vote from the dashboard on a change's current commit, stamped with their verified identity
  * and counted like any other vote (never the author's). It also answers any open question about the change.
  */
@@ -261,6 +308,50 @@ export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: str
 	const outcome = await giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
 	await ctx.ping?.(repo).catch(() => undefined);
 	return outcome;
+}
+
+/** What a person's release tells, and what its agent hears. */
+export const RELEASED_NOTE = "Its paths are free for other agents; its agent is told; its commits stay on its branch.";
+
+/**
+ * A person releases a change's claim from the dashboard, whoever's it is, saying why: a stuck change freed. Its paths
+ * are free for other agents, its agent is told with its next reply, and its commits stay on its branch. The release is
+ * stamped with the person, not as stale, which the audit accepts (see othersClaimsReleased). GitHub's change is given up
+ * as before (see giveUpGitHubChange), so GitHive brings it back when GitHub's branch moves. The route checks they can
+ * write.
+ */
+export async function releaseAsPerson(ctx: ToolContext, repo: string, change: string, person: string, reason: string) {
+	if (!/^person:[^/]+$/.test(person))
+		fail(403, "only a person releases another's claim from the dashboard; agents release their own with release");
+	const why = reason.trim();
+	if (!why) fail(400, "say why you release it: its agent is told");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const store = storeFor(ctx, repo, registry);
+	const { claim } = await store.readChange(change);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to release`);
+	const stamper = await ctx.stamper?.();
+	if (isGitHubChange(claim))
+		return giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
+	const outcome = await store.giveUp({ change, agent: person, reason: why, stale: false }, stamper);
+	if (!outcome.ok) return outcome;
+	const at = new Date().toISOString();
+	await ctx.notify?.(repo, claimInto(claim, projectBranch(registry)), [
+		{
+			agent: claim.agent,
+			notice: {
+				kind: "released",
+				at,
+				change,
+				says: `A person released your claim on ${change}: ${why}`,
+				next:
+					`Its paths are free for other agents now. Your commits stay on changes/${change} in your fork; claim ` +
+					"again to carry on, if they're still free.",
+				from: { agent: person },
+			},
+		},
+	]);
+	await ctx.ping?.(repo, { kind: "released", agent: claim.agent, change, detail: why, at }).catch(() => undefined);
+	return { ok: true as const, released: change, note: RELEASED_NOTE };
 }
 
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */

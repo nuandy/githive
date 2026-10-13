@@ -1,0 +1,175 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { diffFiles } from "../src/change-diff";
+import { changeDiff } from "../src/toolkit/mcp";
+import { agentClone } from "./helpers/agents";
+import { startGitServer, type GitServer } from "./helpers/git-server";
+import { toolCalls } from "./helpers/tool-calls";
+
+// A change's files, as its page's Files tab shows them: what it changed since it left its branch (or what it brought
+// when it landed), file by file, with what lies outside its claim flagged, and the work capped.
+
+let server: GitServer;
+let work: string;
+beforeEach(async () => {
+	server = await startGitServer();
+	work = mkdtempSync(join(tmpdir(), "githive-change-diff-"));
+});
+afterEach(async () => {
+	await server.close();
+	rmSync(work, { recursive: true, force: true });
+});
+
+const bytes = (text: string) => new TextEncoder().encode(text);
+
+describe("a change's files, capped", () => {
+	const sides: Record<string, [string | null, string | null]> = {
+		"a.txt": ["one\ntwo\n", "one\n2\n"],
+		"b.txt": [null, "new\n"],
+		"c.png": ["\u0000PNG", "\u0000PNG2"],
+		"d.txt": ["x".repeat(40), "y"],
+		"e.txt": ["gone\n", null],
+		"f.txt": ["a\n", "b\n"],
+	};
+	const read = async (side: "base" | "head", path: string) => {
+		const text = sides[path]?.[side === "base" ? 0 : 1];
+		return text == null ? null : bytes(text);
+	};
+
+	it("marks binary and too-big files, flags what's outside the claim, and counts each file's lines", async () => {
+		const { files, total } = await diffFiles(Object.keys(sides), read, {
+			claimed: ["a.txt", "b.txt"],
+			limits: { fileBytes: 32 },
+		});
+		expect(total).toBe(6);
+		expect(files).toEqual([
+			{
+				path: "a.txt",
+				status: "modified",
+				added: 1,
+				removed: 1,
+				hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: [" one", "-two", "+2"] }],
+			},
+			{
+				path: "b.txt",
+				status: "added",
+				added: 1,
+				removed: 0,
+				hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: ["+new"] }],
+			},
+			{ path: "c.png", status: "modified", outside: true, binary: true },
+			{ path: "d.txt", status: "modified", outside: true, tooBig: true },
+			expect.objectContaining({ path: "e.txt", status: "removed", outside: true, added: 0, removed: 1 }),
+			expect.objectContaining({ path: "f.txt", status: "modified", outside: true }),
+		]);
+	});
+
+	it("lists at most so many files, and leaves out lines past its text", async () => {
+		const few = await diffFiles(Object.keys(sides), read, { limits: { files: 2 } });
+		expect([few.files.map((file) => file.path), few.total]).toEqual([["a.txt", "b.txt"], 6]);
+		// a.txt's lines take 13 bytes (" one", "-two" and "+2", each with its newline), so b.txt's don't fit in 16.
+		const short = await diffFiles(["a.txt", "b.txt"], read, { limits: { bytes: 16 } });
+		expect(short.files[0]!.hunks).toHaveLength(1);
+		expect(short.files[1]).toEqual({ path: "b.txt", status: "added", added: 1, removed: 0, cut: true });
+	});
+});
+
+describe("a change's files, from Git", { timeout: 120_000 }, () => {
+	const { ctx, call, register, approve } = toolCalls(() => server);
+
+	/** main with a few files, as the change finds it. */
+	async function seedMain() {
+		const seed = await agentClone(server.url, work, "seed");
+		seed.write("src/a/x.js", "one\ntwo\nthree\n");
+		seed.write("src/a/gone.js", "bye\n");
+		seed.write("package.json", "{}\n");
+		await seed.run("add", "-A");
+		await seed.run("commit", "-q", "-m", "seed");
+		await seed.run("push", "-q", "origin", "main");
+		return seed;
+	}
+
+	/** The agent's work on c-1: a changed, a new, a removed and a binary file in its claim, and one outside it. */
+	async function pushWork(agent: string) {
+		const clone = await agentClone(server.url, work, agent);
+		await clone.run("checkout", "-q", "-b", "changes/c-1");
+		clone.write("src/a/x.js", "one\n2\nthree\n");
+		clone.write("src/a/new.js", "new\n");
+		clone.write("src/a/logo.png", "\u0000PNG");
+		clone.write("package.json", '{ "x": 1 }\n');
+		await clone.run("rm", "-q", "src/a/gone.js");
+		await clone.run("commit", "-q", "-am", "work");
+		await clone.run("add", "-A");
+		await clone.run("commit", "-q", "-m", "more work");
+		await clone.run("push", "-q", "origin", "changes/c-1");
+		return clone.run("rev-parse", "HEAD");
+	}
+
+	const changedHere = [
+		{ path: "package.json", status: "modified", added: 1, removed: 1, outside: true },
+		{ path: "src/a/gone.js", status: "removed", added: 0, removed: 1 },
+		{ path: "src/a/logo.png", status: "added", binary: true },
+		{ path: "src/a/new.js", status: "added", added: 1, removed: 0 },
+		{
+			path: "src/a/x.js",
+			status: "modified",
+			added: 1,
+			removed: 1,
+			hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" one", "-two", "+2", " three"] }],
+		},
+	];
+
+	it("diffs an open change's head against where it left its branch, not against the branch now", async () => {
+		await call("settings", { required: 1 });
+		const seed = await seedMain();
+		const base = server.git("rev-parse", "main").trim();
+		await register("a");
+		await call("claim", { change: "c-1", agent: "a", paths: ["src/a/"], intent: "work on a" }, "a");
+		const head = await pushWork("a");
+		// main moves on after the change left it: none of that is the change's.
+		seed.write("src/b.js", "b\n");
+		await seed.run("add", "-A");
+		await seed.run("commit", "-q", "-m", "elsewhere");
+		await seed.run("push", "-q", "origin", "main");
+
+		const diff = await changeDiff(ctx(), "p", "c-1");
+		expect(diff).toMatchObject({ change: "c-1", of: "head", base, head, total: 5 });
+		expect(diff.files).toEqual(changedHere.map((file) => expect.objectContaining(file)));
+		expect(diff.files.find((file) => file.path === "src/a/x.js")?.outside).toBeUndefined();
+	});
+
+	it("shows nothing for a change with nothing pushed, and refuses one that doesn't exist", async () => {
+		await call("settings", { required: 1 });
+		await register("a");
+		await call("claim", { change: "c-2", agent: "a", paths: ["src/z/"], intent: "later" }, "a");
+		expect(await changeDiff(ctx(), "p", "c-2")).toEqual({
+			change: "c-2",
+			of: "head",
+			base: null,
+			head: null,
+			files: [],
+			total: 0,
+		});
+		await expect(changeDiff(ctx(), "p", "nope")).rejects.toThrow(/\[404\] no change nope/);
+	});
+
+	it("shows a landed change as the commit it landed as, against the branch before it", async () => {
+		await call("settings", { required: 1 });
+		await seedMain();
+		await register("a", "reviewer");
+		await call("claim", { change: "c-1", agent: "a", paths: ["src/a/", "package.json"], intent: "work on a" }, "a");
+		const head = await pushWork("a");
+		await approve(head);
+		expect(await call("merge", { change: "c-1", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const landed = server.git("rev-parse", "main").trim();
+
+		const diff = await changeDiff(ctx(), "p", "c-1");
+		expect(diff).toMatchObject({ of: "landed", head: landed, base: server.git("rev-parse", "main^1").trim() });
+		// A landed change has no claim left to be outside of.
+		const { outside: _outside, ...packageJson } = changedHere[0]!;
+		expect(diff.files).toEqual([packageJson, ...changedHere.slice(1)].map((file) => expect.objectContaining(file)));
+		expect(diff.files.some((file) => file.outside)).toBe(false);
+	});
+});

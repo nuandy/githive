@@ -97,24 +97,26 @@ describe("GitHub's change", () => {
 		approval: { approved: true, approvals: 0, required: 0, vetoedBy: [] },
 	};
 
-	it("can be given up from its page by people who can write, and no other change can", () => {
-		const giveUp = async () => ({ ok: true, released: "github-abc" });
-		const page = (claim: Claim, withGiveUp = true) =>
-			text(
-				renderToStaticMarkup(
-					<ChangePage
-						snapshot={{ ...repoSnapshot, claims: [claim] }}
-						changeId={claim.change}
-						claim={claim}
-						repo="acme/web"
-						tab="conversation"
-						{...(withGiveUp ? { giveUp } : {})}
-					/>,
-				),
+	it("can be released from its page by people who can write, like any change", () => {
+		const release = async () => ({ ok: true, released: "github-abc" });
+		const page = (claim: Claim, withRelease = true) =>
+			renderToStaticMarkup(
+				<ChangePage
+					snapshot={{ ...repoSnapshot, claims: [claim] }}
+					changeId={claim.change}
+					claim={claim}
+					repo="acme/web"
+					tab="conversation"
+					{...(withRelease ? { release } : {})}
+				/>,
 			);
-		expect(page(change)).toContain("Give up GitHub's changes");
-		expect(page(change, false)).not.toContain("Give up");
-		expect(page({ ...change, change: "c-1", agent: "agent-a", source: undefined })).not.toContain("Give up");
+		expect(page(change)).toContain('aria-label="More about this change"');
+		expect(page(change, false)).not.toContain("More about this change");
+		expect(page({ ...change, change: "c-1", agent: "agent-a", source: undefined })).toContain(
+			'aria-label="More about this change"',
+		);
+		// It needs no review: the decision box says so.
+		expect(text(page(change))).toContain("No review: GitHub's changes are trusted.");
 	});
 
 	it("says it's from GitHub and needs no review while the repo trusts GitHub", () => {

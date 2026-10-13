@@ -1,5 +1,5 @@
 import { inLane, inLaneEntry } from "../claim-paths";
-import type { ClaimRecord, Registry } from "./claims";
+import type { ClaimRecord, Registry, ReleaseRecord } from "./claims";
 import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
@@ -537,11 +537,16 @@ function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, b
 }
 
 /**
- * Releases of another agent's claim that wasn't stale yet. githive-github's claim (GitHub's change) is the exception:
- * a person who can write, or a repo admin, may give it up at any time, through the toolkit, which stamps the release
- * with who did it (see giveUpGitHubChange). The audit can't see who could write then, so it holds such a release to
- * being stamped.
+ * Releases of another agent's claim that wasn't stale yet. Two are exceptions, both made through the toolkit, which
+ * stamps the release with who did it: githive-github's claim (GitHub's change), which a person who can write, or a
+ * repo admin, may give up at any time (see giveUpGitHubChange); and any claim a person who can write releases from the
+ * dashboard (see releaseAsPerson), stamped as that person. The audit can't see who could write then, so it holds such
+ * a release to being stamped.
  */
+// Released by a person themselves, as the stamp names them: not one of their agents, nor a service.
+const byPerson = (release: ReleaseRecord) =>
+	/^person:[^/]+$/.test(release.by) && (!release.verifiedBy || release.verifiedBy === release.by);
+
 async function othersClaimsReleased(history: History, staleAfterMs: number | undefined, verified: Verify) {
 	const staleAfter = staleAfterMs ?? STALE_AFTER_MS;
 	const violations: Violation[] = [];
@@ -550,6 +555,7 @@ async function othersClaimsReleased(history: History, staleAfterMs: number | und
 		for (const release of entry.state.released.slice(checked)) {
 			if (release.by === release.agent) continue;
 			if (release.agent === GITHUB_AGENT && release.stale && (await verified("release", release))) continue;
+			if (byPerson(release) && (await verified("release", release))) continue;
 			const idle = Date.parse(release.at) - Date.parse(release.lastActive);
 			if (idle <= staleAfter)
 				violations.push({

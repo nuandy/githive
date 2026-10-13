@@ -480,20 +480,21 @@ export function releaseStale(
 }
 
 /**
- * Releases another agent's claim on someone's word, idle or not, recorded like a stale release with their stamp. Only
- * for claims GitHive's own job holds, which no one else can release otherwise (see giveUpGitHubChange); the caller
- * decides who may.
+ * Releases another agent's claim on someone's word, idle or not, with their stamp. GitHub's change, which GitHive's
+ * own job holds and no one else can release otherwise (see giveUpGitHubChange), is recorded like a stale release; a
+ * person's release of any other claim (see releaseAsPerson) isn't stale (`stale: false`). The caller decides who may.
  */
 export function giveUp(
 	log: CasLog<Registry>,
-	input: { change: string; agent: string; reason: string },
+	input: { change: string; agent: string; reason: string; stale?: boolean },
 	stamper?: Stamper,
 ) {
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
 		const at = new Date().toISOString();
-		const record: ReleaseRecord = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		const { stale, ...notStale } = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		const record: ReleaseRecord = input.stale === false ? notStale : { ...notStale, stale };
 		return {
 			state: {
 				...state,

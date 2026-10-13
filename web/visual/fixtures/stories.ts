@@ -257,7 +257,9 @@ export function buildHive(input: HiveInput): Hive {
 	for (const story of stories)
 		for (const step of story.steps) {
 			if (step.kind === "vote") {
-				const by = ownerOf(step.reviewer);
+				// A person's agent votes as them and itself, as GitHive stamps it: person:<hash>/<agent>.
+				const owner = ownerOf(step.reviewer);
+				const by = owner ? `${owner}/${step.reviewer.split("/")[1]}` : undefined;
 				const vote: Vote = {
 					commit: mustHead(story, step.at),
 					reviewer: step.reviewer,

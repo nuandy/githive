@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ago, historyFixture, repoSnapshot as snapshot, stubApi, visibleText } from "../test/fixtures";
+import { ago, historyFixture, inlineText, repoSnapshot as snapshot, stubApi, visibleText } from "../test/fixtures";
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
 import { RepoPage } from "./RepoPage";
 
@@ -180,9 +180,9 @@ describe("a repo", () => {
 		expect(html).toMatch(/<strong>agent-c<\/strong> wants to land <code[^>]*>changes\/c-1<\/code> on <code/);
 		expect(html).toContain("rev-1</strong> (tests reviewer) approved these changes");
 		expect(html).toContain("First draft of section C");
-		expect(html).toContain("1 of 2 approvals");
+		expect(visibleText(html)).toContain("review: 1 of 2 · rev-1");
 		expect(html).toMatch(/Builder working \(revision 1\)/);
-		expect(html).toMatch(/security.*reject/);
+		expect(inlineText(html)).toContain("security: GitHive's reviewer asked for changes");
 		expect(html).toMatch(/Commits<\/span><span data-slot="counter"[^>]*>2<\/span>/);
 		// An agent's question for a person, and a person's vote form.
 		const asked = {

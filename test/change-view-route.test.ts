@@ -110,6 +110,16 @@ describe("a change's page through the dashboard's routes", { timeout: 60_000 }, 
 		await repoCache.noteAttempt("b-1", "checks failed: npm test exited 1");
 		expect((await get(env, "/repos/_/p/changes/b-1")).attempts).toEqual(["conflict on shared.txt"]);
 
+		// Its files: what it changed since it left main, whatever main did since.
+		expect(await get(env, "/repos/_/p/changes/b-1/diff")).toMatchObject({
+			change: "b-1",
+			of: "head",
+			base,
+			head,
+			total: 1,
+			files: [{ path: "shared.txt", status: "added", added: 1, removed: 0 }],
+		});
+
 		// The repo's snapshot gives each claim's lease: b-1 is pushed, so it waits on review.
 		const snapshot = (await get(env, "/repos/_/p")) as { claims: { change: string; lease?: unknown }[] };
 		expect(snapshot.claims).toEqual([expect.objectContaining({ change: "b-1", lease: { waitingOn: "reviewers" } })]);

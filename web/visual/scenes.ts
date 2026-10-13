@@ -168,7 +168,7 @@ const page = (name: string, hash: string, more: Partial<Scene> = {}): Scene => (
 });
 
 const click =
-	(name: string | RegExp, role: "button" | "link" | "radio" = "button") =>
+	(name: string | RegExp, role: "button" | "link" | "radio" | "menuitem" = "button") =>
 	async (p: Page) => {
 		await p.getByRole(role, { name }).first().click();
 	};
@@ -563,6 +563,20 @@ const APP: Scene[] = [
 	page("change-wishlist-commits", `${STOREFRONT}/changes/wishlist/commits`),
 	page("change-cart-coupons-commits", `${STOREFRONT}/changes/cart-coupons/commits`, { act: openSummary("More") }),
 	page("change-session-cookies-evidence", `${STOREFRONT}/changes/session-cookies`, { act: openSummary("Evidence") }),
+	// The Files tab: a file outside the claim, a long test folded, a binary image; one file asked for by the address.
+	page("change-checkout-tax-files", `${STOREFRONT}/changes/checkout-tax/files`),
+	page("change-cart-coupons-files", `${STOREFRONT}/changes/cart-coupons/files`),
+	page("change-hero-banner-files", `${STOREFRONT}/changes/hero-banner/files/src/pages/Home.tsx`),
+	page("change-og-images-files", `${STOREFRONT}/changes/og-images/files`),
+	// Deciding: Land now's confirm, the release dialog, and the agent's commands unfolded in the Conflict panel.
+	page("change-checkout-tax-land", `${STOREFRONT}/changes/checkout-tax`, { act: click("Land now") }),
+	page("change-stock-sync-release", `${STOREFRONT}/changes/stock-sync`, {
+		act: steps(click("More about this change"), click("Release claim…", "menuitem")),
+	}),
+	page("change-og-images-release", `${STOREFRONT}/changes/og-images`, { act: click("Release claim…") }),
+	page("change-hero-banner-commands", `${STOREFRONT}/changes/hero-banner`, {
+		act: openSummary("What the agent will do"),
+	}),
 
 	page("docs-hive", "/repos/acme/docs"),
 	page("docs-history", "/repos/acme/docs/history"),

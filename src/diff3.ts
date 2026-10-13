@@ -60,26 +60,30 @@ const same = (x: string[], y: string[]) => x.length === y.length && x.every((lin
 const ended = (lines: string[]) =>
 	lines.length && !lines.at(-1)!.endsWith("\n") ? [...lines.slice(0, -1), `${lines.at(-1)}\n`] : lines;
 
-/** For each line of `from`, the line of `to` it's kept as in a longest common run of lines, or -1. */
-function matched(from: string[], to: string[]): number[] {
+/**
+ * For each line of `from`, the line of `to` it's kept as in a longest common run of lines, or -1. Past `mostEdits`
+ * inserted or deleted lines it stops looking for common ones, and the rest count as changed.
+ */
+export function matched(from: string[], to: string[], mostEdits = MOST_EDITS): number[] {
 	const kept = new Array<number>(from.length).fill(-1);
 	let start = 0;
 	while (start < from.length && start < to.length && from[start] === to[start]) kept[start] = start++;
 	let [endFrom, endTo] = [from.length, to.length];
 	while (endFrom > start && endTo > start && from[endFrom - 1] === to[endTo - 1]) kept[--endFrom] = --endTo;
-	for (const [x, y] of commonLines(from.slice(start, endFrom), to.slice(start, endTo))) kept[start + x] = start + y;
+	for (const [x, y] of commonLines(from.slice(start, endFrom), to.slice(start, endTo), mostEdits))
+		kept[start + x] = start + y;
 	return kept;
 }
 
 /**
  * The pairs of lines `a` and `b` keep in common, by Myers' O(ND) diff, or none when they differ by more than
- * MOST_EDITS lines. Each step keeps only its own diagonals, so the memory is about MOST_EDITS² / 2 numbers at most.
+ * `most` lines. Each step keeps only its own diagonals, so the memory is about most² / 2 numbers at most.
  */
-function commonLines(a: string[], b: string[]): [number, number][] {
+function commonLines(a: string[], b: string[], most: number): [number, number][] {
 	const [n, m] = [a.length, b.length];
 	if (!n || !m) return [];
 	const trace: Int32Array[] = [];
-	for (let d = 0; d <= Math.min(n + m, MOST_EDITS); d++) {
+	for (let d = 0; d <= Math.min(n + m, most); d++) {
 		const before = trace[d - 1];
 		// The furthest x on diagonal k after d edits, at v[k + d].
 		const v = new Int32Array(2 * d + 1);

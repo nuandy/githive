@@ -22,7 +22,10 @@ import {
 	REQUESTS,
 	orgDetails,
 } from "./fixtures/account.ts";
+import { ROBIN } from "./fixtures/people.ts";
+import { diffOf } from "./fixtures/diffs.ts";
 import { fileAt } from "./fixtures/files.ts";
+import { sha } from "./fixtures/ids.ts";
 import type { RepoFixture } from "./fixtures/repo.ts";
 import { DOCS_REPO, NEW_THING, NOTES_REPO, TINY_LIB } from "./fixtures/small-repos.ts";
 import { STOREFRONT } from "./fixtures/storefront.ts";
@@ -57,7 +60,7 @@ function decode(segment: string): string | null {
 
 /** The answer to one API request, or null when this module doesn't know the route. */
 export function answer(method: string, url: URL, who: Who): Answer | null {
-	if (method.toUpperCase() !== "GET") return { status: 200, body: {} };
+	if (method.toUpperCase() !== "GET") return { status: 200, body: written(url) };
 	const decoded = url.pathname.split("/").filter(Boolean).map(decode);
 	if (decoded.some((part) => part === null)) return null;
 	const parts = decoded as string[];
@@ -91,6 +94,20 @@ export function answer(method: string, url: URL, who: Who): Answer | null {
 		default:
 			return null;
 	}
+}
+
+/** What a write answers, as if it worked: a change landed or released says so, the rest answer nothing much. */
+function written(url: URL): unknown {
+	const [, , , , change, action] = url.pathname.split("/").map((part) => decodeURIComponent(part));
+	if (url.pathname.split("/")[4] !== "changes" || !change) return {};
+	if (action === "merge") return { ok: true, commit: sha(`landed-now:${change}`) };
+	if (action === "release")
+		return {
+			ok: true,
+			released: change,
+			note: "Its paths are free for other agents; its agent is told; its commits stay on its branch.",
+		};
+	return {};
 }
 
 function meAnswer(second: string | undefined, rest: string[], who: Who): Answer | null {
@@ -143,20 +160,30 @@ function repoAnswer(owner: string, name: string, rest: string[], query: URLSearc
 
 	if (what === undefined) return hive ? ok(hive.snapshot) : notStarted();
 	if (what === "changes") {
-		if (id === undefined || more.length) return null;
+		if (id === undefined) return null;
 		if (!hive) return notStarted();
+		if (more.length === 1 && more[0] === "diff") {
+			const diff = diffOf(repo, id);
+			return diff ? ok(diff) : fail(404, `no change ${id} on ${fullName}`);
+		}
+		if (more.length) return null;
 		const change = hive.changes.get(id);
 		return change ? ok(change) : fail(404, `no change ${id} on ${fullName}`);
 	}
 	if (id !== undefined) return null;
 	switch (what) {
 		case "access": {
+			// Who they are in the records and their teams in the repo's org, for a person signed in.
+			const org = ORGS[owner];
+			const teams = (org?.teams ?? []).filter((team) => team.members.includes(ROBIN.handle));
 			const access: RepoAccess = {
 				id: repo.id,
 				fullName,
 				level,
 				visibility: repo.visibility,
 				branch: repo.branch,
+				...(who === "admin" ? { by: ROBIN.person, teams: teams.map((team) => `@${owner}/${team.slug}`) } : {}),
+				...(who === "operator" ? { by: OPERATOR.by } : {}),
 			};
 			return ok(access);
 		}

@@ -9,7 +9,7 @@
 //   #/repos/:owner/:name/settings/:section    a part of Settings (General without one)
 //   #/repos/:owner/:name/changes?filter=<needs-you|in-review|…>   the Changes list narrowed
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
-//   #/repos/:owner/:name/changes/:id[/commits][?decide]
+//   #/repos/:owner/:name/changes/:id[/commits|/files[/<path>]][?decide]
 //                                             (?decide: opened at its decision, to vote or answer)
 //   #/settings/agents                         your agents, their tokens, and connected apps
 // Inside the dashboard a repo is named by its full name, "<owner>/<name>".
@@ -20,7 +20,7 @@
 import { repoPath } from "./repoName";
 
 export type RepoTab = "hive" | "changes" | "history" | "claims" | "code" | "agents" | "settings" | "audit";
-export type ChangeTab = "conversation" | "commits";
+export type ChangeTab = "conversation" | "commits" | "files";
 /** The parts of a repo's Settings, each on a page of its own. */
 export const SETTINGS_SECTIONS = [
 	"general",
@@ -56,6 +56,7 @@ export type Route =
 			repo: string;
 			change: string;
 			tab: ChangeTab;
+			/** Files tab: the file shown, "src/a.ts". */ file?: string;
 			/** Opened at its decision: to vote on it, or answer its agent. */ decide?: true;
 	  }
 	| { page: "not-found" };
@@ -63,7 +64,7 @@ export type Route =
 const encode = encodeURIComponent;
 
 const REPO_TABS: RepoTab[] = ["hive", "changes", "history", "claims", "code", "agents", "settings", "audit"];
-const CHANGE_TABS: ChangeTab[] = ["commits"];
+const CHANGE_TABS: ChangeTab[] = ["commits", "files"];
 
 function decode(segment: string | undefined): string | null {
 	if (segment === undefined) return null;
@@ -135,12 +136,23 @@ export function parseRoute(hash: string): Route {
 			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
 			return { page: "repo", repo, tab, ...set({ branch: params.text("branch"), filter: params.text("filter") }) };
 		}
-		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
+		if (rest[0] === "changes" && rest.length >= 2) {
 			const change = decode(rest[1]);
 			if (!change) return { page: "not-found" };
-			if (rest.length === 3 && !CHANGE_TABS.includes(rest[2] as ChangeTab)) return { page: "not-found" };
 			const tab = (rest[2] as ChangeTab | undefined) ?? "conversation";
-			return { page: "change", repo, change, tab, ...set({ decide: params.flag("decide") || undefined }) };
+			if (rest.length >= 3 && !CHANGE_TABS.includes(tab)) return { page: "not-found" };
+			// Only the Files tab goes on, to one of its files.
+			const segments = rest.slice(3).map(decode);
+			if (segments.length && (tab !== "files" || segments.some((segment) => segment === null)))
+				return { page: "not-found" };
+			const file = segments.join("/");
+			return {
+				page: "change",
+				repo,
+				change,
+				tab,
+				...set({ file: file || undefined, decide: params.flag("decide") || undefined }),
+			};
 		}
 	}
 	return { page: "not-found" };
@@ -165,10 +177,12 @@ function changeHref(
 	repo: string,
 	change: string,
 	tab: ChangeTab = "conversation",
-	view: { decide?: boolean } = {},
+	view: { decide?: boolean; file?: string } = {},
 ): string {
 	const tabPart = tab === "conversation" ? "" : `/${tab}`;
-	return withQuery(`#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`, { decide: view.decide });
+	const { file } = view;
+	const filePart = tab === "files" && file ? `/${file.split("/").filter(Boolean).map(encode).join("/")}` : "";
+	return withQuery(`#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}${filePart}`, { decide: view.decide });
 }
 
 function codeHref(repo: string, path = "", ref?: string): string {
@@ -183,6 +197,7 @@ export const href = {
 	repo: repoHref,
 	settings: settingsHref,
 	changes: changesHref,
+	/** A change's page; on its Files tab, at one of its files. */
 	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,

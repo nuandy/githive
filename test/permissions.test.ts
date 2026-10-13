@@ -59,6 +59,7 @@ const ROUTES: [method: string, path: string, needs: Level][] = [
 	["GET", "/repos/acme/web", "read"],
 	["GET", "/repos/acme/web/access", "read"],
 	["GET", "/repos/acme/web/changes/c-1", "read"],
+	["GET", "/repos/acme/web/changes/c-1/diff", "read"],
 	["GET", "/repos/acme/web/landing?branch=main", "read"],
 	["GET", "/repos/acme/web/audit", "read"],
 	["GET", "/repos/acme/web/history", "read"],
@@ -71,6 +72,7 @@ const ROUTES: [method: string, path: string, needs: Level][] = [
 	["POST", "/repos/acme/web/github/pr", "write"],
 	["POST", "/repos/acme/web/github/again", "write"],
 	["POST", "/repos/acme/web/changes/c-1/give-up", "write"],
+	["POST", "/repos/acme/web/changes/c-1/release", "write"],
 	["PATCH", "/repos/acme/web", "admin"],
 	["POST", "/repos/acme/web/settings", "admin"],
 	["GET", "/repos/acme/web/collaborators", "admin"],
@@ -213,6 +215,28 @@ describe("what each person can see", () => {
 			"you can read in acme/docs; this needs review",
 		);
 		expect(await tool(env, "claims", people.eve.token)).toBe("no repo acme/web");
+	});
+
+	it("tells a person who they are in the records, and their teams in the repo's org, for the roles they vote as", async () => {
+		const { env, people, orgs } = await world();
+		const acme = (await orgs.org("acme"))!;
+		await orgs.createTeam(acme, "payments");
+		await orgs.addTeamMember(acme.id, "payments", "bob");
+		const access = async (who: Handle) =>
+			(await (
+				await worker.fetch(
+					new Request(`${ORIGIN}/repos/acme/web/access`, { headers: { Cookie: people[who].session } }),
+					env as never,
+					{ waitUntil: () => {} } as never,
+				)
+			).json()) as { level: string; by?: string; teams?: string[] };
+		expect(await access("bob")).toMatchObject({
+			level: "write",
+			by: expect.stringMatching(/^person:[^/]+$/),
+			teams: ["@acme/payments"],
+		});
+		expect(await access("cyd")).toMatchObject({ level: "review", teams: [] });
+		expect((await access("bob")).by).not.toBe((await access("cyd")).by);
 	});
 
 	it("lets someone signed out read a public repo, and asks them to sign in for anything else", async () => {

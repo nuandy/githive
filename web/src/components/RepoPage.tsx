@@ -4,9 +4,10 @@ import type {
 	BranchHistory,
 	DemoRunStatus,
 	LandingStretch,
+	ChangeDiff,
 	ChangeHistory,
-	GiveUpAnswer,
 	HiveEvent,
+	ReleaseAnswer,
 	HiveStatus,
 	RepoAccess,
 	PullAnswer,
@@ -62,7 +63,13 @@ export type RepoView =
 			/** Settings tab: the section shown. */ section?: SettingsSection;
 			/** Changes tab: the list's filter (see changeList.ts), when not all. */ filter?: string;
 	  }
-	| { kind: "change"; change: string; tab: ChangeTab; /** Opened at its decision. */ decide?: true };
+	| {
+			kind: "change";
+			change: string;
+			tab: ChangeTab;
+			/** Files tab: the file shown. */ file?: string;
+			/** Scroll to the decision box and focus it once the change is read. */ decide?: boolean;
+	  };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
 export type RepoPageApi = CodeApi &
@@ -88,8 +95,10 @@ export type RepoPageApi = CodeApi &
 		) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 		/** People who can write: open the standing pull request on GitHub, or find it. */
 		githubPull?: (repo: string) => Promise<PullAnswer>;
-		/** People who can write: give up GitHub's change, freeing its paths. */
-		giveUpGitHub?: (repo: string, change: string) => Promise<GiveUpAnswer>;
+		/** A change's files, for its Files tab (stand-ins may leave it out). */
+		diff?: (repo: string, change: string) => Promise<ChangeDiff>;
+		/** People who can write: release a change's claim, whoever's it is, saying why. */
+		release?: (repo: string, change: string, reason: string) => Promise<ReleaseAnswer>;
 		/** People who can write: bring GitHub's changes back again, after they were given up or sent back. */
 		githubAgain?: (repo: string) => Promise<unknown>;
 	};
@@ -235,19 +244,14 @@ function RepoTabContent({
 	if (!snapshot) return <NothingYet repo={repo} />;
 	if (view.kind === "change") {
 		return (
-			<ChangePage
-				snapshot={snapshot}
-				changeId={view.change}
-				claim={snapshot.claims.find((claim) => claim.change === view.change)}
-				history={changeHistory}
+			<ChangeView
 				repo={repo}
-				tab={view.tab}
-				{...(view.decide ? { decide: true } : {})}
+				view={view}
+				snapshot={snapshot}
+				changeHistory={changeHistory}
 				api={api}
-				canVote={voting}
-				merge={canWrite(access?.level) ? api.merge : undefined}
-				giveUp={canWrite(access?.level) ? api.giveUpGitHub : undefined}
-				previewable={access?.visibility === "public"}
+				access={access}
+				voting={voting}
 			/>
 		);
 	}
@@ -282,6 +286,67 @@ function RepoTabContent({
 			api={api}
 			canWrite={canWrite(access?.level)}
 			onBranchMade={onSettingsChanged}
+		/>
+	);
+}
+
+/**
+ * A change's page, with what it reads beside the change: the landing of the branch it lands on, polled as the Changes
+ * tab polls it, so a change being checked says Landing; and its files, read again as its head moves.
+ */
+function ChangeView({
+	repo,
+	view,
+	snapshot,
+	changeHistory,
+	api,
+	access,
+	voting,
+}: {
+	repo: string;
+	view: Extract<RepoView, { kind: "change" }>;
+	snapshot: RepoSnapshot;
+	changeHistory: ChangeHistory | null | undefined;
+	api: RepoPageProps["api"];
+	access: RepoAccess | undefined;
+	voting: boolean;
+}) {
+	const claim = snapshot.claims.find((each) => each.change === view.change);
+	const branch = claim?.into ?? changeHistory?.branch ?? snapshot.branch ?? "main";
+	const landing = usePoll(
+		api.landing && claim ? `landing:${repo}:${branch}` : null,
+		() => api.landing!(repo, branch),
+		5_000,
+	);
+	// Kept by the server like the change's own view, its files can come from an earlier push for a moment: asked again
+	// soon until they're the head's.
+	const head = claim?.head ?? changeHistory?.released.find((release) => release.mergedAs)?.mergedAs ?? "";
+	const diffKey = api.diff ? `diff:${repo}:${view.change}:${head}` : null;
+	const [behind, setBehind] = useState(false);
+	const diff = usePoll(diffKey, () => api.diff!(repo, view.change), behind ? 5_000 : 120_000);
+	const nowBehind = !!claim?.head && diff.data?.of === "head" && !!diff.data.head && diff.data.head !== claim.head;
+	if (nowBehind !== behind) setBehind(nowBehind);
+	const writes = canWrite(access?.level);
+	return (
+		<ChangePage
+			snapshot={snapshot}
+			changeId={view.change}
+			claim={claim}
+			history={changeHistory}
+			repo={repo}
+			tab={view.tab}
+			file={view.file}
+			api={api}
+			canVote={voting}
+			access={access ? { by: access.by, teams: access.teams } : undefined}
+			landing={landing.data}
+			diff={diff.data ?? (diff.error ? null : undefined)}
+			diffError={diff.error}
+			onDiffRetry={diff.refresh}
+			merge={writes ? api.merge : undefined}
+			release={writes ? api.release : undefined}
+			decide={!!view.decide}
+			previewable={access?.visibility === "public"}
 		/>
 	);
 }

@@ -39,7 +39,9 @@ describe("hash routes", () => {
 		// One segment is no longer a repo: a repo has an owner.
 		expect(parseRoute("#/repos/my-app")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/repos/acme/web/insights")).toEqual({ page: "not-found" });
-		expect(parseRoute("#/repos/acme/web/changes/x/files")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/changes/x/diffs")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/changes/x/commits/a.ts")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/changes/x/files/%E0%A4%A")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/repos/acme/%E0%A4%A")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/orgs/a/b")).toEqual({ page: "not-found" });
 	});
@@ -112,6 +114,31 @@ describe("hash routes", () => {
 			branch: "a b",
 			filter: "approved",
 		});
+	});
+
+	it("opens a change's Files tab, at one of its files if asked", () => {
+		expect(parseRoute("#/repos/acme/web/changes/x/files")).toEqual({
+			page: "change",
+			repo: "acme/web",
+			change: "x",
+			tab: "files",
+		});
+		expect(href.change("acme/web", "x", "files")).toBe("#/repos/acme/web/changes/x/files");
+		expect(href.change("acme/web", "x", "files", { file: "src/a b.ts" })).toBe(
+			"#/repos/acme/web/changes/x/files/src/a%20b.ts",
+		);
+		expect(parseRoute(href.change("acme/web", "x", "files", { file: "src/x#y.ts" }))).toEqual({
+			page: "change",
+			repo: "acme/web",
+			change: "x",
+			tab: "files",
+			file: "src/x#y.ts",
+		});
+		// Only the Files tab takes a file.
+		expect(href.change("acme/web", "x", "commits", { file: "src/a.ts" })).toBe("#/repos/acme/web/changes/x/commits");
+		expect(href.change("acme/web", "x", "files", { file: "src/a.ts", decide: true })).toBe(
+			"#/repos/acme/web/changes/x/files/src/a.ts?decide",
+		);
 	});
 
 	it("puts files in the Code tab's path, encoded per segment", () => {

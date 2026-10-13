@@ -428,6 +428,13 @@ the floor: no stale release sooner than 30 minutes after the claim's agent last
 claimed. Every release the turn rule allows passes it; the audit can't replay
 the rest (a head lives in its agent's fork, not in the records).
 
+A person who can write may also free a stuck change from its dashboard page,
+whoever holds it, saying why (`POST /repos/<owner>/<name>/changes/<change>/release`,
+`releaseAsPerson`): its paths are free for other agents, its agent hears of it
+with its next reply, and its commits stay on its branch. The release records the
+person and their reason, stamped as them, and isn't marked stale; the audit
+accepts a stamped release by a person, as it does GitHub's give-up.
+
 A release names the merge it follows (`mergedAs`), when it follows one.
 
 ## Branches
@@ -1945,7 +1952,12 @@ RepoCache, which keeps parsed files and open changes' footprints and is as
 much a hint. A repo's other tabs
 show its changes (one branch at a time; a change's page shows any conflict,
 with the commits on the branch that touched its files and the conflicting
-lines, and the names it alters or uses that other changes touch), what landed on a branch and why
+lines, the names it alters or uses that other changes touch, and its files:
+`GET /repos/<owner>/<name>/changes/<change>/diff`, each file's unified diff from
+the change's merge base with its branch to its head, or, once landed, from the
+landed commit's first parent to it, with files outside its claim flagged; capped
+at 300 files, about 1 MB of diff text and 256 KB a side, binary and too-big files
+marked rather than diffed), what landed on a branch and why
 (History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make

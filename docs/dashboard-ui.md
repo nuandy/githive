@@ -143,6 +143,19 @@ Reach for `components/ui` before writing a control by hand:
   each language load only when a file in it shows (`lib/highlight.ts`); its spans are read back into tokens, never set
   as HTML.
 
+## A change's page
+
+- **The decision box** (`DecisionBox`, from `lib/decision.ts`) is where a change is decided: its state, approvals per
+  role and who gave each, the latest check on its head, a conflict with its branch, how many open changes its code
+  meets, and one primary action, Land now (confirmed first, naming what lands with it and the checks that run) or
+  Vote. Its ⋯ menu releases the claim. It's sticky in the sidebar beside every tab at 900px and up, under the header
+  below that, and it's `#decide` (focusable): `decide` brings it into view. Work its contents out in `lib/decision.ts`,
+  as pure functions, not in the component.
+- **The Files tab** (`ChangeFiles`) folds each file, its lines drawn only while open, in `diff-add` and `diff-del`
+  (their `-strong` behind the line numbers), with git's hunk headers. `href.change(repo, id, "files", path)` opens one
+  file; link a file of the change there, as Awareness and the Conflict panel do.
+- A person shows as "you" or "a person", never as a `person:` hash; their agents by their `<handle>/<agent>` names.
+
 To add a shadcn component, run from the repository root: `npx shadcn@latest add <name>` (`components.json` points it
 at `web/src/components/ui`). Then point its `cn` import at `@/lib/utils` (ours knows the theme's names), swap
 lucide icons for `Icon`, and restyle it from the theme.
