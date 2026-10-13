@@ -192,6 +192,9 @@ export function ReleaseDialog({
 			<AlertDialogContent>
 				<form
 					className="grid gap-4"
+					// While it's sent, nothing is disabled, so focus stays where it was: the reason is read-only, and a second
+					// press does nothing.
+					aria-busy={busy || undefined}
 					onSubmit={(event) => {
 						event.preventDefault();
 						void go();
@@ -210,7 +213,7 @@ export function ReleaseDialog({
 							value={reason}
 							onChange={(event) => setReason(event.target.value)}
 							placeholder="What it's stuck on, for its agent and the audit"
-							disabled={busy}
+							readOnly={busy}
 						/>
 						{error ? (
 							<FieldHint className="text-bad" role="alert">
@@ -222,7 +225,7 @@ export function ReleaseDialog({
 					</Field>
 					<AlertDialogFooter>
 						<AlertDialogCancel type="button">Cancel</AlertDialogCancel>
-						<Button type="submit" variant="danger" disabled={busy || !reason.trim()}>
+						<Button type="submit" variant="danger" disabled={!reason.trim()} aria-disabled={busy || undefined}>
 							{busy ? "Releasing…" : "Release claim"}
 						</Button>
 					</AlertDialogFooter>

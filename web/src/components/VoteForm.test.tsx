@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
 import type { Claim, Vote } from "../lib/claimStatus";
 import { ago, inlineText, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
+import { voteDraftKey } from "../lib/voteDraft";
 import { VoteForm } from "./VoteForm";
 
 // A person's vote on a change's head, from its page.
@@ -104,6 +105,27 @@ describe("a person's vote", () => {
 			const html = render(pushedClaim, { policy: guarded, reader: { by: "person:bob", teams: [] } });
 			expect(inlineText(html)).not.toContain("which you can't give");
 		});
+	});
+
+	it("comes back as it was left: the verdict, the role and what was written", () => {
+		const kept = new Map<string, string>();
+		const drafts = {
+			getItem: (key: string) => kept.get(key) ?? null,
+			setItem: (key: string, value: string) => void kept.set(key, value),
+			removeItem: (key: string) => void kept.delete(key),
+		};
+		kept.set(
+			voteDraftKey("acme/docs-site", pushedClaim.change, pushedClaim.head!),
+			JSON.stringify({ choice: "request", role: "security", evidence: "The cache never expires" }),
+		);
+		const html = render(pushedClaim, { drafts });
+		expect(html).toMatch(/<input[^>]*checked="" value="request"/);
+		expect(html).toMatch(/<option value="security" selected=""/);
+		expect(html).toContain("The cache never expires</textarea>");
+		// Another push is another vote: nothing kept for it.
+		const later = render({ ...pushedClaim, head: "c0ffee000000" }, { drafts });
+		expect(later).not.toMatch(/checked=""/);
+		expect(later).not.toContain("The cache never expires");
 	});
 
 	it("folds to what the reader voted once they have, and offers to change it", () => {

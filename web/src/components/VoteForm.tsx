@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import type { RepoSnapshot, VoteInput } from "../api";
 import { messageOf } from "../lib/errors";
 import { shortSha } from "../lib/model";
@@ -14,6 +14,7 @@ import {
 } from "../lib/decision";
 import { roleName } from "../lib/roles";
 import { cn } from "../lib/utils";
+import { keepVoteDraft, readVoteDraft, sessionStore, type VoteChoice, voteDraftKey } from "../lib/voteDraft";
 import { Icon } from "./Icon";
 import { Button } from "./ui/button";
 import { Fold } from "./ui/collapse";
@@ -24,7 +25,7 @@ export interface VoteApi {
 }
 
 /** What a person decides: approve, send it back, or block it as a role that can. */
-type Choice = "approve" | "request" | "block";
+type Choice = VoteChoice;
 
 /** The vote a choice casts, as `role`: a request for changes is a reviewer's, a block the blocking role's. */
 function voteOf(choice: Choice, role: string, blocking: boolean): Pick<VoteInput, "role" | "verdict"> {
@@ -44,7 +45,8 @@ function votedWords(vote: Pick<Vote, "role" | "verdict" | "commit">, blocks: boo
  * A person's vote on a change's current commit, from its page. It is stamped with their verified identity, counts like
  * any reviewer's, and answers an agent's question about the change. It offers the roles the reader may vote as (all of
  * them, each said to be theirs or not, when that can't be told), then a verdict with what it does. Once they've voted on
- * this commit it folds to what they voted, with a way to change it. A refusal shows the server's words.
+ * this commit it folds to what they voted, with a way to change it. A refusal shows the server's words. What's half
+ * written is kept for the session, per commit, so leaving the page and coming back finds it; sending it drops it.
  */
 export function VoteForm({
 	repo,
@@ -54,6 +56,7 @@ export function VoteForm({
 	reader = {},
 	mine,
 	initialRole,
+	drafts = sessionStore(),
 	className,
 }: {
 	repo: string;
@@ -67,13 +70,21 @@ export function VoteForm({
 	mine?: Vote | undefined;
 	/** The role chosen at first (tests). */
 	initialRole?: string;
+	/** Where a draft is kept: the session's storage (tests pass their own). */
+	drafts?: Parameters<typeof keepVoteDraft>[0];
 	className?: string;
 }) {
 	const { roles, exact } = voteRoles(policy, claim, reader);
+	const draftKey = claim.head ? voteDraftKey(repo, claim.change, claim.head) : null;
+	const [draft] = useState(() => (draftKey ? readVoteDraft(drafts, draftKey) : {}));
+	const drafted = roles.some((each) => each.role === draft.role) ? draft.role : undefined;
 	// As the role it waits on, when that's the reader's: the Inbox's "Vote as payments" opens it as payments.
-	const [role, setRole] = useState(initialRole ?? startingRole(roles, claim.approval.awaiting) ?? "review");
-	const [choice, setChoice] = useState<Choice | null>(null);
-	const [evidence, setEvidence] = useState("");
+	const [role, setRole] = useState(initialRole ?? drafted ?? startingRole(roles, claim.approval.awaiting) ?? "review");
+	const [choice, setChoice] = useState<Choice | null>(draft.choice ?? null);
+	const [evidence, setEvidence] = useState(draft.evidence ?? "");
+	useEffect(() => {
+		if (draftKey) keepVoteDraft(drafts, draftKey, { choice, role, evidence });
+	}, [drafts, draftKey, choice, role, evidence]);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 	// The vote just cast, until the page's votes bring it, and the head the reader chose to vote on again.
@@ -122,6 +133,8 @@ export function VoteForm({
 			</div>
 		);
 
+	// While it's sent, nothing is disabled, so focus stays where it was (a disabled field drops it to the page): the
+	// form is busy, its words read-only, and a second press does nothing.
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		if (!choice || !evidence.trim() || busy) return;
@@ -130,6 +143,7 @@ export function VoteForm({
 		const vote = { ...voteOf(choice, role, blocking), evidence: evidence.trim() };
 		try {
 			await api.vote(repo, claim.change, vote);
+			if (draftKey) keepVoteDraft(drafts, draftKey, {});
 			setCast({ ...vote, commit: head });
 			setReopened(null);
 			setChoice(null);
@@ -152,6 +166,7 @@ export function VoteForm({
 				className,
 			)}
 			aria-labelledby="vote-title"
+			aria-busy={busy || undefined}
 			onSubmit={submit}
 		>
 			<div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5 rounded-t-md border-b border-border bg-surface-2 px-4 py-2.5">
@@ -180,10 +195,10 @@ export function VoteForm({
 								id="vote-role"
 								value={role}
 								onChange={(event) => {
+									if (busy) return;
 									setRole(event.target.value);
 									if (choice === "block") setChoice(null);
 								}}
-								disabled={busy}
 								aria-describedby={unknown.length ? "vote-role-hint" : undefined}
 							>
 								{roles.map((option) => (
@@ -207,7 +222,7 @@ export function VoteForm({
 					blocking={blocking}
 					agent={claim.agent}
 					required={claim.approval.required}
-					disabled={busy}
+					busy={busy}
 				/>
 				<Label htmlFor="vote-evidence">
 					{claim.attention ? `Your answer to ${claim.attention.agent}` : "What you checked"}
@@ -219,7 +234,7 @@ export function VoteForm({
 					value={evidence}
 					onChange={(event) => setEvidence(event.target.value)}
 					placeholder="What you looked at, and what you found"
-					disabled={busy}
+					readOnly={busy}
 				/>
 				{/* A message unfolds under the field, and folds away as the next try starts; the fold takes the grid's gap
 				    above it in with it. */}
@@ -232,7 +247,8 @@ export function VoteForm({
 					<Button
 						type="submit"
 						variant={choice ? SUBMIT[choice].variant : "default"}
-						disabled={busy || !!missing}
+						disabled={!!missing}
+						aria-disabled={busy || undefined}
 						aria-describedby={missing ? "vote-missing" : undefined}
 					>
 						{choice ? <Icon name={SUBMIT[choice].icon} /> : null}
@@ -288,9 +304,10 @@ function VerdictChoice(props: {
 	blocking: boolean;
 	agent: string;
 	required: number;
-	disabled: boolean;
+	/** The vote is being sent: a choice stays as it is. */
+	busy: boolean;
 }) {
-	const { choice, setChoice, role, blocking, agent, required, disabled } = props;
+	const { choice, setChoice, role, blocking, agent, required, busy } = props;
 	const counts = required > 0 ? ` Your approval counts toward the ${required} it needs.` : "";
 	const options: { value: Choice; title: string; detail: string }[] = [
 		{
@@ -311,7 +328,7 @@ function VerdictChoice(props: {
 			detail: `It can't land, whatever its approvals, until ${role} approves a later push.`,
 		});
 	return (
-		<fieldset className="mx-0 my-1 grid gap-1.5 border-0 p-0" disabled={disabled}>
+		<fieldset className="mx-0 my-1 grid gap-1.5 border-0 p-0">
 			<legend className="sr-only">Verdict</legend>
 			{options.map((option) => (
 				<label
@@ -328,7 +345,9 @@ function VerdictChoice(props: {
 						name="verdict"
 						value={option.value}
 						checked={choice === option.value}
-						onChange={() => setChoice(option.value)}
+						onChange={() => {
+							if (!busy) setChoice(option.value);
+						}}
 					/>
 					<span className="grid gap-px">
 						<strong>{option.title}</strong>
