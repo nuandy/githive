@@ -5,6 +5,7 @@ import { usePoll } from "../hooks/usePoll";
 import { freeWork, type Goal, hiveGoals } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
 import { announcement, type GoalMotion, goalMotions, MOTION_MS } from "../lib/hiveMotion";
+import { motionMs } from "../lib/motion";
 import { chooseRange, DEFAULT_RANGE, timeAxis } from "../lib/timeAxis";
 import { DemoBanner } from "./DemoRun";
 import { GoalsPanel } from "./GoalsPanel";
@@ -246,17 +247,21 @@ function useMotions(goals: Goal[], now: number) {
 			.filter(Boolean);
 		// A screen reader hears at most one announcement every few seconds, however busy the hive.
 		say(words.join(". "));
-		// Each motion's class comes off once it has played; a newer read mustn't cancel that.
+		// Each motion's class comes off once it has played (at once under reduced motion, where none plays); a newer
+		// read mustn't cancel that.
 		for (const motion of started) {
-			const timer = setTimeout(() => {
-				timers.current.delete(timer);
-				setMotions((current) => {
-					if (current.get(motion.key)?.seq !== motion.seq) return current;
-					const next = new Map(current);
-					next.delete(motion.key);
-					return next;
-				});
-			}, motion.delay + MOTION_MS[motion.motion]);
+			const timer = setTimeout(
+				() => {
+					timers.current.delete(timer);
+					setMotions((current) => {
+						if (current.get(motion.key)?.seq !== motion.seq) return current;
+						const next = new Map(current);
+						next.delete(motion.key);
+						return next;
+					});
+				},
+				motionMs(motion.delay + MOTION_MS[motion.motion]),
+			);
 			timers.current.add(timer);
 		}
 		// `now` moves every tick; only a new read of the goals is compared.

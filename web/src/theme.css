@@ -322,10 +322,12 @@
 	/* Going somewhere (a page, a tab, what replaces Loading): a quick fade, no movement, so the page never lurches. */
 	--animate-fade: fade var(--motion-fast) ease-out backwards;
 	--animate-leave: leave var(--motion-base) var(--ease-in) both;
+	/* A changed number swells a little and settles: a nudge to look, not a jump. */
 	--animate-bump: bump 0.6s ease-out;
 	--animate-pop: pop 0.5s var(--ease-pop) backwards;
-	/* The live dot breathing while the page gets live updates: its halo widens and fades, and back. */
-	--animate-live: live-pulse 2s ease-in-out infinite;
+	/* The live dot breathing as the page goes live: its halo widens and fades, and back, three times; then it holds
+	   still, as nothing may blink or pulse for more than a few seconds (WCAG 2.2.2). */
+	--animate-live: live-pulse 2s ease-in-out 3;
 
 	@keyframes appear {
 		from {
@@ -346,7 +348,7 @@
 	}
 	@keyframes bump {
 		0% {
-			transform: scale(1.6);
+			transform: scale(1.15);
 		}
 		100% {
 			transform: none;
@@ -593,7 +595,8 @@
 	--animate-goal-flash-bad: goal-flash-bad 1.6s ease-out var(--motion-delay, 0ms) backwards;
 	--animate-goal-flash-good: goal-flash-good 2s ease-out var(--motion-delay, 0ms) backwards;
 	--animate-goal-pop: goal-pop 0.6s var(--ease-pop) var(--motion-delay, 0ms) backwards;
-	--animate-goal-blink: goal-blink 1.1s infinite;
+	/* Blinks three times, then holds still (WCAG 2.2.2), as the map's landing lamp does. */
+	--animate-goal-blink: goal-blink 1.1s 3;
 	/* The map's cells grow in and shrink away, chips pop on, and a cell flashes or pulses with what happened. */
 	--animate-hive-cell-in: hive-cell-in 0.45s var(--ease-spring) backwards;
 	--animate-hive-cell-out: hive-cell-out 0.45s ease-in forwards;
@@ -602,7 +605,7 @@
 	--animate-hive-cell-flash-bad: hive-cell-flash-bad 1.2s ease var(--motion-delay, 0ms) backwards;
 	--animate-hive-cell-flash-good: hive-cell-flash-good 1.4s ease var(--motion-delay, 0ms) backwards;
 	--animate-hive-cell-pulse: hive-cell-pulse 0.8s ease var(--motion-delay, 0ms) backwards;
-	--animate-hive-cell-blink: hive-cell-blink 1s infinite;
+	--animate-hive-cell-blink: hive-cell-blink 1s 3;
 	--animate-hive-cluster-in: hive-cluster-in 0.45s ease-out;
 
 	@keyframes hive-appear {

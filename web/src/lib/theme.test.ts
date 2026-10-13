@@ -204,3 +204,20 @@ describe("touch targets", () => {
 		expect(coarse).toMatch(/width: max\(100%, 44px\);\s*height: max\(100%, 44px\);/);
 	});
 });
+
+// Nothing blinks or pulses for more than a few seconds (WCAG 2.2.2): three times, then it holds still. A bump is a
+// nudge, not a jump.
+describe("motion", () => {
+	const animation = (name: string) => new RegExp(`--animate-${name}:([^;]*);`).exec(css)?.[1] ?? "";
+
+	for (const name of ["goal-blink", "hive-cell-blink", "live"])
+		it(`${name} plays three times, then holds still`, () => {
+			expect(animation(name)).not.toMatch(/infinite/);
+			expect(animation(name)).toMatch(/\s3$/);
+		});
+
+	it("bumps a changed number by about 15%", () => {
+		const bump = /@keyframes bump \{\s*0% \{\s*transform: scale\(([\d.]+)\);/.exec(css)?.[1];
+		expect(Number(bump)).toBeCloseTo(1.15, 2);
+	});
+});
