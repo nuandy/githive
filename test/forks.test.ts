@@ -345,6 +345,27 @@ describe("status", () => {
 		expect((summaries.at(-1)?.patch.waiting as unknown[]).length).toBe(1);
 	}, 60_000);
 
+	it("doesn't count a change waiting on a team's role as needing a person: an agent on the team can vote", async () => {
+		await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } });
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Handle refund webhooks" });
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
+		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
+		const watched = {
+			...ctx(),
+			summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }),
+		};
+		const waiting = await repoSnapshot(watched, "project");
+		expect(waiting.claims[0]!.approval.awaiting).toEqual(["security"]);
+		expect(summaries.at(-1)?.patch).toMatchObject({ open: 1, needsYou: 0, waiting: [] });
+		// An agent whose owner is on the team signs it off.
+		const vote = { repo: "project", commit: head, reviewer: "sec-bot", role: "security", verdict: "approve" };
+		await callTool("vote", { ...vote, evidence: "ok" }, { ...ctx(), teamsOf: async () => ["@acme/security"] });
+		expect((await repoSnapshot(watched, "project")).claims[0]!.approval).toMatchObject({
+			approved: true,
+			awaiting: [],
+		});
+	}, 60_000);
+
 	it("says how a change ended once its claim is gone", async () => {
 		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });

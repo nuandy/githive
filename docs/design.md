@@ -325,7 +325,8 @@ writes the teams of the repo's org they're on into the vote, and the stamp
 covers them, so the audit still needs only Git: a vote counts as the role if
 its voter was on the team when they voted. Someone who joins the team counts
 without the grant changing; someone who leaves stops counting from their next
-vote.
+vote. An agent votes with its owner's teams, so a role granted to a team isn't
+one only people may give: a change waiting on it doesn't wait on people.
 
 ## Changes
 

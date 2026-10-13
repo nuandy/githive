@@ -128,11 +128,17 @@ describe("warnings about who holds a role", () => {
 			...(holders ? { grants: { security: holders } } : {}),
 		});
 		expect(peopleOnly(policy(["person:*"]), "security")).toBe(true);
-		expect(peopleOnly(policy(["person:ada", "@acme/security"]), "security")).toBe(true);
-		// GitHive's reviewers hold it by default, and a pool is agents.
+		expect(peopleOnly(policy(["person:ada", "person:*"]), "security")).toBe(true);
+		// GitHive's reviewers hold it by default, and a pool, a person's agent or an agent's name is agents.
 		expect(peopleOnly(policy(), "security")).toBe(false);
 		expect(peopleOnly(policy(["person:*", "service:sec-team/*"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:ada/claude"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:*", "sec-bot"]), "security")).toBe(false);
 		expect(peopleOnly(policy([]), "security")).toBe(false);
+		// An agent votes with its owner's teams, so a team's role is one an agent can give.
+		const teamAgent = { reviewer: "sec-bot", by: "service:acme/sec-bot", teams: ["@acme/security"] };
+		expect(holdsRole(policy(["@acme/security"]), "security", teamAgent)).toBe(true);
+		expect(peopleOnly(policy(["person:ada", "@acme/security"]), "security")).toBe(false);
 	});
 });
 
