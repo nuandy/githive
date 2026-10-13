@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import type { RepoSnapshot } from "../api";
+import { useReturnFocus } from "../hooks/useReturnFocus";
 import { useShortcuts } from "../hooks/useShortcuts";
 import { claimTitle } from "../lib/claimStatus";
 import { filterPalette, type PaletteItem, paletteItems } from "../lib/palette";
@@ -53,6 +54,8 @@ export function CommandPalette({
 	const id = useId();
 	const shown = filterPalette(items, query);
 	const chosen = Math.min(active, Math.max(shown.length - 1, 0));
+	// It has no trigger: closed, focus goes back to what had it.
+	const returnFocus = useReturnFocus(open);
 	// Each time it opens, it starts afresh.
 	useEffect(() => {
 		if (!open) return;
@@ -65,7 +68,8 @@ export function CommandPalette({
 	}, [chosen]);
 	const choose = (item: PaletteItem | undefined) => {
 		if (!item) return;
-		went.current = true;
+		// To the page it's on, nothing moves: focus goes back.
+		went.current = window.location.hash !== item.href;
 		onOpenChange(false);
 		go(item.href);
 	};
@@ -88,9 +92,10 @@ export function CommandPalette({
 				// ⌘K opens no palette over another dialog, but closes this one (useShortcuts).
 				data-palette=""
 				className="top-[12vh] max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
-				// Going somewhere, focus goes to the new page's heading, not back to what opened the palette.
+				// Going somewhere, focus goes to the new page's heading; else back to what had it.
 				onCloseAutoFocus={(event) => {
 					if (went.current) event.preventDefault();
+					else returnFocus(event);
 				}}
 			>
 				<DialogTitle className="sr-only">Go to</DialogTitle>
@@ -179,11 +184,12 @@ export const SHORTCUTS: { keys: string[][]; what: string }[] = [
 	{ keys: [["?"]], what: "Show these shortcuts" },
 ];
 
-/** The list of shortcuts, in a dialog. */
+/** The list of shortcuts, in a dialog. Closed, focus goes back to what had it: a key opened it, or the user menu. */
 export function ShortcutsHelp({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+	const returnFocus = useReturnFocus(open);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent>
+			<DialogContent onCloseAutoFocus={returnFocus}>
 				<DialogHeader>
 					<DialogTitle>Keyboard shortcuts</DialogTitle>
 					<DialogDescription>Anywhere but in a field you're typing in.</DialogDescription>
