@@ -124,6 +124,14 @@ app.get("/api", (c) =>
 	}),
 );
 
+// A repo's API address opened in a browser, as people paste it, goes to its page on the dashboard. The dashboard's
+// own reads and scripts aren't page loads, so they still get the JSON.
+app.get("/repos/:owner/:name", async (c, next) => {
+	if (c.req.header("Sec-Fetch-Mode") !== "navigate" || c.req.header("Sec-Fetch-Dest") !== "document") return next();
+	const repo = [c.req.param("owner"), c.req.param("name")].map(encodeURIComponent).join("/");
+	return c.redirect(`/#/repos/${repo}`, 302);
+});
+
 repoRoutes(app);
 dashboardRoutes(app);
 demoRoutes(app);

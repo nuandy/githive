@@ -74,6 +74,23 @@ describe("the dashboard's repos", () => {
 	});
 });
 
+describe("a repo's address opened in a browser", () => {
+	const open = (path: string, headers: Record<string, string>) =>
+		worker.fetch(new Request(`https://githive.test${path}`, { headers }), {} as never, {} as never);
+	const pageLoad = { "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
+
+	it("goes to the repo's page on the dashboard, and the dashboard's own reads still get the JSON", async () => {
+		const loaded = await open("/repos/nuandy/othello", pageLoad);
+		expect(loaded.status).toBe(302);
+		expect(loaded.headers.get("Location")).toBe("/#/repos/nuandy/othello");
+		const read = await open("/repos/nuandy/othello", { "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" });
+		expect(read.headers.get("Location")).toBeNull();
+		// A page under the repo isn't moved: only the repo's own address has a page to go to.
+		const under = await open("/repos/nuandy/othello/audit", pageLoad);
+		expect(under.headers.get("Location")).toBeNull();
+	});
+});
+
 describe("the bench's wipe", () => {
 	const confirm = { confirm: "delete every repo in the bench namespace" };
 	const benchEnv = (names: string[], allowed = true) => {
