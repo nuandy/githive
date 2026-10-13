@@ -308,14 +308,29 @@ const APP: Scene[] = [
 	page("new-repo-fresh", "/new", { act: click(/Start fresh/, "radio") }),
 	page("new-repo-import", "/new", { act: steps(fill(/^Name/, "widgets"), click(/A Git repository/, "radio")) }),
 	page("new-repo-bad-name", "/new", { act: fill(/^Name/, "my project") }),
+	// A name that's taken: said under the name, with a link to the one there.
 	page("new-repo-error", "/new", {
 		act: steps(
-			answering("/repos", { error: "robin/widgets exists already" }, { status: 409, method: "POST" }),
+			answering("/repos", { error: "robin/widgets exists" }, { status: 409, method: "POST" }),
 			fill(/^Name/, "widgets"),
 			click(/A Git repository/, "radio"),
 			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
 			click("Make repository"),
 		),
+	}),
+	// An import that failed: said under its URL.
+	page("new-repo-import-error", "/new", {
+		act: steps(
+			answering("/repos", { error: "the repository has no branch to import" }, { status: 400, method: "POST" }),
+			fill(/^Name/, "widgets"),
+			click(/A Git repository/, "radio"),
+			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
+			click("Make repository"),
+		),
+	}),
+	// A name too long, said once the field is left.
+	page("new-repo-long-name", "/new", {
+		act: steps(fill(/^Name/, "x".repeat(104)), async (p) => p.getByLabel(/^Name/).first().blur()),
 	}),
 	page("inbox", "/inbox"),
 	page("orgs", "/orgs"),
