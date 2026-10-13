@@ -378,6 +378,8 @@ function ChangesTab({
 }) {
 	const shown = shownBranch(snapshot, { kind: "repo", tab: "changes", ...(asked ? { branch: asked } : {}) }, branch);
 	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
+	// How many changes have landed on the project's branch: History's count, which its link leads to.
+	const history = usePoll(api.history ? `history:${repo}:${branch}` : null, () => api.history!(repo, branch), 60_000);
 	return (
 		<>
 			<Overview
@@ -395,6 +397,7 @@ function ChangesTab({
 				shown={shown}
 				filter={parseFilter(filter)}
 				{...(landing.data ? { landing: landing.data } : {})}
+				{...(history.data ? { landed: history.data.total } : {})}
 			/>
 		</>
 	);

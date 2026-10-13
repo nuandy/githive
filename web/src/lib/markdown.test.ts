@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Block, type Inline, isMarkdown, linkTarget, parseInline, parseMarkdown } from "./markdown";
+import { type Block, FORMAT_MOST, type Inline, isMarkdown, linkTarget, parseInline, parseMarkdown } from "./markdown";
 
 const text = (value: string): Inline => ({ kind: "text", text: value });
 
@@ -17,6 +17,17 @@ describe("Markdown blocks", () => {
 			{ kind: "heading", level: 2, children: [text("Sub")] },
 			{ kind: "paragraph", children: [text("#hashtag")] },
 		]);
+		// A closing run of #s goes only after a space; one that's all there is leaves the heading empty.
+		expect(parseMarkdown("## a ### b ##\n# a#\n### ###\n#\ttabbed  #  ")).toEqual([
+			{ kind: "heading", level: 2, children: [text("a ### b")] },
+			{ kind: "heading", level: 1, children: [text("a#")] },
+			{ kind: "heading", level: 3, children: [] },
+			{ kind: "heading", level: 1, children: [text("tabbed")] },
+		]);
+		// A paragraph's line that ends in two spaces breaks there; its last line's spaces go.
+		expect(parseMarkdown("  one  \ntwo  ")).toEqual([
+			{ kind: "paragraph", children: [text("one"), { kind: "break" }, text("two")] },
+		]);
 	});
 
 	it("keeps fenced and indented code as it is, with its language", () => {
@@ -26,6 +37,11 @@ describe("Markdown blocks", () => {
 		]);
 		// An unclosed fence runs to the end.
 		expect(parseMarkdown("~~~\na\nb")).toEqual([{ kind: "code", lang: "", text: "a\nb" }]);
+		// Its language is the first word of what follows the fence; a backtick there makes it inline code instead.
+		expect(parseMarkdown("```  ts title=x\nlet a;\n```\n\n``` `a` ```")).toEqual([
+			{ kind: "code", lang: "ts", text: "let a;" },
+			{ kind: "paragraph", children: [{ kind: "code", text: "`a`" }] },
+		]);
 	});
 
 	it("reads lists, nested and ordered, and blockquotes", () => {
@@ -62,6 +78,36 @@ describe("Markdown blocks", () => {
 				],
 			},
 		]);
+		// A row keeps the cells it has, up to the head's: Markdown.tsx leaves the rest empty.
+		expect(parseMarkdown("a | b | c\n--|--|--\n1\n1 | 2 | 3 | 4")).toEqual([
+			{
+				kind: "table",
+				align: [null, null, null],
+				head: [[text("a")], [text("b")], [text("c")]],
+				rows: [[[text("1")]], [[text("1")], [text("2")], [text("3")]]],
+			},
+		]);
+	});
+
+	it("reads a task list's boxes, ticked or not", () => {
+		const [list] = parseMarkdown("- [ ] write it\n- [x] test it\n- [X] `ship` it\n- [] not a box\n- [ ]");
+		expect(list).toEqual({
+			kind: "list",
+			ordered: false,
+			start: 1,
+			items: [
+				[{ kind: "paragraph", children: [{ kind: "task", checked: false }, text("write it")] }],
+				[{ kind: "paragraph", children: [{ kind: "task", checked: true }, text("test it")] }],
+				[
+					{
+						kind: "paragraph",
+						children: [{ kind: "task", checked: true }, { kind: "code", text: "ship" }, text(" it")],
+					},
+				],
+				[{ kind: "paragraph", children: [text("[] not a box")] }],
+				[{ kind: "paragraph", children: [text("[ ]")] }],
+			],
+		} satisfies Block);
 	});
 
 	it("never passes raw HTML through: it's text", () => {
@@ -164,6 +210,97 @@ describe("where a Markdown link goes", () => {
 			"",
 		])
 			expect(linkTarget(url, at), url).toBeNull();
+	});
+
+	it("decodes a path before it resolves it, so an encoded way out of the repo goes nowhere", () => {
+		for (const url of ["%2e%2e/%2e%2e/x", "%2E%2E/..", "a%2f..%2f..%2f..%2fx", "..%2F..%2Fx", "/%2e%2e/x"])
+			expect(linkTarget(url, at), url).toBeNull();
+		expect(linkTarget("%2e%2e/README.md", at)).toEqual({ href: "#/repos/acme/web/code/README.md", external: false });
+		expect(linkTarget("a%2Fb.md", at)).toEqual({ href: "#/repos/acme/web/code/docs/a/b.md", external: false });
+		// A % that starts no escape stays as it's written.
+		expect(linkTarget("100%25%.md", at)).toEqual({ href: "#/repos/acme/web/code/docs/100%25%25.md", external: false });
+	});
+
+	it("drops only what a browser drops: spaces and controls at the ends, and tabs and newlines anywhere", () => {
+		expect(linkTarget("my file.md", at)).toEqual({ href: "#/repos/acme/web/code/docs/my%20file.md", external: false });
+		expect(linkTarget(" \u0001https://x.dev/a b\t\n", at)).toEqual({ href: "https://x.dev/a b", external: true });
+		expect(linkTarget("https://x.dev/a\tb\nc\r", at)).toEqual({ href: "https://x.dev/abc", external: true });
+		expect(linkTarget("java\nscript:alert(1)", at)).toBeNull();
+		expect(linkTarget("\u0000 javascript:alert(1)", at)).toBeNull();
+		// A file named with spaces, written in angle brackets as Markdown asks.
+		expect(parseInline("[it](<docs/my file.md>)")).toEqual([
+			{ kind: "link", href: "docs/my file.md", children: [text("it")] },
+		]);
+	});
+});
+
+describe("a hostile Markdown file", () => {
+	// Agents write a repo's Markdown, so a file may be made to stall the reader or overflow its stack. Each of these
+	// took seconds, or threw, at this size; each is read in a fraction of that now. Files over FORMAT_MOST show as
+	// their source, so that's the size to beat.
+	const size = FORMAT_MOST;
+	const repeat = (unit: string) => unit.repeat(Math.floor(size / unit.length));
+	const hostile: [string, string][] = [
+		["a fence line with a backtick at its end", "```" + "a".repeat(size) + "`"],
+		["a fence line of spaces before a backtick", "```" + " ".repeat(size) + "`"],
+		["a heading with long runs of spaces", "# a" + " ".repeat(size / 2) + "a" + " ".repeat(size / 2) + "#x"],
+		["emphasis that never closes", repeat("*a ")],
+		["underscores that never close", repeat("_a ")],
+		["strikethrough that never closes", repeat("~~a ")],
+		["brackets that never close", repeat("[a ")],
+		["brackets nested deep", "[".repeat(size / 2) + "]".repeat(size / 2)],
+		["brackets nested deep, with a reference defined", "[x]: y\n\n" + "[".repeat(size / 2) + "]".repeat(size / 2)],
+		["images nested deep", repeat("![")],
+		["link destinations whose parentheses never close", repeat("[a](()")],
+		["link titles whose parentheses never close", repeat("[a](b (")],
+		["link destinations in angle brackets that never close", repeat("[a](<")],
+		["code spans of every length", Array.from({ length: 440 }, (_, n) => "`".repeat(n + 1) + "a").join("")],
+		["a bare link followed by punctuation", "http://a" + ".".repeat(size) + "x"],
+		["a paragraph of many short lines", repeat("a \n")],
+		["a run of spaces inside a line", "a" + " ".repeat(size) + "b\nc"],
+		["a table delimiter row of spaces", "a|b\n|-" + " ".repeat(size) + "x"],
+		[
+			"a table's many columns over many short rows",
+			`${"|".repeat(8_000)}\n${"-|".repeat(8_000)}\n${repeat("x\n").slice(0, 60_000)}`,
+		],
+		["a quote's lazy lines", "> a\n" + repeat("b\n")],
+		["a list of dashes", repeat("- ") + "x"],
+		["quotes nested deep", ">".repeat(size) + " a"],
+	];
+	// The best of up to three reads, so a busy machine running other tests beside this one doesn't fail it: a reader
+	// that's quadratic again takes seconds every time.
+	for (const [name, source] of hostile)
+		it(`reads ${name} quickly`, () => {
+			let best = Infinity;
+			for (let tries = 0; tries < 3 && best >= 200; tries++) {
+				const start = performance.now();
+				parseMarkdown(source);
+				best = Math.min(best, performance.now() - start);
+			}
+			expect(best).toBeLessThan(200);
+		});
+
+	it("reads quotes and lists nested deeper than 16 as text, without running out of stack", () => {
+		const depth = (blocks: Block[]): number =>
+			Math.max(
+				0,
+				...blocks.map((block) =>
+					block.kind === "quote"
+						? 1 + depth(block.children)
+						: block.kind === "list"
+							? 1 + Math.max(0, ...block.items.map(depth))
+							: 0,
+				),
+			);
+		const quotes = parseMarkdown(">".repeat(5_000) + " deep");
+		expect(depth(quotes)).toBe(16);
+		expect(JSON.stringify(quotes)).toContain("deep");
+		expect(depth(parseMarkdown("- ".repeat(5_000) + "deep"))).toBe(16);
+		// Emphasis and links nest as far, and no further.
+		expect(() => parseInline("*".repeat(20_000) + "a" + "*".repeat(20_000))).not.toThrow();
+		expect(() => parseInline("![".repeat(5_000) + "a" + "](x)".repeat(5_000))).not.toThrow();
+		// Short of that, they nest as they're written.
+		expect(depth(parseMarkdown("> > > three"))).toBe(3);
 	});
 });
 

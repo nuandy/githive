@@ -24,6 +24,14 @@ describe("a file's language", () => {
 		expect(languageOf("", "ts")).toBe("typescript");
 		expect(languageOf("", "cobol")).toBeUndefined();
 	});
+
+	it("is never one of an object's own keys, for a fence or an extension that names one", () => {
+		for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+			expect(languageOf("", name), name).toBeUndefined();
+			expect(languageOf(`a.${name}`), name).toBeUndefined();
+			expect(tokenClass([`hljs-${name}`]), name).toBeUndefined();
+		}
+	});
 });
 
 describe("highlighted code", () => {
@@ -51,6 +59,11 @@ describe("highlighted code", () => {
 		expect(tokenClass(["hljs-number"])).toBe("text-code-literal");
 		expect(tokenClass([])).toBeUndefined();
 		expect(tokenClass(["hljs-punctuation"])).toBeUndefined();
+	});
+
+	it("colors nothing in a language named after an object's own key", async () => {
+		expect(await highlight("x", "constructor")).toBeNull();
+		expect(await highlight("x", "__proto__")).toBeNull();
 	});
 
 	it("highlights with highlight.js, loading the language it needs", async () => {

@@ -27,7 +27,15 @@ export interface LandedChange {
 	/** The merge's subject: its intent, or "Merge <change> by <agent>" for older merges without one. */
 	title: string;
 	intent?: string;
+	/** The files its merge changed: the first FILES_MOST of them, in git's order. */
 	files: string[];
+	/** How many files its merge changed: more than `files` lists when that's cut short. */
+	filesTotal: number;
+	/**
+	 * Commits that aren't landed changes (pushed with plain git, a revert) reached the branch after it. History lists
+	 * neither them nor their files, so a file it lists may have changed since. Only `branchHistory` says.
+	 */
+	unlistedSince?: true;
 	reviews: HistoryReview[];
 	/** When it landed, while the repo's landing still recalls it. */
 	at?: string;
@@ -70,14 +78,24 @@ function landedOf(commit: BranchCommit): LandedChange | null {
 		title: commit.message.split("\n")[0] ?? "",
 		...(intent ? { intent } : {}),
 		files: commit.files.slice(0, FILES_MOST),
+		filesTotal: commit.files.length,
 		reviews: [],
 	};
 }
 
-/** The changes landed on a repo's branch (its project branch by default), newest first, with their reviews. */
+/**
+ * The changes landed on a repo's branch (its project branch by default), newest first, with their reviews, each
+ * marked if commits that aren't landed changes came after it.
+ */
 export async function branchHistory(ctx: ToolContext, repo: string, branch?: string): Promise<BranchHistory> {
 	const { shown, commits } = await readHistory(ctx, repo, branch);
-	const landed = commits.flatMap((commit) => landedOf(commit) ?? []).reverse();
+	const landed: LandedChange[] = [];
+	let unlisted = false;
+	for (const commit of commits.toReversed()) {
+		const entry = landedOf(commit);
+		if (!entry) unlisted = true;
+		else landed.push(unlisted ? { ...entry, unlistedSince: true } : entry);
+	}
 	const listed = await withReviews(ctx, repo, shown, landed.slice(0, HISTORY_MOST));
 	return { branch: shown, total: landed.length, changes: listed };
 }

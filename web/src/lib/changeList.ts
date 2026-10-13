@@ -9,12 +9,21 @@ import { changeState, type ClaimState, type StateContext, type Waiting, waitingO
 type Claim = RepoSnapshot["claims"][number];
 
 /** The list's filters, as the address names them (?filter=needs-you), in the order their chips show. */
-export const CHANGE_FILTERS = ["needs-you", "in-review", "approved", "building", "landing", "all"] as const;
+export const CHANGE_FILTERS = [
+	"needs-you",
+	"needs-work",
+	"in-review",
+	"approved",
+	"building",
+	"landing",
+	"all",
+] as const;
 export type ChangeFilter = (typeof CHANGE_FILTERS)[number];
 
 /** Each filter's chip. */
 export const FILTER_WORDS: Record<ChangeFilter, string> = {
 	"needs-you": "Needs you",
+	"needs-work": "Needs work",
 	"in-review": "In review",
 	approved: "Approved",
 	building: "Building",
@@ -45,9 +54,13 @@ function listed(claim: Claim, context: StateContext): ListedChange {
 	return { claim, state: changeState(claim, context), ...(waiting ? { waiting } : {}) };
 }
 
+/** What Needs work gathers: changes sent back to their agent (changes requested, checks failed), or that it left. */
+const NEEDS_WORK: ClaimState[] = ["changes-requested", "checks-failed", "abandoned"];
+
 function inFilter(change: ListedChange, filter: ChangeFilter): boolean {
 	if (filter === "all") return true;
 	if (filter === "needs-you") return !!change.waiting;
+	if (filter === "needs-work") return NEEDS_WORK.includes(change.state);
 	return change.state === filter;
 }
 

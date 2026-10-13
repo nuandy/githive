@@ -77,6 +77,17 @@ describe("the History tab", () => {
 		expect(visibleText(files)).toContain("src/auth/login.ts test/login.test.ts");
 	});
 
+	it("counts all of a change's files, and says how many more there are than it lists", () => {
+		const wide = { ...landed.changes[0]!, filesTotal: 26 };
+		const html = renderToStaticMarkup(<History repo="acme/web" history={{ ...landed, changes: [wide] }} />);
+		expect(html).toMatch(/aria-controls="history-files-a+"[^>]*>26 files/);
+		const files = visibleText(renderToStaticMarkup(<LandedFiles repo="acme/web" landed={wide} />));
+		expect(files).toContain("src/auth/login.ts test/login.test.ts and 24 more");
+		expect(
+			visibleText(renderToStaticMarkup(<LandedFiles repo="acme/web" landed={landed.changes[0]!} />)),
+		).not.toContain("more");
+	});
+
 	it("puts the changes that landed together under one heading", () => {
 		const at = landed.changes[0]!.at!;
 		const batch = {

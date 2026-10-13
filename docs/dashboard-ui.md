@@ -49,10 +49,12 @@ variable: `fill="var(--good)"`.
 
 **Contrast** is measured, in light and dark, by `web/src/lib/theme.test.ts` (it reads `theme.css`): text at 4.5:1
 (a lamp's color on its `-soft`, on `surface-2` and `surface-3`; muted text, placeholders among it; text on a solid
-lamp; code's syntax colors on the card and `surface-2`), and what marks a control or focus at 3:1 (`input` and `border-strong` on the card and the page, `ring` on every
-surface). A new color, or a new pair that sets text on a color, goes into that test. Content that's out of play
-(a revoked agent, a resolved violation) says so in a badge at full contrast; it never fades with `opacity`. The amber
-lamp, pale on light paper, carries a ring of `warn`.
+lamp; code's syntax colors on the card and `surface-2`), and what marks a control, focus or a state at 3:1 (`input`
+and `border-strong` on the card and the page, `ring` on every surface, each `stage-*` on the card and the page). It
+follows `var()` as the page does, so a token named after another is measured too. A new color, or a new pair that
+sets text on a color, goes into that test. Content that's out of play (a revoked agent, a resolved violation) says so
+in a badge at full contrast; it never fades with `opacity`. The amber lamp, pale on light paper (2.2:1, the test's
+one accepted exception: its glyph and words say "landing" too), carries a ring of `warn`.
 
 **A change's state** has one noun, one color, one icon and one mark everywhere it shows: pills, lamps, the Hive's cells,
 strip and goal rows, the Claims map's rows and every legend. They're one table, `STATES` in `web/src/lib/status.ts`, and
@@ -143,7 +145,13 @@ Reach for `components/ui` before writing a control by hand:
 - Native `<details>` take the `disclosure` class to unfold instead of jumping open.
 - `Markdown` (`components/Markdown.tsx`, read by `lib/markdown.ts`): a Markdown file as formatted text, drawn as React
   elements. Raw HTML stays text, never markup, and a link goes only over http or https, or to a path in the repo
-  (`linkTarget`); anything else shows as its words. No `dangerouslySetInnerHTML` anywhere.
+  (`linkTarget`, which decodes a path before it resolves it); anything else shows as its words. No
+  `dangerouslySetInnerHTML` anywhere. Its headings are drawn a level down (the page has the `h1`), and task lists'
+  boxes as read-only checkboxes. Agents write the files, so the reader treats them as hostile: it reads in one pass
+  (a regular expression that can backtrack over a long run, or a scan repeated for each opener, can stall the page
+  for seconds; `markdown.test.ts` times the cases), nests quotes, lists, emphasis and links at most 16 deep, and a
+  file over `FORMAT_MOST` (100 KB) shows as its source. `Markdown` has its own error boundary: give it a `fallback`
+  (the Code tab gives the source, with a note), so a file that can't be drawn never takes the page down.
 - `useHighlighted` and `TokenLine` (`components/Highlighted.tsx`): code in its syntax colors. highlight.js's core and
   each language load only when a file in it shows (`lib/highlight.ts`); its spans are read back into tokens, never set
   as HTML.

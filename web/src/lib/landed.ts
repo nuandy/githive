@@ -4,13 +4,37 @@ import { counted } from "./plural";
 // What a branch's history (History's data: the changes landed, newest first) says beyond each change: the last one to
 // touch a file, and which landed together.
 
+/** The most files History lists for a change. */
+const FILES_LISTED = 20;
+
 /**
- * The newest landed change that touched `path`, if History lists one. It lists a change's first 20 files and the
- * branch's last 200 changes, and nothing pushed with plain git, so a file can be missing, or changed since by a commit
- * it doesn't list.
+ * Whether a change's file list is cut short: it changed more files than it lists. An older server doesn't say how
+ * many, so a list as long as one gets may be.
  */
-export function lastChangeTo(path: string, changes: LandedChange[]): LandedChange | undefined {
-	return changes.find((change) => change.files.includes(path));
+export const filesCut = (change: Pick<LandedChange, "files" | "filesTotal">) =>
+	change.filesTotal !== undefined ? change.filesTotal > change.files.length : change.files.length >= FILES_LISTED;
+
+/** The last landed change to touch a file, and why History can't be sure it's the last, if it can't. */
+export interface LastChange {
+	change: LandedChange;
+	/**
+	 * "cut": a newer change's file list is cut short, so it may have touched the file too. "unlisted": commits History
+	 * doesn't list (pushed with plain git, a revert) reached the branch since, and may have.
+	 */
+	unsure?: "cut" | "unlisted";
+}
+
+/**
+ * The newest landed change that touched `path`, if History lists one (it lists the branch's last 200), and whether
+ * History can be sure of it.
+ */
+export function lastChangeTo(path: string, changes: LandedChange[]): LastChange | undefined {
+	const at = changes.findIndex((change) => change.files.includes(path));
+	if (at < 0) return undefined;
+	const change = changes[at]!;
+	if (change.unlistedSince) return { change, unsure: "unlisted" };
+	if (changes.slice(0, at).some(filesCut)) return { change, unsure: "cut" };
+	return { change };
 }
 
 /** Changes that landed together, newest first, and when; a change that landed on its own is a batch of one. */

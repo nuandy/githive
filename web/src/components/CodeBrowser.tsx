@@ -1,12 +1,12 @@
-import { useState } from "react";
-import type { BranchHistory, LandedChange, RepoFile, RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import { type ReactNode, useState } from "react";
+import type { BranchHistory, RepoFile, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { useStagger } from "../hooks/useStagger";
 import { type ClaimHolder, holderOf, holdersFromSnapshot } from "../lib/claimsMap";
 import { languageOf } from "../lib/highlight";
-import { lastChangeTo } from "../lib/landed";
-import { isMarkdown } from "../lib/markdown";
+import { type LastChange, lastChangeTo } from "../lib/landed";
+import { FORMAT_MOST, isMarkdown } from "../lib/markdown";
 import { shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
@@ -32,6 +32,7 @@ import {
 } from "./ui/dropdown-menu";
 import { Empty } from "./ui/empty";
 import { Segmented } from "./ui/segmented";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export interface CodeApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
@@ -60,8 +61,8 @@ export interface CodeViewProps {
 	branches?: string[];
 	/** The open change that holds the path shown, if one does. */
 	holder?: ClaimHolder;
-	/** The last landed change to touch the file shown, as History has it. */
-	lastChange?: LandedChange;
+	/** The last landed change to touch the file shown, as History has it, and whether History can be sure of it. */
+	lastChange?: LastChange;
 	/** Show a Markdown file's source rather than formatted (tests set it). */
 	source?: boolean;
 }
@@ -135,7 +136,7 @@ export function CodeView({
 			</div>
 
 			{holder && clean ? <ClaimBanner path={clean} holder={holder} /> : null}
-			{lastChange ? <LastChange repo={repo} change={lastChange} /> : null}
+			{lastChange ? <LastChangeLine repo={repo} last={lastChange} /> : null}
 			<div key={phase} className={cn("min-w-0", fades)}>
 				<CodeBody
 					repo={repo}
@@ -161,7 +162,7 @@ export function CodeView({
 
 /**
  * Which branch or commit the code is shown at: a chip, or with other branches to go to, a menu of them (the project's
- * first) that sets the address's ref.
+ * first) that sets the address's ref. On a branch, a tooltip says which commit it's at.
  */
 function RefMenu({
 	repo,
@@ -182,27 +183,39 @@ function RefMenu({
 	const current = refParam ?? branch;
 	const onBranch = names.includes(current);
 	const label = onBranch ? current : shortSha(current);
-	const commit = tree ? `At commit ${shortSha(tree.commit)}` : undefined;
+	// At a commit, the chip names it already.
+	const commit = tree && onBranch ? shortSha(tree.commit) : undefined;
+	const hinted = (trigger: ReactNode) =>
+		commit ? (
+			<Tooltip>
+				<TooltipTrigger asChild>{trigger}</TooltipTrigger>
+				<TooltipContent>At commit {commit}</TooltipContent>
+			</Tooltip>
+		) : (
+			trigger
+		);
 	if (names.length < 2)
-		return (
-			<Badge outline className="font-mono text-caption leading-4.5" title={commit}>
+		return hinted(
+			<Badge outline className="font-mono text-caption leading-4.5" tabIndex={commit ? 0 : undefined}>
 				<Icon name="commit" size={14} />
 				{label}
-			</Badge>
+			</Badge>,
 		);
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger asChild>
-				<Button
-					size="sm"
-					className="font-mono text-caption font-medium data-[state=open]:bg-surface-2"
-					aria-label={`Branch: ${label}`}
-				>
-					<Icon name="commit" size={14} />
-					{label}
-					<Icon name="chevron" size={14} className="text-muted-foreground" />
-				</Button>
-			</DropdownMenuTrigger>
+			{hinted(
+				<DropdownMenuTrigger asChild>
+					<Button
+						size="sm"
+						className="font-mono text-caption font-medium data-[state=open]:bg-surface-2"
+						aria-label={`Branch: ${label}${commit ? `, at commit ${commit}` : ""}`}
+					>
+						<Icon name="commit" size={14} />
+						{label}
+						<Icon name="chevron" size={14} className="text-muted-foreground" />
+					</Button>
+				</DropdownMenuTrigger>,
+			)}
 			<DropdownMenuContent align="start">
 				<DropdownMenuLabel>Show the code on</DropdownMenuLabel>
 				<DropdownMenuRadioGroup
@@ -236,12 +249,37 @@ function ClaimBanner({ path, holder }: { path: string; holder: ClaimHolder }) {
 	);
 }
 
-/** The last landed change to touch the file, linked, with when it landed and its commit. */
-function LastChange({ repo, change }: { repo: string; change: LandedChange }) {
+/** Why History can't be sure a change was the last to touch a file. */
+const UNSURE: Record<NonNullable<LastChange["unsure"]>, string> = {
+	cut: "A newer change touched more files than History lists, so it may have changed this one since.",
+	unlisted:
+		"Commits History doesn't list (pushed with plain git, or a revert) came after it, and may have changed this file.",
+};
+
+/**
+ * The last landed change to touch the file, linked, with when it landed and its commit; hedged, with why in a tooltip,
+ * where History can't be sure it's the last.
+ */
+function LastChangeLine({ repo, last }: { repo: string; last: LastChange }) {
+	const { change, unsure } = last;
 	return (
 		<p className="m-0 text-ui text-muted-foreground">
 			<Icon name="merge" size={14} className="mr-1.5 inline -mb-px align-baseline" />
 			Last changed by <a href={href.change(repo, change.change)}>{shortTitle(change.title || change.change)}</a>
+			{unsure ? (
+				<>
+					{" ("}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<span tabIndex={0} className="underline decoration-dotted underline-offset-3">
+								as far as GitHive's history shows
+							</span>
+						</TooltipTrigger>
+						<TooltipContent>{UNSURE[unsure]}</TooltipContent>
+					</Tooltip>
+					)
+				</>
+			) : null}
 			{change.at ? <>, landed {timeAgo(change.at)}</> : null}
 			{" · "}
 			<a href={href.code(repo, "", change.commit)}>
@@ -340,7 +378,7 @@ function FolderView({ files, path, link }: { files: string[]; path: string; link
 
 /**
  * A file: its size, then its lines numbered and in their syntax colors, or a Markdown file formatted, with its source
- * a click away.
+ * a click away. A Markdown file too long to format, or one that can't be, shows its source, saying why.
  */
 function FileView({
 	repo,
@@ -376,7 +414,9 @@ function FileView({
 		);
 	const lines = file.text !== undefined ? file.text.replace(/\n$/, "").split("\n") : [];
 	const lineCount = file.text !== undefined ? `${counted(lines.length, "line")} · ` : "";
-	const formatted = isMarkdown(path) && file.text !== undefined && !file.binary && !file.tooBig;
+	const markdown = isMarkdown(path) && file.text !== undefined && !file.binary && !file.tooBig;
+	const formatted = markdown && file.text!.length <= FORMAT_MOST;
+	const dir = path.split("/").slice(0, -1).join("/");
 	return (
 		<Box asChild className="overflow-hidden">
 			<div>
@@ -404,11 +444,25 @@ function FileView({
 						className="animate-fade px-1 py-5"
 						source={file.text!}
 						repo={repo}
-						dir={path.split("/").slice(0, -1).join("/")}
+						dir={dir}
 						gitRef={refParam}
+						fallback={
+							<FileContents
+								file={file}
+								lines={lines}
+								path={path}
+								note="This file couldn't be formatted, so it's shown as its source."
+							/>
+						}
 					/>
 				) : (
-					<FileContents key="source" file={file} lines={lines} path={path} />
+					<FileContents
+						key="source"
+						file={file}
+						lines={lines}
+						path={path}
+						note={markdown && !formatted ? "This file is too long to format, so it's shown as its source." : undefined}
+					/>
 				)}
 			</div>
 		</Box>
@@ -418,30 +472,34 @@ function FileView({
 /** A line under the file's header saying why its contents aren't shown. */
 const NOT_SHOWN = "my-3.75 px-0.5 py-3 text-muted-foreground";
 
-function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; path: string }) {
+/** A file's lines, numbered and in their syntax colors, under a `note` saying why they're shown, if there's one. */
+function FileContents({ file, lines, path, note }: { file: RepoFile; lines: string[]; path: string; note?: string }) {
 	const highlighted = useHighlighted(file.binary || file.tooBig ? undefined : file.text, languageOf(path));
 	if (file.binary) return <p className={NOT_SHOWN}>This is a binary file, so it isn't shown.</p>;
 	if (file.tooBig) return <p className={NOT_SHOWN}>This file is too big to show here.</p>;
 	return (
-		<div className="max-h-[75vh] overflow-auto" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
-			<table className="w-full border-collapse font-mono text-caption leading-[1.6] [tab-size:2]">
-				<tbody>
-					{lines.map((line, index) => (
-						<tr key={index} className="transition-colors duration-fast hover:bg-surface-2">
-							<td
-								className="w-[1%] min-w-11 px-3 py-0 text-right align-top whitespace-nowrap text-muted-foreground select-none"
-								aria-hidden="true"
-							>
-								{index + 1}
-							</td>
-							<td className="px-3 py-0 whitespace-pre">
-								{highlighted?.[index]?.length ? <TokenLine tokens={highlighted[index]} /> : line || " "}
-							</td>
-						</tr>
-					))}
-				</tbody>
-			</table>
-		</div>
+		<>
+			{note ? <p className="m-0 border-b border-border px-4 py-2.5 text-ui text-muted-foreground">{note}</p> : null}
+			<div className="max-h-[75vh] overflow-auto" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
+				<table className="w-full border-collapse font-mono text-caption leading-[1.6] [tab-size:2]">
+					<tbody>
+						{lines.map((line, index) => (
+							<tr key={index} className="transition-colors duration-fast hover:bg-surface-2">
+								<td
+									className="w-[1%] min-w-11 px-3 py-0 text-right align-top whitespace-nowrap text-muted-foreground select-none"
+									aria-hidden="true"
+								>
+									{index + 1}
+								</td>
+								<td className="px-3 py-0 whitespace-pre">
+									{highlighted?.[index]?.length ? <TokenLine tokens={highlighted[index]} /> : line || " "}
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+		</>
 	);
 }
 

@@ -99,7 +99,7 @@ describe("the Code tab", () => {
 			text: "# My app\n\nSee [the stats](src/stats/page.tsx).\n",
 		};
 		const html = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} />);
-		expect(html).toMatch(/<h1 class="[^"]*">My app<\/h1>/);
+		expect(html).toMatch(/<h2 class="[^"]*">My app<\/h2>/);
 		expect(html).toContain('<a href="#/repos/acme/my-app/code/src/stats/page.tsx">the stats</a>');
 		expect(html).toMatch(
 			/<button[^>]*aria-pressed="true"[^>]*>Formatted<\/button><button[^>]*aria-pressed="false"[^>]*>Source/,
@@ -107,7 +107,16 @@ describe("the Code tab", () => {
 		expect(html).not.toContain("<table");
 		const source = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} source />);
 		expect(source).toMatch(/aria-hidden="true">1<\/td><td class="[^"]*"># My app<\/td>/);
-		expect(source).not.toContain("<h1");
+		expect(source).not.toContain("My app</h2>");
+	});
+
+	it("shows a Markdown file too long to format as its source, and says so", () => {
+		const text = `# Long\n\n${"A line of the changelog.\n".repeat(5_000)}`;
+		const long = { ref: "master", commit: "abc", path: "README.md", size: text.length, text };
+		const html = renderToStaticMarkup(<CodeView {...base} path="README.md" file={long} />);
+		expect(visibleText(html)).toContain("This file is too long to format, so it s shown as its source.");
+		expect(html).toMatch(/aria-hidden="true">1<\/td><td class="[^"]*"># Long<\/td>/);
+		expect(html).not.toContain(">Formatted<");
 	});
 
 	it("says who holds a file, and the last change to touch it", () => {
@@ -125,13 +134,15 @@ describe("the Code tab", () => {
 					conflicts: [],
 				}}
 				lastChange={{
-					commit: "c0ffee1234",
-					change: "prices",
-					agent: "devon/codex",
-					head: "h",
-					title: "Format prices",
-					files: ["src/index.ts"],
-					reviews: [],
+					change: {
+						commit: "c0ffee1234",
+						change: "prices",
+						agent: "devon/codex",
+						head: "h",
+						title: "Format prices",
+						files: ["src/index.ts"],
+						reviews: [],
+					},
 				}}
 			/>,
 		);
@@ -143,15 +154,40 @@ describe("the Code tab", () => {
 		expect(html).toMatch(/<span data-state="in-review"/);
 		expect(text).toContain("Last changed by Format prices · c0ffee1");
 		expect(html).toContain('<a href="#/repos/acme/my-app/changes/prices">Format prices</a>');
+		expect(text).not.toContain("as far as");
+	});
+
+	it("hedges the last change to a file when History can't be sure of it", () => {
+		const change = {
+			commit: "c0ffee1234",
+			change: "prices",
+			agent: "devon/codex",
+			head: "h",
+			title: "Format prices",
+			files: ["src/index.ts"],
+			reviews: [],
+		};
+		const hedged = (unsure: "cut" | "unlisted") =>
+			renderToStaticMarkup(<CodeView {...base} path="src/index.ts" lastChange={{ change, unsure }} />);
+		expect(visibleText(hedged("cut"))).toContain(
+			"Last changed by Format prices ( as far as GitHive s history shows ) · c0ffee1",
+		);
+		expect(hedged("unlisted")).toContain("as far as GitHive&#x27;s history shows");
+		// The hedge is focusable, so its reason (a tooltip) reaches the keyboard too.
+		expect(hedged("cut")).toMatch(/<span tabindex="0"[^>]*>as far as GitHive&#x27;s history shows<\/span>/);
 	});
 
 	it("switches branches from a menu where there's more than one", () => {
 		const one = renderToStaticMarkup(<CodeView {...base} path="" />);
-		expect(one).not.toContain('aria-label="Branch: master"');
+		expect(one).not.toContain('aria-haspopup="menu"');
 		const many = renderToStaticMarkup(<CodeView {...base} path="src" branches={["release/2.4"]} />);
-		expect(many).toMatch(
-			/<button[^>]*aria-label="Branch: master"[^>]*aria-haspopup="menu"|<button[^>]*aria-haspopup="menu"[^>]*aria-label="Branch: master"/,
-		);
+		const button = /<button[^>]*aria-haspopup="menu"[^>]*>/.exec(many)?.[0] ?? "";
+		// On a branch, the commit it's at: in a tooltip, and in the button's name.
+		expect(button).toContain('aria-label="Branch: master, at commit abc1234"');
+		expect(button).toContain('data-slot="tooltip-trigger"');
+		// The chip alone (one branch) has the tooltip too, reached by the keyboard.
+		const chip = /<span[^>]*data-slot="tooltip-trigger"[^>]*>/.exec(one)?.[0] ?? "";
+		expect(chip).toContain('tabindex="0"');
 		const atCommit = renderToStaticMarkup(
 			<CodeView {...base} path="src" refParam="ffee00112233" branches={["release/2.4"]} />,
 		);

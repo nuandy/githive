@@ -288,6 +288,7 @@ function noneWords(filter: ChangeFilter, query: string, branch: string): string 
 	}
 	const none: Record<ChangeFilter, string> = {
 		"needs-you": "Nothing needs you",
+		"needs-work": "Nothing needs work",
 		"in-review": "No change is in review",
 		approved: "No change is approved",
 		building: "No change is being built",
@@ -311,6 +312,7 @@ export function ChangeList({
 	now,
 	filter = "all",
 	search = "",
+	landed,
 }: {
 	snapshot: RepoSnapshot;
 	repo: string;
@@ -323,6 +325,8 @@ export function ChangeList({
 	filter?: ChangeFilter;
 	/** What the search starts with (tests set it). */
 	search?: string;
+	/** How many changes have landed on the project's branch, as History counts them, once it has. */
+	landed?: number;
 }) {
 	const project = snapshot.branch ?? "main";
 	const branch = shown ?? project;
@@ -343,6 +347,8 @@ export function ChangeList({
 			...(to === "all" ? {} : { filter: to }),
 		});
 	const audit = branch === project ? (snapshot.audit?.open ?? 0) : 0;
+	// History's count comes after the list: it fades in where there was none.
+	const countArrived = useChanged(landed !== undefined);
 	return (
 		<Box aria-labelledby="changes-title">
 			<BoxHeader>
@@ -354,13 +360,16 @@ export function ChangeList({
 					<Icon name="pull" />
 					<Bumping count={open.length} /> Open
 				</h2>
-				{snapshot.audit ? (
+				{landed !== undefined ? (
 					<a
 						href={href.repo(repo, "history")}
-						className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground"
+						className={cn(
+							"inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground",
+							countArrived && "animate-fade",
+						)}
 					>
 						<Icon name="merge" />
-						<Bumping count={snapshot.audit.merges} /> landed on {project}
+						<Bumping count={landed} /> landed on {project}
 					</a>
 				) : null}
 			</BoxHeader>
@@ -398,7 +407,7 @@ export function ChangeList({
 			{audit ? (
 				<p className="m-0 flex flex-wrap items-center gap-1.75 border-b border-border px-4 py-2.5 text-ui">
 					<Lamp state="needs-person" />
-					<a href={href.repo(repo, "audit")}>{counted(audit, "merge")} for the audit to look at</a>
+					<a href={href.repo(repo, "audit")}>{counted(audit, "open audit violation")}</a>
 				</p>
 			) : null}
 			{open.length === 0 ? (
@@ -638,8 +647,8 @@ export function AuditTab({
 				<div>
 					<strong>{openHeadline}</strong>
 					<p className="text-muted-foreground">
-						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since GitHive
-						started on it.
+						{/* The audit reads every branch changes land on, not only the project's. */}
+						{counted(audit.merges, "commit")} checked since GitHive started.
 						{audit.violations.length === 0 ? " No violations." : ""}
 					</p>
 				</div>

@@ -82,12 +82,25 @@ describe("the Changes list", () => {
 		const { counts } = changeList(claims, context, { filter: "all", query: "" });
 		expect(counts).toEqual({
 			"needs-you": 2,
+			"needs-work": 2,
 			"in-review": 2,
 			approved: 1,
 			building: 1,
 			landing: 1,
 			all: 9,
 		});
+	});
+
+	it("gathers what went back to its agent, or its agent left, under Needs work", () => {
+		expect(ids("needs-work")).toEqual(["failed", "blocked"]);
+		const left = claim("left", { head: null, active: minutesAgo(3 * 24 * 60) });
+		const listed = changeList([...claims, left], context, { filter: "needs-work", query: "" });
+		expect(listed.shown.map((each) => [each.claim.change, each.state])).toEqual([
+			["failed", "checks-failed"],
+			["blocked", "changes-requested"],
+			["left", "abandoned"],
+		]);
+		expect(parseFilter("needs-work")).toBe("needs-work");
 	});
 
 	it("searches title, change id, agent and path, every word somewhere", () => {

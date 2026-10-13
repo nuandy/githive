@@ -487,7 +487,10 @@ without minor units (JPY, KRW) are never rounded.
 
 ## Releasing
 
-\`main\` deploys on every landing. \`release/2.4\` takes backports only, with three approvals.
+\`main\` deploys on every landing. \`release/2.4\` takes backports only, with three approvals. Before a release:
+
+- [x] \`npm test\` and \`npm run e2e\` pass on \`main\`
+- [ ] The changelog names every change since the last release
 `,
 	"acme/docs": `# Acme docs
 
