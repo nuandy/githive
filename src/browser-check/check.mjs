@@ -142,6 +142,9 @@ function hostFor(options) {
 	return serveFiles(options.root);
 }
 
+/** Cloudflare's own scripts, which it adds to pages it serves (analytics under /cdn-cgi/): not the site's doing. */
+const injected = (text) => text.includes("/cdn-cgi/");
+
 const firstLine = (text) => String(text).split("\n")[0].slice(0, 300);
 
 /** Opens `url` in a new tab, recording what goes wrong on it and what it does. */
@@ -150,6 +153,7 @@ async function open(browser, url, origin) {
 	const seen = { problems: [], requests: 0, dialogs: 0, popups: 0 };
 	const own = (address) => {
 		if (!address.startsWith(origin)) return false;
+		if (injected(address)) return false;
 		// Browsers ask for /favicon.ico whether or not a page names one.
 		return new URL(address).pathname !== "/favicon.ico";
 	};
@@ -159,6 +163,7 @@ async function open(browser, url, origin) {
 		if (message.type() !== "error") return;
 		// A file that failed to load is reported once, from its response.
 		if (message.text().startsWith("Failed to load resource")) return;
+		if (injected(message.text())) return;
 		seen.problems.push(`console error: ${firstLine(message.text())}`);
 	});
 	page.on("requestfailed", (request) => {
