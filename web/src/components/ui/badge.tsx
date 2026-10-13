@@ -64,7 +64,8 @@ export function Counter({ className, ...props }: ComponentProps<"span">) {
 export type LampColor = "amber" | "green" | "red" | "neutral";
 
 const LAMP: Record<LampColor, string> = {
-	amber: "[--lamp:var(--amber)]",
+	// Amber is pale on light paper (2.2:1); a ring of the darker warn gives it an edge that shows.
+	amber: "[--lamp:var(--amber)] inset-ring inset-ring-warn dark:inset-ring-0",
 	green: "[--lamp:var(--good)]",
 	red: "[--lamp:var(--bad)]",
 	neutral: "[--lamp:var(--border-strong)]",

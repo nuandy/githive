@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils";
 // field takes the outline every focusable thing has (theme.css).
 
 const field = [
-	"min-w-0 rounded-md border border-border-strong bg-card px-2.5 py-1.5 text-foreground",
+	"min-w-0 rounded-md border border-input bg-card px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground",
 	"[font-family:inherit] [font-size:inherit] [font-weight:inherit] leading-[inherit]",
 	"transition-[border-color] duration-fast ease-out",
 	"disabled:cursor-not-allowed disabled:opacity-55",

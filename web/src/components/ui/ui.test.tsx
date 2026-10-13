@@ -72,6 +72,12 @@ describe("the building blocks", () => {
 		expect(renderToStaticMarkup(<Lamp />)).not.toContain("[--lamp:");
 	});
 
+	it("rings the amber lamp in warn on light paper, where amber alone is too pale to see", () => {
+		const amber = renderToStaticMarkup(<Lamp color="amber" />);
+		expect(amber).toContain("inset-ring-warn");
+		expect(amber).toContain("dark:inset-ring-0");
+	});
+
 	it("rules boxes and callouts", () => {
 		const html = renderToStaticMarkup(
 			<Box>
@@ -94,7 +100,7 @@ describe("the building blocks", () => {
 		expect(open).toContain("grid-rows-[1fr]");
 	});
 
-	it("draws fields in the same box", () => {
+	it("draws fields in the same box, its edge and placeholder at a contrast that shows", () => {
 		for (const html of [
 			renderToStaticMarkup(<Input defaultValue="2" />),
 			renderToStaticMarkup(<Textarea defaultValue="npm test" />),
@@ -103,8 +109,20 @@ describe("the building blocks", () => {
 					<option value="a">A</option>
 				</NativeSelect>,
 			),
-		])
-			expect(html).toContain("border-border-strong");
+		]) {
+			expect(html).toContain("border-input");
+			expect(html).toContain("placeholder:text-muted-foreground");
+		}
+	});
+
+	it("edges every control in the input's color", () => {
+		expect(renderToStaticMarkup(<Button>Save</Button>)).toContain("border-input");
+		expect(renderToStaticMarkup(<Button variant="danger">Delete</Button>)).toContain("border-input");
+		const segmented = renderToStaticMarkup(
+			<Segmented label="View" options={[{ value: "a", words: "A" }]} value="a" onPick={() => undefined} />,
+		);
+		expect(segmented).toMatch(/data-slot="segmented"[^>]*border-input/);
+		expect(renderToStaticMarkup(<ThemeMenu />)).toContain("border-input");
 	});
 
 	it("doesn't clip a focused choice's ring", () => {

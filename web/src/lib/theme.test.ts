@@ -102,34 +102,67 @@ describe("the theme", () => {
 	});
 });
 
-// Text on a solid status fill (Merge, a solid badge, the inbox count) takes that fill's -foreground, which must read
-// on it in each scheme. A scheme that doesn't set a value inherits :root's.
-describe("text on a solid status color", () => {
-	const block = (selector: string) => {
-		const start = css.indexOf(`\n${selector} {`);
-		return css.slice(start, css.indexOf("}", start));
-	};
-	const declared = (selector: string, name: string) =>
-		block(selector).match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1];
-	const value = (selector: string, name: string) => declared(selector, name) ?? declared(":root", name);
-	const luminance = (hex: string) => {
-		const [r, g, b] = [1, 3, 5]
-			.map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-			.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-		return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-	};
-	const contrast = (a: string, b: string) => {
-		const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-		return (light! + 0.05) / (dark! + 0.05);
-	};
+// What theme.css says, scheme by scheme: a scheme that doesn't set a value inherits :root's.
+const block = (selector: string) => {
+	const start = css.indexOf(`\n${selector} {`);
+	return css.slice(start, css.indexOf("}", start));
+};
+const declared = (selector: string, name: string) =>
+	block(selector).match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1];
+const value = (selector: string, name: string) => declared(selector, name) ?? declared(":root", name);
+const luminance = (hex: string) => {
+	const [r, g, b] = [1, 3, 5]
+		.map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+		.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+	return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+};
+const contrast = (a: string, b: string) => {
+	const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (light! + 0.05) / (dark! + 0.05);
+};
+const SCHEMES = [":root", ".dark"];
 
-	for (const scheme of [":root", ".dark"])
-		for (const tone of ["good", "bad", "warn", "needs"])
-			it(`reads at 4.5:1 or more: ${tone}, ${scheme}`, () => {
-				const fill = value(scheme, tone);
-				const text = value(scheme, `${tone}-foreground`);
-				expect(fill).toBeDefined();
-				expect(text, `--${tone}-foreground`).toBeDefined();
-				expect(contrast(fill!, text!)).toBeGreaterThanOrEqual(4.5);
+/** Asserts `fore` reads on each of `backs` at `least`, in every scheme. */
+function reads(fore: string, backs: string[], least: number) {
+	for (const scheme of SCHEMES)
+		for (const back of backs)
+			it(`${fore} on ${back}, ${scheme}: ${least}:1 or more`, () => {
+				const [a, b] = [value(scheme, fore), value(scheme, back)];
+				expect(a, `--${fore}`).toBeDefined();
+				expect(b, `--${back}`).toBeDefined();
+				expect(contrast(a!, b!)).toBeGreaterThanOrEqual(least);
 			});
+}
+
+// Text on a solid status fill (Merge, a solid badge, the inbox count) takes that fill's -foreground, which must read
+// on it in each scheme.
+describe("text on a solid status color", () => {
+	for (const tone of ["good", "bad", "warn", "needs"]) reads(`${tone}-foreground`, [tone], 4.5);
+});
+
+// A status in words (a soft pill, a step, a banner) sits on its own tint, or on the muted surfaces rows and boxes use.
+describe("status text", () => {
+	for (const tone of ["good", "bad", "warn", "needs", "neutral"])
+		reads(tone, [`${tone}-soft`, "surface-2", "surface-3", "card", "background"], 4.5);
+	reads("link", ["link-soft", "surface-2", "surface-3", "card", "background"], 4.5);
+});
+
+// Muted words, placeholders among them, read wherever they're set.
+describe("muted text", () => {
+	reads("muted-foreground", ["card", "background", "surface-2", "surface-3"], 4.5);
+});
+
+// What says where a control is, or which one has focus, stands out from the paper around it (WCAG 1.4.11).
+describe("edges and the focus ring", () => {
+	reads("input", ["card", "background"], 3);
+	reads("border-strong", ["card", "background"], 3);
+	reads("ring", ["card", "background", "surface-2", "surface-3", "link-soft"], 3);
+});
+
+// A hovered or highlighted item's surface shows on the muted surfaces too, not only on the card.
+describe("the hover surface", () => {
+	it("is surface-3, a step under surface-2", () => {
+		expect(block(":root")).toMatch(/--accent:\s*var\(--surface-3\);/);
+		expect(block(".dark")).not.toMatch(/--accent:/);
+	});
 });

@@ -68,14 +68,15 @@
 	--muted-foreground: #56636b;
 	--secondary: #eef0ee;
 	--secondary-foreground: var(--foreground);
-	/* shadcn's accent: the surface under a hovered or highlighted item. */
-	--accent: #eef0ee;
+	/* shadcn's accent: the surface under a hovered or highlighted item, a step under the muted ones so it shows on them. */
+	--accent: var(--surface-3);
 	--accent-foreground: var(--foreground);
 	--surface-2: #eef0ee;
 	--surface-3: #e3e7e5;
 	--border: #d3d9d6;
-	--border-strong: #b7c0bc;
-	--input: #b7c0bc;
+	/* A control's edge (a field, a button) and a strong rule: 3:1 on the card and the page, so they're seen. */
+	--border-strong: #858f8b;
+	--input: #858f8b;
 
 	/* A primary action's ink fill. */
 	--primary: #1e2b33;
@@ -85,14 +86,15 @@
 	--link-soft: #e3ecf1;
 	--ring: #23506e;
 
-	/* The lamps. --amber is the lamp itself (the logo's honey); --warn is amber dark enough for text. */
+	/* The lamps. --amber is the lamp itself (the logo's honey); --warn is amber dark enough for text. A lamp's color
+	   as text reads at 4.5:1 on its -soft, on surface-2 and on surface-3 (lib/theme.test.ts). */
 	--amber: #e59a0b;
 	--amber-soft: #fbf0d9;
-	--good: #2e7d5b;
+	--good: #276b4e;
 	--good-soft: #e1efe8;
 	--warn: #8f5800;
 	--warn-soft: #fbf0d9;
-	--bad: #c03a2b;
+	--bad: #b03426;
 	--bad-soft: #f8e4e1;
 	--needs: #b13527;
 	--needs-soft: #f8e4e1;
@@ -150,12 +152,11 @@
 	--muted: #1d282f;
 	--muted-foreground: #9aa8a6;
 	--secondary: #1d282f;
-	--accent: #1d282f;
 	--surface-2: #1d282f;
 	--surface-3: #24313a;
 	--border: #2c3a41;
-	--border-strong: #3d4d55;
-	--input: #3d4d55;
+	--border-strong: #66777f;
+	--input: #66777f;
 
 	--primary: #e4e9e7;
 	--primary-foreground: #121a1f;
@@ -169,9 +170,9 @@
 	--good-soft: #15302a;
 	--warn: #f2b13a;
 	--warn-soft: #33270f;
-	--bad: #e5604f;
+	--bad: #ef7563;
 	--bad-soft: #3a1d1a;
-	--needs: #e5604f;
+	--needs: #ef7563;
 	--needs-soft: #3a1d1a;
 	--neutral: #9aa8a6;
 	--neutral-soft: #232f35;

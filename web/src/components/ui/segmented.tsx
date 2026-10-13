@@ -23,7 +23,7 @@ export function Segmented<T extends string | number>({
 			data-slot="segmented"
 			role="group"
 			aria-label={label}
-			className={cn("inline-flex rounded-md border border-border-strong", className)}
+			className={cn("inline-flex rounded-md border border-input", className)}
 			{...props}
 		>
 			{options.map((option) => (

@@ -16,7 +16,7 @@ export interface Crumb {
 
 // The bar's links to Inbox, Agents and Admin: round-ended pills, as tall as the theme and user menus beside them.
 const pill = cn(
-	"inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1",
+	"inline-flex shrink-0 items-center gap-1.5 rounded-full border border-input px-2.5 py-1",
 	"text-ui font-medium text-foreground transition-colors duration-fast hover:bg-surface-2 hover:no-underline",
 	"aria-[current=page]:border-link aria-[current=page]:text-link",
 );
@@ -50,7 +50,7 @@ export function UserMenu({
 			<DropdownMenuTrigger
 				aria-label={`Signed in as ${me.handle}`}
 				className={cn(
-					"inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-border bg-transparent",
+					"inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-input bg-transparent",
 					"py-0.75 pr-2.5 pl-0.75 to-560:pr-0.75",
 					"[font-family:inherit] text-ui leading-[inherit] font-medium text-foreground",
 					"transition-colors duration-fast hover:bg-surface-2 data-[state=open]:bg-surface-2",

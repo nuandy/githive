@@ -19,12 +19,12 @@ export const buttonVariants = cva(
 	{
 		variants: {
 			variant: {
-				default: "border-border-strong bg-card text-foreground hover:not-disabled:bg-surface-2",
+				default: "border-input bg-card text-foreground hover:not-disabled:bg-surface-2",
 				primary:
 					"border-primary bg-primary text-primary-foreground hover:not-disabled:bg-[color-mix(in_srgb,var(--primary)_90%,#000)]",
 				go: "border-good bg-good text-good-foreground hover:not-disabled:bg-[color-mix(in_srgb,var(--good)_88%,#000)]",
 				danger:
-					"border-border-strong bg-card text-bad hover:not-disabled:border-bad hover:not-disabled:bg-bad hover:not-disabled:text-bad-foreground",
+					"border-input bg-card text-bad hover:not-disabled:border-bad hover:not-disabled:bg-bad hover:not-disabled:text-bad-foreground",
 				ghost: "border-transparent bg-transparent text-foreground hover:not-disabled:bg-surface-2",
 				link: "border-0 bg-transparent font-normal text-link hover:not-disabled:underline",
 			},
