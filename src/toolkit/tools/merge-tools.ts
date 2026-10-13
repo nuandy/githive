@@ -71,6 +71,7 @@ export const mergeTools: ToolHandlers = {
 			change,
 			agent: agentArg("agent"),
 		});
+		if (outcome.ok) await releaseLanded(call, change, outcome.commit);
 		// The hive sees a merge refused for a conflict, naming its files: once for each head (see RepoCache.ping).
 		if (!outcome.ok && outcome.conflicts?.length)
 			await ctx
@@ -129,6 +130,20 @@ async function reviewWithinLimit(call: ToolCall, key: string, reviewer: string) 
 	if (!refused) return;
 	await ctx.reviews?.release(repo, key, reviewer, true).catch(() => undefined);
 	fail(403, refused);
+}
+
+/**
+ * Releases a landed change's claim if it's still held. A batch releases its changes' claims after handing the lease
+ * on; if that's cut short (an object dropped mid-call), the claim stays, and changes that land after it wait on it
+ * forever. Asking to merge a change that has landed finishes the job instead.
+ */
+async function releaseLanded(call: ToolCall, change: string, commit: string) {
+	const { store, stamper } = call;
+	const held = (await store.readChange(change).catch(() => null))?.claim;
+	if (!held) return;
+	await store
+		.release({ change, agent: held.agent, reason: "merged", mergedAs: commit }, stamper)
+		.catch((err) => console.error(`releasing ${change} after it landed failed`, String(err)));
 }
 
 /** The caller's latest rejection of an earlier commit of the change it's about to review, if any. */

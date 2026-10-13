@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/toolkit/claim-store";
@@ -5,18 +8,23 @@ import type { Registry } from "../src/toolkit/claims";
 import { giveBackPartClaim, withoutLeftovers } from "../src/toolkit/tools/claim-leftovers";
 import type { ToolCall } from "../src/toolkit/tools/context";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { shardingToolCalls } from "./helpers/tool-calls";
+import { shardingToolCalls, toolCalls } from "./helpers/tool-calls";
+import { memoryLanding } from "../src/toolkit/landing";
+import { pushChange } from "./helpers/agents";
 
 // A demo run's first minute: thirteen agents claim their pieces at once, and the claims spread over records as the
 // eighth arrives. Each agent then asks status about its change, as GitHive's agents do on their next turn. A claim
 // that was made must read as made, and a claim that was refused must leave nothing behind.
 
 let server: GitServer;
+let work: string;
 beforeEach(async () => {
 	server = await startGitServer();
+	work = mkdtempSync(join(tmpdir(), "githive-claims-"));
 });
 afterEach(async () => {
 	await server.close();
+	rmSync(work, { recursive: true, force: true });
 });
 
 const PIECES = ["board", "game", "help", "input", "message", "progress", "puzzle", "scoring", "share"];
@@ -110,5 +118,27 @@ describe("an agent's own open changes", { timeout: 60_000 }, () => {
 		expect(await call("reviews", { agent: "agent-a" })).toMatchObject({ yours: [{ change: "c-1", pushed: false }] });
 		// Another agent's lists don't carry it.
 		expect(await call("backlog", { agent: "agent-b" })).not.toHaveProperty("yours");
+	});
+});
+
+describe("a change that landed while its claim stayed", { timeout: 60_000 }, () => {
+	it("has its claim released, as merged, when merge is asked again", async () => {
+		const landing = memoryLanding();
+		const { call, register, approve } = toolCalls(() => server, { landing: () => landing });
+		await call("settings", { required: 1 });
+		await register("author", "reviewer");
+		const claim = { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" };
+		await call("claim", claim, "author");
+		const head = await pushChange(server.url, work, "author", "c-1", { "src/c/x.js": "x\n" });
+		await approve(head);
+		const landed = await call("merge", { change: "c-1", agent: "author" }, "author");
+		expect(landed).toMatchObject({ ok: true });
+		// The claim back, as a release cut short after the landing would leave it.
+		await call("claim", claim, "author");
+		expect((await call("status", { change: "c-1" }, "author")).claim).toMatchObject({ agent: "author" });
+		expect(await call("merge", { change: "c-1", agent: "author" }, "author")).toMatchObject({ ok: true });
+		const after = await call("status", { change: "c-1" }, "author");
+		expect(after.claim).toBeNull();
+		expect(after.released).toMatchObject({ reason: "merged", mergedAs: landed.commit });
 	});
 });
