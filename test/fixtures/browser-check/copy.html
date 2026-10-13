@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+	<body>
+		<p id="message"></p>
+		<button id="share">Share</button>
+		<button id="silent">Copy link</button>
+		<script>
+			const message = document.getElementById("message");
+			document.getElementById("share").onclick = async () => {
+				await navigator.clipboard.writeText("Honeycomb");
+				message.textContent = "Copied";
+			};
+			document.getElementById("silent").onclick = () => navigator.clipboard.writeText("https://example.com");
+		</script>
+	</body>
+</html>

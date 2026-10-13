@@ -67,6 +67,14 @@ describe.skipIf(!CHROME)("the browser check in Chromium", { timeout: 150_000 }, 
 		});
 	});
 
+	it("lets a page copy on a click, as a person's browser does, and still fails a copy nothing shows", async () => {
+		const { code, output } = await check("--page", "/copy.html");
+		expect(code).toBe(1);
+		expect(output.split("\n").filter((line) => line.startsWith("- "))).toEqual([
+			expect.stringMatching(/^- \/copy\.html: clicking button#silent "Copy link" changed nothing on the page/),
+		]);
+	});
+
 	it("says what's wrong with its options", async () => {
 		expect(await check("--start", "npm run dev")).toEqual({
 			code: 2,

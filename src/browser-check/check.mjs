@@ -324,6 +324,11 @@ async function main() {
 		headless: true,
 		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
 	});
+	// As a person's browser allows a page to copy on a click. Headless Chromium otherwise refuses some runs and not
+	// others, which would make a Copy or Share button pass or fail by chance.
+	await browser
+		.defaultBrowserContext()
+		.overridePermissions(origin, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
 	const problems = [];
 	let clickables = 0;
 	try {
