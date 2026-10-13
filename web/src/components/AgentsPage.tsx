@@ -227,9 +227,33 @@ function AgentList({
 	const live = agents.filter((agent) => !agent.revokedAt);
 	const revoked = agents.filter((agent) => agent.revokedAt);
 	return (
-		<ul className={cn(ROWS, staggers && "stagger")}>
-			{[...live, ...revoked].map((agent) => agentRow(agent, arrived(agent.id)))}
-		</ul>
+		<>
+			{live.length ? (
+				<ul className={cn(ROWS, staggers && "stagger")}>{live.map((agent) => agentRow(agent, arrived(agent.id)))}</ul>
+			) : (
+				<p className={LINE}>No active agents. Name one above, or bring back a revoked one.</p>
+			)}
+			{revoked.length ? <RevokedAgents agents={revoked} row={(agent) => agentRow(agent, arrived(agent.id))} /> : null}
+		</>
+	);
+}
+
+/**
+ * Revoked agents, folded away under the active ones. They're kept, not deleted: an agent's name is its identity in
+ * the repos' records, and naming one again brings the same agent back, with new tokens.
+ */
+function RevokedAgents({ agents, row }: { agents: MyAgent[]; row: (agent: MyAgent) => React.ReactNode }) {
+	return (
+		<details className="disclosure mt-3">
+			{/* The browser's disclosure triangle, written out. */}
+			<summary className="list-item cursor-pointer list-inside list-[disclosure-closed] text-meta text-muted-foreground [[open]>&]:list-[disclosure-open]">
+				Revoked ({agents.length})
+			</summary>
+			<p className="mt-2 mb-0 text-meta text-muted-foreground">
+				Name one of these again above to bring it back, with new tokens; its work stays under its name.
+			</p>
+			<ul className={ROWS}>{agents.map(row)}</ul>
+		</details>
 	);
 }
 

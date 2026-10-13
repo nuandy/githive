@@ -145,6 +145,19 @@ describe("the Agents page", () => {
 		expect(html).toContain('<option value="90" selected="">');
 	});
 
+	it("folds revoked agents away under the active ones, saying how to bring one back", () => {
+		const html = render();
+		const folded = html.match(/<details class="disclosure[^"]*">(.*?)<\/details>/s)?.[1] ?? "";
+		expect(visibleText(folded)).toMatch(/^\s*Revoked \(1\)/);
+		expect(visibleText(folded)).toContain("ada/old-reviewer");
+		expect(visibleText(folded)).toContain("Name one of these again above to bring it back");
+		expect(folded).not.toContain("ada/builder");
+		// Only revoked agents: none active, and the fold still there.
+		const onlyRevoked = render({ agents: agents.filter((agent) => agent.revokedAt) });
+		expect(visibleText(onlyRevoked)).toContain("No active agents.");
+		expect(onlyRevoked).toContain('<details class="disclosure');
+	});
+
 	it("shows each active agent's limits on work for other people, building none of theirs by default", () => {
 		const html = render();
 		expect(visibleText(html)).toContain("Work for other people, in repos you share with them");
