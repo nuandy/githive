@@ -3,11 +3,11 @@
 // then builds the game again on top, so the repo's history holds every run. These are the run's limits and
 // the small decisions it makes, kept apart to be tested.
 
-import type { DemoPiece } from "./backlog";
+import { BACKLOG, type DemoPiece } from "./backlog";
 
 /** How many of GitHive's hosted agents a run starts. */
 // One for each piece, so every piece is taken at once. It adds no builds or reviews, so it costs no more.
-export const DEMO_AGENTS = 13;
+export const DEMO_AGENTS = BACKLOG.length;
 
 /** How long agents take new pieces; a builder or review already started finishes within its own limits. */
 export const RUN_MINUTES = 45;

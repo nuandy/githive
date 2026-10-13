@@ -55,7 +55,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 					Watch a hive build Honeycomb (Demo Game)
 				</h2>
 				<p className="m-0 text-muted-foreground">
-					Thirteen of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
+					Eleven of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
 					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
 					it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game when it's done.
 				</p>
@@ -157,7 +157,7 @@ export function DemoBanner({
 	if (!run.data) return null;
 	return (
 		<p className={cn(calloutVariants(), "m-0 animate-appear")} role="status">
-			{runWords(run.data)} Thirteen of GitHive's agents, each named for a job in a hive, work on their own: they review
+			{runWords(run.data)} Eleven of GitHive's agents, each named for a job in a hive, work on their own: they review
 			one another's changes and take pieces of the backlog, and nothing assigns the work.{" "}
 			{gameLanded(run.data) ? <PlayLink repo={repo} /> : null}
 		</p>

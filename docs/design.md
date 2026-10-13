@@ -1490,12 +1490,14 @@ demo's pieces out of the backlog. Then it puts the starting files back as a
 change of `githive-demo`'s, `reset-<n>`, claiming every top-level path. Those
 are files the repo began with, so the reset needs no review or checks: the run
 sets the approvals required and the checks to none, merges the reset, and puts
-both back. Only then do its thirteen hosted agents start, for 45 minutes, so
-every piece they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`)
-go into the backlog with the run's number in their ids (`board-3`), since a
-piece's id is the change that builds it and an earlier run's merge would count
-it as done. The repo's Hive tab shows how the run is going. Any signed-in person
-may start one, since a run spends a bounded amount: one run goes at a time, 100
+both back. Only then do its hosted agents start, one for each of the run's 11
+pieces (`src/demo/backlog.ts`), for 45 minutes, so every piece they build is
+reviewed. Until 14 Oct there were 13: yesterday's answers and the share button
+came out, since a demo has to be quick to watch. The pieces go into the
+backlog with the run's number in their ids (`board-3`), since a piece's id is
+the change that builds it and an earlier run's merge would count it as done.
+The repo's Hive tab shows how the run is going. Any signed-in person may start
+one, since a run spends a bounded amount: one run goes at a time, 100
 a day across everyone, held by the `DemoRun` registry. A run stopped before its
 reset lands gives the repo its approvals back. The request for a run only takes
 the registry's running slot and begins the run; the run's own object sets the
