@@ -64,6 +64,29 @@ describe("hash routes", () => {
 		expect(parseRoute(href.org("acme"))).toEqual({ page: "org", org: "acme" });
 	});
 
+	it("keeps the Changes list's filter in the address, beside its branch", () => {
+		expect(parseRoute("#/repos/acme/web/changes?filter=needs-you")).toEqual({
+			page: "repo",
+			repo: "acme/web",
+			tab: "changes",
+			filter: "needs-you",
+		});
+		expect(parseRoute("#/repos/acme/web/changes?branch=next&filter=landing")).toMatchObject({
+			branch: "next",
+			filter: "landing",
+		});
+		expect(href.changes("acme/web", { filter: "needs-you" })).toBe("#/repos/acme/web/changes?filter=needs-you");
+		expect(href.changes("acme/web", { branch: "release/2.4", filter: "in-review" })).toBe(
+			"#/repos/acme/web/changes?branch=release%2F2.4&filter=in-review",
+		);
+		expect(href.changes("acme/web", {})).toBe(href.repo("acme/web", "changes"));
+		expect(parseRoute(href.changes("acme/web", { branch: "a b", filter: "approved" }))).toMatchObject({
+			tab: "changes",
+			branch: "a b",
+			filter: "approved",
+		});
+	});
+
 	it("puts files in the Code tab's path, encoded per segment", () => {
 		expect(href.code("acme/web")).toBe("#/repos/acme/web/code");
 		expect(href.code("acme/web", "src/a b.ts")).toBe("#/repos/acme/web/code/src/a%20b.ts");

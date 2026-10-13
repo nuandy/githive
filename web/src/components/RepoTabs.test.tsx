@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { historyFixture, repoSnapshot as snapshot, stubApi, visibleText } from "../test/fixtures";
+import { ago, historyFixture, repoSnapshot as snapshot, stubApi, visibleText } from "../test/fixtures";
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
 import { RepoPage } from "./RepoPage";
 
@@ -120,18 +120,19 @@ describe("a repo", () => {
 			<ChangeList snapshot={{ ...snapshot, claims }} repo="acme/docs-site" now={now} />,
 		);
 		const rows = html.split("<li ").slice(1);
+		// Each as soon as the others (all in review, active as long ago), so in the order of their ids.
 		expect(rows.map((row) => row.match(/<span class="font-mono text-caption">([^<]+)<\/span>/)?.[1])).toEqual([
-			"c-3",
-			"c-2",
 			"c-1",
+			"c-2",
+			"c-3",
 		]);
-		expect(rows[2]).toMatch(
+		expect(rows[0]).toMatch(
 			/class="(?![^"]*\btext-warn\b)[^"]*" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
 		);
 		// Past its time, anyone may take it: said in the warning tone.
 		expect(rows[1]).toMatch(/class="[^"]*\btext-warn\b[^"]*"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
 		// Waiting on review, it never frees: the list says nothing, the change's page says why.
-		expect(rows[0]).not.toMatch(/[Ff]ree (after|since)/);
+		expect(rows[2]).not.toMatch(/[Ff]ree (after|since)/);
 	});
 
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
@@ -193,5 +194,77 @@ describe("a repo", () => {
 		expect(html).toContain('href="#/repos/acme/docs-site/audit"');
 		expect(html).toMatch(/aria-current="page"[^>]*>.*Audit/);
 		for (const tab of ["Changes", "Settings"]) expect(html).toContain(`<span>${tab}</span>`);
+	});
+});
+
+describe("the Changes list", () => {
+	type Claim = (typeof snapshot.claims)[number];
+	const make = (change: string, over: Partial<Claim> = {}): Claim => ({
+		...snapshot.claims[0]!,
+		change,
+		agent: `agent-${change}`,
+		paths: [`src/${change}/`],
+		intent: `Do ${change}`,
+		hosted: undefined,
+		approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
+		head: `${change}-head`,
+		...over,
+	});
+	const claims = [
+		make("review", { active: ago(3) }),
+		make("asks", { attention: { reason: "which cache?", agent: "agent-asks", at: ago(1) } }),
+		make("ready", { approval: { approved: true, approvals: 1, required: 1, vetoedBy: [] } }),
+		make("backport", { into: "release/2.4" }),
+	];
+	const repo = { ...snapshot, branch: "main", claims, votes: [] };
+
+	it("leads with filter chips that count, and lists what needs action first", () => {
+		const html = renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" />);
+		const chips = visibleText(/<nav aria-label="Show changes"[^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "");
+		expect(chips).toBe(" Needs you 1 In review 1 Approved 1 Building 0 Landing 0 All 3 ");
+		expect(html).toContain('href="#/repos/acme/web/changes?filter=needs-you"');
+		// All is the list as it is, and the one shown.
+		expect(html).toMatch(/<a href="#\/repos\/acme\/web\/changes" aria-current="true"[^>]*>All/);
+		const titles = [...html.matchAll(/text-body font-semibold[^>]*>([^<]+)</g)].map((match) => match[1]);
+		expect(titles).toEqual(["Do asks", "Do ready", "Do review"]);
+		expect(visibleText(html)).toContain("active 3m ago");
+		// What's landed links to the History tab.
+		expect(html).toMatch(/<a href="#\/repos\/acme\/web\/history"[^>]*>.*3<\/span> landed on main<\/a>/);
+		// The audit's open violations, as needsYou counts them, lead to the Audit tab.
+		expect(visibleText(html)).toContain("1 merge for the audit to look at");
+		expect(html).toContain('<p data-slot="announcer"');
+	});
+
+	it("narrows to a filter, keeps the branch in its chips' links, and searches", () => {
+		const needs = renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" filter="needs-you" />);
+		expect([...needs.matchAll(/text-body font-semibold[^>]*>([^<]+)</g)].map((match) => match[1])).toEqual(["Do asks"]);
+		const release = renderToStaticMarkup(
+			<ChangeList snapshot={repo} repo="acme/web" shown="release/2.4" filter="approved" />,
+		);
+		expect(release).toContain('href="#/repos/acme/web/changes?branch=release%2F2.4&amp;filter=needs-you"');
+		expect(visibleText(release)).toContain("No change is approved on release/2.4. Show all 1");
+		const found = renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" search="src/ready" />);
+		expect([...found.matchAll(/text-body font-semibold[^>]*>([^<]+)</g)].map((match) => match[1])).toEqual([
+			"Do ready",
+		]);
+		const none = renderToStaticMarkup(
+			<ChangeList snapshot={repo} repo="acme/web" shown="main" filter="needs-you" search="zzz" />,
+		);
+		expect(visibleText(none)).toContain("No change on main matches “zzz” under Needs you. Show all 0 Clear the search");
+	});
+
+	it("counts the shown branch's open changes on its tab", () => {
+		const tab = (view: Parameters<typeof RepoPage>[0]["view"]) =>
+			renderToStaticMarkup(
+				<RepoPage
+					repo="acme/web"
+					view={view}
+					snapshot={{ ...repo, branches: [{ name: "release/2.4", base: "b", at: "" }] }}
+					api={stubApi()}
+				/>,
+			).match(/<span>Changes<\/span>.*?data-slot="counter"[^>]*>(\d+)</)?.[1];
+		expect(tab({ kind: "repo", tab: "changes" })).toBe("3");
+		expect(tab({ kind: "repo", tab: "changes", branch: "release/2.4" })).toBe("1");
+		expect(tab({ kind: "repo", tab: "audit" })).toBe("3");
 	});
 });

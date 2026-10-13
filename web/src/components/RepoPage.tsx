@@ -22,6 +22,7 @@ import { GitHubLink } from "./GitHubLink";
 import { GitHubSettings } from "./GitHubSettings";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
+import { openOn, parseFilter } from "../lib/changeList";
 import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
@@ -64,6 +65,7 @@ export type RepoView =
 			/** Code tab */ path?: string;
 			ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+			/** Changes tab: the list's filter (see changeList.ts), when not all. */ filter?: string;
 	  }
 	| { kind: "change"; change: string; tab: ChangeTab };
 
@@ -298,6 +300,7 @@ function RepoTabContent({
 			repo={repo}
 			branch={branch}
 			asked={view.branch || undefined}
+			filter={view.kind === "repo" ? view.filter : undefined}
 			snapshot={snapshot}
 			api={api}
 			canWrite={canWrite(access?.level)}
@@ -307,13 +310,14 @@ function RepoTabContent({
 }
 
 /**
- * The Changes tab: a branch's overview, then its open changes. Both read one landing, so a change being checked to
- * land says so in each.
+ * The Changes tab: which branch it shows, then that branch's open changes, read with what's landing on it, so a
+ * change being checked to land says so.
  */
 function ChangesTab({
 	repo,
 	branch,
 	asked,
+	filter,
 	snapshot,
 	api,
 	canWrite,
@@ -323,13 +327,14 @@ function ChangesTab({
 	branch: string;
 	/** The branch the address asks for. */
 	asked: string | undefined;
+	/** The list's filter the address asks for. */
+	filter: string | undefined;
 	snapshot: RepoSnapshot;
 	api: RepoPageProps["api"];
 	canWrite: boolean;
 	onBranchMade?: () => void;
 }) {
-	// The branch asked for, when the repo has it; else the project's.
-	const shown = asked && (snapshot.branches ?? []).some((known) => known.name === asked) ? asked : branch;
+	const shown = shownBranch(snapshot, { kind: "repo", tab: "changes", ...(asked ? { branch: asked } : {}) }, branch);
 	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	return (
 		<>
@@ -341,9 +346,14 @@ function ChangesTab({
 				api={api}
 				canWrite={canWrite}
 				onBranchMade={onBranchMade}
+			/>
+			<ChangeList
+				snapshot={snapshot}
+				repo={repo}
+				shown={shown}
+				filter={parseFilter(filter)}
 				{...(landing.data ? { landing: landing.data } : {})}
 			/>
-			<ChangeList snapshot={snapshot} repo={repo} shown={shown} {...(landing.data ? { landing: landing.data } : {})} />
 		</>
 	);
 }
@@ -358,6 +368,12 @@ function AllLandedBadge({ stretch }: { stretch: LandingStretch }) {
 			✓ All landed
 		</span>
 	);
+}
+
+/** The branch the Changes tab shows: the one the address asks for, when the repo has it; else the project's. */
+function shownBranch(snapshot: RepoSnapshot, view: RepoView, branch: string): string {
+	const asked = view.kind === "repo" && view.tab === "changes" ? view.branch : undefined;
+	return asked && (snapshot.branches ?? []).some((known) => known.name === asked) ? asked : branch;
 }
 
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
@@ -383,7 +399,14 @@ export function RepoPage({
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
 	const tabs: TabItem[] = [
 		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
-		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo, "changes"), count: snapshot?.claims.length },
+		{
+			id: "changes",
+			label: "Changes",
+			icon: "pull",
+			href: href.repo(repo, "changes"),
+			// The branch the Changes tab shows: the one the address asks for, when the repo has it, else the project's.
+			count: snapshot ? openOn(snapshot, shownBranch(snapshot, view, branch)).length : undefined,
+		},
 		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },

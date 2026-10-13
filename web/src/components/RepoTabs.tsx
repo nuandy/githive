@@ -1,9 +1,19 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { RepoAudit, RepoLanding, RepoSnapshot } from "../api";
+import { useAnnouncer } from "../hooks/useAnnouncer";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { identityName } from "../lib/agent";
+import {
+	activeWords,
+	arrivalWords,
+	CHANGE_FILTERS,
+	type ChangeFilter,
+	changeList,
+	FILTER_WORDS,
+	openOn,
+} from "../lib/changeList";
 import type { Tone } from "../lib/changeStatus";
 import {
 	claimAgent,
@@ -20,15 +30,18 @@ import {
 import { leaseWords } from "../lib/lease";
 import { shortSha, briefPaths } from "../lib/model";
 import { counted } from "../lib/plural";
-import { shortAge, timeAgo } from "../lib/relativeTime";
+import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
 import { LoadError } from "./LoadError";
 import { StatusIcon, StatusPill, TONE_TEXT } from "./StatusPill";
-import { Badge, Counter } from "./ui/badge";
+import { Announcer } from "./ui/announcer";
+import { Badge, Counter, Lamp } from "./ui/badge";
 import { Box, BoxBody, BoxHeader, Callout } from "./ui/box";
+import { Button } from "./ui/button";
 import { Empty } from "./ui/empty";
+import { Input } from "./ui/field";
 import { TERMS } from "./ui/manage";
 
 export { ChangePage, type ChangePageProps } from "./ChangePage";
@@ -168,11 +181,11 @@ function ChangeRow({
 				<Approvals claim={claim} />
 				{claim.head ? <code className="text-muted-foreground">{shortSha(claim.head)}</code> : null}
 				<time
-					className="min-w-7 text-right text-muted-foreground to-720:text-left"
+					className="text-right whitespace-nowrap text-muted-foreground to-720:text-left"
 					dateTime={claim.active}
 					title={`Last active ${new Date(claim.active).toLocaleString()}`}
 				>
-					{shortAge(claim.active)}
+					{activeWords(claim.active, now)}
 				</time>
 			</div>
 		</li>
@@ -227,10 +240,65 @@ function ChangeRows({
 	);
 }
 
+/** One filter of the list: a pill with its count, ink-filled while it's the one shown. A link, so the address keeps it. */
+function FilterChip({
+	filter,
+	count,
+	current,
+	link,
+}: {
+	filter: ChangeFilter;
+	count: number;
+	current: boolean;
+	link: string;
+}) {
+	return (
+		<a
+			href={link}
+			aria-current={current ? "true" : undefined}
+			className={cn(
+				"touch-target inline-flex items-center gap-1.5 rounded-full border border-input px-2.75 py-0.5",
+				"text-ui font-semibold whitespace-nowrap text-muted-foreground no-underline",
+				"transition-colors duration-fast hover:bg-surface-2 hover:text-foreground hover:no-underline",
+				current && "border-primary bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+			)}
+		>
+			{FILTER_WORDS[filter]}
+			<span
+				className={cn(
+					"font-normal tabular-nums",
+					// What needs you, while anything does, in the color that asks for a person.
+					filter === "needs-you" && count > 0 && !current && "font-semibold text-bad",
+				)}
+			>
+				{count}
+			</span>
+		</a>
+	);
+}
+
+/** What a filter shows when nothing on the branch is in it, or nothing it holds matches the search. */
+function noneWords(filter: ChangeFilter, query: string, branch: string): string {
+	if (query.trim()) {
+		const among = filter === "all" ? "" : ` under ${FILTER_WORDS[filter]}`;
+		return `No change on ${branch} matches “${query.trim()}”${among}.`;
+	}
+	const none: Record<ChangeFilter, string> = {
+		"needs-you": "Nothing needs you",
+		"in-review": "No change is in review",
+		approved: "No change is approved",
+		building: "No change is being built",
+		landing: "Nothing is landing",
+		all: "No open changes",
+	};
+	return `${none[filter]} on ${branch}.`;
+}
+
 /**
- * The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). Another branch's
- * list, or the list in place of "No open changes" (or that in place of the list), fades in; so does a change opened
- * while it shows.
+ * The open changes on `shown` (the branch the tab shows; without it, every branch's), what needs action first, then
+ * the one active last (changeList.ts): narrowed by a filter, a chip each with its count, and a search. Another
+ * branch's list, another filter's, or the list in place of "No open changes" (or that in place of the list), fades
+ * in; so does a change opened while it shows, which a screen reader hears of too.
  */
 export function ChangeList({
 	snapshot,
@@ -238,6 +306,8 @@ export function ChangeList({
 	shown,
 	landing,
 	now,
+	filter = "all",
+	search = "",
 }: {
 	snapshot: RepoSnapshot;
 	repo: string;
@@ -246,14 +316,30 @@ export function ChangeList({
 	landing?: Pick<RepoLanding, "checking">;
 	/** The time leases and abandoned changes are told against (tests fix it). */
 	now?: number;
+	/** The filter the address asks for. */
+	filter?: ChangeFilter;
+	/** What the search starts with (tests set it). */
+	search?: string;
 }) {
 	const project = snapshot.branch ?? "main";
-	const claims = [...snapshot.claims]
-		.filter((claim) => !shown || (claim.into ?? project) === shown)
-		.sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+	const branch = shown ?? project;
+	const open = shown ? openOn(snapshot, shown) : snapshot.claims;
+	const [query, setQuery] = useState(search);
+	const context = { votes: snapshot.votes, policy: snapshot.policy, landing, now: now ?? Date.now() };
+	const { shown: listed, counts } = changeList(open, context, { filter, query });
+	const claims = listed.map((each) => each.claim);
 	const branchChanged = useChanged(shown);
-	const emptied = useChanged(claims.length === 0);
-	const fades = branchChanged || emptied;
+	const filterChanged = useChanged(filter);
+	const emptied = useChanged(open.length === 0);
+	const fades = branchChanged || filterChanged || emptied;
+	const { said, say } = useAnnouncer();
+	useArrivalsSaid(open, branch, say);
+	const linkTo = (to: ChangeFilter) =>
+		href.changes(repo, {
+			...(shown && shown !== project ? { branch: shown } : {}),
+			...(to === "all" ? {} : { filter: to }),
+		});
+	const audit = branch === project ? (snapshot.audit?.open ?? 0) : 0;
 	return (
 		<Box aria-labelledby="changes-title">
 			<BoxHeader>
@@ -263,24 +349,85 @@ export function ChangeList({
 					aria-current="page"
 				>
 					<Icon name="pull" />
-					<Bumping count={claims.length} /> Open
+					<Bumping count={open.length} /> Open
 				</h2>
 				{snapshot.audit ? (
-					<span className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground">
+					<a
+						href={href.repo(repo, "history")}
+						className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground"
+					>
 						<Icon name="merge" />
-						<Bumping count={snapshot.audit.merges} /> landed on {snapshot.branch ?? "main"}
-					</span>
+						<Bumping count={snapshot.audit.merges} /> landed on {project}
+					</a>
 				) : null}
 			</BoxHeader>
-			{claims.length === 0 ? (
+			{open.length > 0 ? (
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 border-b border-border px-0.5 py-3">
+					<nav aria-label="Show changes" className="min-w-0">
+						<ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+							{CHANGE_FILTERS.map((each) => (
+								<li key={each}>
+									<FilterChip filter={each} count={counts[each]} current={each === filter} link={linkTo(each)} />
+								</li>
+							))}
+						</ul>
+					</nav>
+					<div className="relative ml-auto w-64 to-720:ml-0 to-720:w-full">
+						<Icon
+							name="search"
+							size={14}
+							className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
+						/>
+						<label className="sr-only" htmlFor="change-search">
+							Find a change
+						</label>
+						<Input
+							id="change-search"
+							type="search"
+							className="h-8.5 w-full pl-8 text-ui"
+							placeholder="Title, id, agent or path…"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+						/>
+					</div>
+				</div>
+			) : null}
+			{audit ? (
+				<p className="m-0 flex flex-wrap items-center gap-1.75 border-b border-border px-4 py-2.5 text-ui">
+					<Lamp state="needs-person" />
+					<a href={href.repo(repo, "audit")}>{counted(audit, "merge")} for the audit to look at</a>
+				</p>
+			) : null}
+			{open.length === 0 ? (
 				<Empty className={cn(fades && "animate-fade")}>
 					<Icon name="pull" size={28} />
 					<h2>No open changes</h2>
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
 				</Empty>
+			) : claims.length === 0 ? (
+				<p
+					key={`${filter}:none`}
+					className={cn("m-0 px-4 py-8 text-center text-muted-foreground", fades && "animate-fade")}
+				>
+					{noneWords(filter, query, branch)}
+					{filter !== "all" ? (
+						<>
+							{" "}
+							<a href={linkTo("all")}>Show all {counts.all}</a>
+						</>
+					) : null}
+					{query.trim() ? (
+						<>
+							{" "}
+							<Button variant="link" className="align-baseline" onClick={() => setQuery("")}>
+								Clear the search
+							</Button>
+						</>
+					) : null}
+				</p>
 			) : (
 				<ChangeRows
-					key={shown}
+					key={`${shown}:${filter}`}
 					claims={claims}
 					votes={snapshot.votes}
 					policy={snapshot.policy}
@@ -290,8 +437,30 @@ export function ChangeList({
 					fades={fades}
 				/>
 			)}
+			<Announcer said={said} />
 		</Box>
 	);
+}
+
+/**
+ * Says what changes opened on the branch since the list first showed it, as they come: at most once every few
+ * seconds (useAnnouncer). Another branch starts over, unsaid.
+ */
+function useArrivalsSaid(open: Claim[], branch: string, say: (words: string) => void) {
+	const seen = useRef<{ branch: string; changes: Set<string> } | null>(null);
+	const ids = open.map((claim) => claim.change).join("\n");
+	useEffect(() => {
+		const before = seen.current;
+		seen.current = { branch, changes: new Set(open.map((claim) => claim.change)) };
+		if (!before || before.branch !== branch) return;
+		say(
+			arrivalWords(
+				open.filter((claim) => !before.changes.has(claim.change)),
+				branch,
+			),
+		);
+		// Keyed by the list's changes: a poll that brings the same ones says nothing.
+	}, [ids, branch, say]);
 }
 
 // The audit's rows: an icon a little down the first line, then what it says; ruled off from the one above, the first

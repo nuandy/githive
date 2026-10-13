@@ -6,6 +6,7 @@
 //   #/orgs/:org                               an organization (or your own namespace)
 //   #/repos/:owner/:name[/changes|/history|/claims|/agents|/audit|/settings][?branch=<branch>]
 //                                             (the Hive tab without one)
+//   #/repos/:owner/:name/changes?filter=<needs-you|in-review|…>   the Changes list narrowed
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:owner/:name/changes/:id[/commits]
 //   #/settings/agents                         your agents, their tokens, and connected apps
@@ -31,6 +32,7 @@ export type Route =
 			/** Code tab: the file or folder shown, "" for the top. */ path?: string;
 			/** Code tab: a branch or commit other than the project's branch. */ ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+			/** Changes tab: the list's filter, when not all of them. */ filter?: string;
 	  }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
@@ -80,8 +82,9 @@ export function parseRoute(hash: string): Route {
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
 			const branch = params.get("branch") || undefined;
+			const filter = params.get("filter") || undefined;
 			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
-			return { page: "repo", repo, tab, ...(branch ? { branch } : {}) };
+			return { page: "repo", repo, tab, ...(branch ? { branch } : {}), ...(filter ? { filter } : {}) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
@@ -101,6 +104,12 @@ function repoHref(repo: string, tab: RepoTab = "hive", branch?: string): string 
 	return `#/repos/${repoPath(repo)}${tabPart}${query}`;
 }
 
+/** The Changes list on a branch (the project's by default), narrowed by a filter (all by default). */
+function changesHref(repo: string, { branch, filter }: { branch?: string; filter?: string }): string {
+	const query = new URLSearchParams({ ...(branch ? { branch } : {}), ...(filter ? { filter } : {}) }).toString();
+	return `#/repos/${repoPath(repo)}/changes${query ? `?${query}` : ""}`;
+}
+
 function changeHref(repo: string, change: string, tab: ChangeTab = "conversation"): string {
 	const tabPart = tab === "conversation" ? "" : `/${tab}`;
 	return `#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`;
@@ -116,6 +125,7 @@ function codeHref(repo: string, path = "", ref?: string): string {
 export const href = {
 	repos: () => "#/",
 	repo: repoHref,
+	changes: changesHref,
 	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,

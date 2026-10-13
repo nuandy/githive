@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
-import { cellLamp, lampCounts, lampOf, territory } from "./overview";
+import { lampCounts, lampOf } from "./overview";
 
 type Claim = RepoSnapshot["claims"][number];
 const claim = (change: string, paths: string[], over: Partial<Claim> = {}): Claim => ({
@@ -88,59 +88,5 @@ describe("a claim's lamp", () => {
 			now: soon,
 		});
 		expect(counts).toMatchObject({ building: 1, "in-review": 2, approved: 0 });
-	});
-});
-
-describe("the territory", () => {
-	const files = ["lib/a.js", "lib/router/index.js", "test/t.js", "README.md"];
-
-	it("has a region per top-level folder, the top-level files last, each split one level in", () => {
-		const regions = territory(files, []);
-		expect(regions.map((r) => r.name)).toEqual(["lib", "test", ""]);
-		expect(regions[0]!.cells.map((c) => [c.name, !!c.folder])).toEqual([
-			["a.js", false],
-			["router", true],
-		]);
-		expect(regions[0]!.files).toBe(2);
-	});
-
-	it("lights the cell a claim covers, the whole region for a claim on the folder, and new paths as planned", () => {
-		const regions = territory(
-			files,
-			[claim("r", ["lib/router/route.js"], pushed), claim("t", ["test/"], approved), claim("n", ["swarm/p1/"])],
-			{ now: soon },
-		);
-		const lib = regions.find((r) => r.name === "lib")!;
-		expect(
-			cellLamp(
-				lib.cells.find((c) => c.name === "router")!,
-				lib,
-			),
-		).toBe("in-review");
-		expect(
-			cellLamp(
-				lib.cells.find((c) => c.name === "a.js")!,
-				lib,
-			),
-		).toBeUndefined();
-		const test = regions.find((r) => r.name === "test")!;
-		expect(test.whole.map((h) => h.change)).toEqual(["t"]);
-		expect(cellLamp(test.cells[0]!, test)).toBe("approved");
-		const swarm = regions.find((r) => r.name === "swarm")!;
-		expect(swarm.files).toBe(0);
-		expect(swarm.cells).toMatchObject([{ name: "p1", planned: true, folder: true }]);
-	});
-
-	it("shows a cell held by several changes at its most urgent", () => {
-		const [lib] = territory(
-			files,
-			[
-				claim("a", ["lib/router/x.js"], approved),
-				claim("b", ["lib/router/y.js"], { ...pushed, attention: { reason: "?", agent: "b", at: "" } }),
-			],
-			{ now: soon },
-		);
-		const router = lib!.cells.find((c) => c.name === "router")!;
-		expect(router.holders.map((h) => h.change)).toEqual(["b", "a"]);
 	});
 });

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
 import { Overview } from "./Overview";
-import { ChangeLabels } from "./RepoTabs";
+import { ChangeLabels, ChangeList } from "./RepoTabs";
 
 // The overview shows one branch at a time, picked from those changes land
 // on; a change says where it lands and what holds it back.
@@ -46,8 +46,10 @@ describe("the overview of one branch", () => {
 		);
 		expect(html).toContain('<option value="main">main (project)</option>');
 		expect(html).toMatch(/<option value="feature\/checkout" selected="">feature\/checkout<\/option>/);
-		expect(html).toContain("2 claims in force");
 		expect(html).toContain("New branch");
+		const list = renderToStaticMarkup(<ChangeList repo="acme/web" shown="feature/checkout" snapshot={snapshot} />);
+		expect(list).toMatch(/<span>2<\/span> Open/);
+		expect(list).not.toContain("do on-main");
 	});
 
 	it("shows the project's branch for a branch nothing lands on, and says so", () => {
@@ -55,7 +57,6 @@ describe("the overview of one branch", () => {
 			<Overview repo="acme/web" branch="main" shown="feature/gone" snapshot={snapshot} api={api} />,
 		);
 		expect(html).toContain("There&#x27;s no branch feature/gone taking changes here: showing main.");
-		expect(html).toContain("1 claim in force");
 		expect(html).not.toContain("New branch");
 	});
 });
