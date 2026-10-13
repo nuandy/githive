@@ -1,6 +1,9 @@
 import type { BacklogItem, DemoRunStatus, HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLiveEvents } from "../hooks/useLiveEvents";
 import { usePoll } from "../hooks/usePoll";
+import { isLive } from "../lib/liveEvents";
+import { mergeEvents } from "../lib/mergeEvents";
 import { freeWork, type Goal, hiveGoals } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
 import { announcement, type GoalMotion, goalMotions, MOTION_MS } from "../lib/hiveMotion";
@@ -34,10 +37,11 @@ export function HiveTab({
 	const landing = usePoll(load ? `landing:${repo}:${branch}` : null, () => load!(repo, branch), 5_000);
 	const tree = usePoll(`tree:${repo}:${branch}`, () => api.tree(repo), 60_000);
 	const loadEvents = api.events;
-	const events = usePoll(loadEvents ? `events:${repo}` : null, () => loadEvents!(repo), 10_000);
-	// The snapshot is read again on each ping from the live feed, so the events follow it.
-	const refreshEvents = events.refresh;
-	useEffect(() => refreshEvents(), [snapshot.claims, refreshEvents]);
+	// The live feed brings each event as it happens, so the feed is read again only as a safety net while it's up.
+	const eventsEvery = isLive(repo) ? 60_000 : 10_000;
+	const events = usePoll(loadEvents ? `events:${repo}` : null, () => loadEvents!(repo), eventsEvery);
+	const live = useLiveEvents(repo);
+	const shown = useMemo(() => (events.data ? mergeEvents(events.data.events, live) : undefined), [events.data, live]);
 	// Only the claims landing on this branch: each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === branch) };
 	const elsewhere = new Set(
@@ -56,7 +60,7 @@ export function HiveTab({
 				{...(landing.error ? { landingError: String(landing.error) } : {})}
 				{...(tree.data ? { tree: tree.data } : {})}
 				{...(tree.error ? { treeError: String(tree.error) } : {})}
-				{...(events.data ? { events: events.data.events } : {})}
+				{...(shown ? { events: shown } : {})}
 				{...(events.error ? { eventsError: String(events.error) } : {})}
 				showsLanding={!!load}
 				showsFeed={!!loadEvents}

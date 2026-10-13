@@ -1980,7 +1980,14 @@ new repositories, a person's own agents and, for admins, who may sign in, and
 a card to start a demo run. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
-pages after each write. The list of repos and their counts is a hint kept in
+pages after each write. Each message to a page says what changed (`records`,
+`pushed`, `landing`, `awareness`, or a kept view rebuilt) and carries the hive
+events that came with it, so the Hive's feed shows them as they come and a
+page reads again only what that kind touches: an awareness message reads
+nothing, a rebuilt snapshot only the snapshot. Messages are numbered, and
+RepoCache keeps the last 200 (`src/page-feed.ts`): a page that reconnects
+says the last it had and is sent what it missed, or `missed`, and reads
+everything again, when that's too far back or the repo's cache was cleared. The list of repos and their counts is a hint kept in
 one RepoIndex; the records in Git are what count.
 
 **Sites.** A public repo's static site is served from its files at `/site/<owner>/<repo>/`, its default branch,

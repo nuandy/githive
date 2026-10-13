@@ -12,6 +12,7 @@ import {
 	toldKey,
 	trimTold,
 } from "./news-log";
+import { keepPageMessage, PAGE_PREFIXES, pageMessagesSince } from "./page-feed";
 import type { KeptPushHints } from "./push-hints";
 import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
@@ -124,6 +125,7 @@ const KEPT_PREFIXES = [
 	"news:",
 	"notice:",
 	...NEWS_PREFIXES,
+	...PAGE_PREFIXES,
 	"attempts:",
 	"merge:",
 	// Record tips and states, and packs, before they had objects of their own.
@@ -207,10 +209,17 @@ export class RepoCache extends DurableObject<Env> {
 	/** Calls held in ringAfter, each woken by the next ring. */
 	private readonly listening = new Set<Listener>();
 
+	/**
+	 * A dashboard page's live feed. A page that reconnects with `?since=<seq>`, the last message it had, is first sent
+	 * what it missed (see page-feed.ts).
+	 */
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
 		const { 0: client, 1: server } = new WebSocketPair();
 		this.ctx.acceptWebSocket(server);
+		const since = Number(new URL(request.url).searchParams.get("since") ?? "");
+		if (Number.isInteger(since) && since >= 0)
+			for (const message of await pageMessagesSince(this.ctx.storage, since)) server.send(JSON.stringify(message));
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
@@ -281,13 +290,15 @@ export class RepoCache extends DurableObject<Env> {
 
 	// Each event under its own key, by its time then what it was, so an event delivered twice is kept once and
 	// adding one never rewrites the others.
+	// Returns the events kept, the ones the log didn't have already.
 	private async keepEvents(given: HiveEvent[]) {
 		const events = await this.newConflicts(given);
-		if (!events.length) return;
+		if (!events.length) return events;
 		await this.eventsByKey();
 		await this.ctx.storage.put(Object.fromEntries(events.map((event) => [`${EVENT}${eventKey(event)}`, event])));
 		this.eventWrites += 1;
 		if (this.eventWrites % EVENT_WRITES_PER_TRIM === 0) await this.trimEvents();
+		return events;
 	}
 
 	// Events but the `conflicted` ones the log already has for the same change and head: an agent merging the same
@@ -640,8 +651,8 @@ export class RepoCache extends DurableObject<Env> {
 	 * hosted agents. A change that concerns no agent, such as a landing being checked, rings nothing.
 	 */
 	private async publish(published: Published) {
-		await this.keepEvents(published.events ?? []);
-		if (published.kind) this.broadcast(published.kind);
+		const events = await this.keepEvents(published.events ?? []);
+		if (published.kind) await this.broadcast(published.kind, events);
 		if (published.ring) await this.ring(published.ring, published.whom, published.told);
 	}
 
@@ -755,8 +766,9 @@ export class RepoCache extends DurableObject<Env> {
 		void ring().catch((err) => console.error(`ringing the hive (${rung.reason}) failed`, String(err)));
 	}
 
-	private broadcast(kind: string) {
-		const message = JSON.stringify({ kind, at: new Date().toISOString() });
+	// Sends watching pages what changed, with its events, numbered and kept for a page that reconnects.
+	private async broadcast(kind: string, events: HiveEvent[] = []) {
+		const message = JSON.stringify(await keepPageMessage(this.ctx.storage, kind, events));
 		for (const socket of this.ctx.getWebSockets()) {
 			try {
 				socket.send(message);

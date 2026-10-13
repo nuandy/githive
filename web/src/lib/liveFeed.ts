@@ -1,7 +1,10 @@
-// A repo's live feed: a WebSocket on which each message only means "something
-// changed, read again". This keeps the socket open, reconnects with backoff,
-// and folds bursts of pings into one refresh. No React here, so it can be
-// tested with a fake socket and fake timers.
+// A repo's live feed: a WebSocket on which each message says what changed (its
+// kind, so a page reads again only what that touches) and carries the events
+// that came with it, so the hive's feed shows them without reading again. Each
+// message has a number: a reconnect says the last one had, and the server sends
+// what was missed, or "missed" when that's too much. This keeps the socket open,
+// reconnects with backoff, and folds bursts of messages into one refresh. No
+// React here, so it can be tested with a fake socket and fake timers.
 
 export type LiveStatus = "off" | "connecting" | "live" | "reconnecting";
 
@@ -21,8 +24,13 @@ export interface Timers {
 export interface LiveFeedOptions {
 	url: string;
 	connect: (url: string) => SocketLike;
-	/** Read everything again. */
-	onPing(): void;
+	/**
+	 * Read again what these kinds of change touch: "records", "pushed", "landing", "awareness", "view:<name>", or
+	 * "missed" (read everything). A message from an older server, without a kind, comes as "missed".
+	 */
+	onPing(kinds: string[]): void;
+	/** The hive events a message carried, as it arrives. */
+	onEvents?(events: unknown[]): void;
 	onStatus(status: LiveStatus): void;
 	timers?: Timers;
 	/** Pings closer together than this make one refresh. */
@@ -48,6 +56,9 @@ export class LiveFeed {
 	private reconnectTimer: unknown = null;
 	private pingTimer: unknown = null;
 	private everOpened = false;
+	/** The number of the last message had, once a server that numbers them has sent one. */
+	private lastSeq: number | null = null;
+	private readonly kinds = new Set<string>();
 	private readonly timers: Timers;
 
 	constructor(private readonly options: LiveFeedOptions) {
@@ -65,6 +76,7 @@ export class LiveFeed {
 		if (this.reconnectTimer !== null) this.timers.clearTimeout(this.reconnectTimer);
 		if (this.pingTimer !== null) this.timers.clearTimeout(this.pingTimer);
 		this.reconnectTimer = this.pingTimer = null;
+		this.kinds.clear();
 		const socket = this.socket;
 		this.socket = null;
 		if (socket) {
@@ -82,7 +94,7 @@ export class LiveFeed {
 		this.options.onStatus(this.everOpened || this.attempt > 0 ? "reconnecting" : "connecting");
 		let socket: SocketLike;
 		try {
-			socket = this.options.connect(this.options.url);
+			socket = this.options.connect(this.urlFromLast());
 		} catch {
 			this.scheduleReconnect();
 			return;
@@ -94,11 +106,12 @@ export class LiveFeed {
 			this.everOpened = true;
 			this.attempt = 0;
 			this.options.onStatus("live");
-			// Anything may have changed while the socket was down.
-			if (reopened) this.ping();
+			// Anything may have changed while the socket was down. A server that numbers its messages sends what was
+			// missed; one that doesn't can't, so everything is read again.
+			if (reopened && this.lastSeq === null) this.ping("missed");
 		};
-		socket.onmessage = () => {
-			if (!this.stopped && this.socket === socket) this.ping();
+		socket.onmessage = (event) => {
+			if (!this.stopped && this.socket === socket) this.received(event);
 		};
 		socket.onclose = () => {
 			if (this.stopped || this.socket !== socket) return;
@@ -118,11 +131,51 @@ export class LiveFeed {
 		}, delay);
 	}
 
-	private ping() {
+	private urlFromLast() {
+		if (this.lastSeq === null) return this.options.url;
+		const joiner = this.options.url.includes("?") ? "&" : "?";
+		return `${this.options.url}${joiner}since=${this.lastSeq}`;
+	}
+
+	private received(event: unknown) {
+		const message = messageOf(event);
+		if (message.seq !== undefined) this.lastSeq = message.seq;
+		if (message.events?.length) this.options.onEvents?.(message.events);
+		this.ping(message.kind);
+	}
+
+	private ping(kind: string) {
+		this.kinds.add(kind);
 		if (this.pingTimer !== null) return;
 		this.pingTimer = this.timers.setTimeout(() => {
 			this.pingTimer = null;
-			if (!this.stopped) this.options.onPing();
+			const kinds = [...this.kinds];
+			this.kinds.clear();
+			if (!this.stopped) this.options.onPing(kinds);
 		}, this.options.debounceMs ?? 250);
 	}
+}
+
+interface Message {
+	kind: string;
+	seq?: number;
+	events?: unknown[];
+}
+
+// A message as the server sends it. Anything else, from an older server, means only "something changed".
+function messageOf(event: unknown): Message {
+	const data = (event as { data?: unknown } | null)?.data;
+	let parsed: unknown;
+	try {
+		parsed = typeof data === "string" ? JSON.parse(data) : undefined;
+	} catch {
+		parsed = undefined;
+	}
+	const message = (parsed ?? {}) as Partial<Message>;
+	if (typeof message.kind !== "string") return { kind: "missed" };
+	return {
+		kind: message.kind,
+		...(typeof message.seq === "number" ? { seq: message.seq } : {}),
+		...(Array.isArray(message.events) ? { events: message.events } : {}),
+	};
 }

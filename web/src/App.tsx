@@ -1,5 +1,6 @@
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { messageOf } from "./lib/errors";
+import { type RepoPart, touchedBy } from "./lib/repoParts";
 import {
 	SIGNED_OUT_EVENT,
 	SIGNED_OUT_MESSAGE,
@@ -289,12 +290,15 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 
 /**
  * A repo's data for its page: its snapshot, audit, the reader's access, and the change shown, if any. While the
- * repo's live feed is connected, each ping refreshes them and polling slows to a safety net.
+ * repo's live feed is connected, a ping refreshes what its kinds of change touch (see touchedBy), and polling slows
+ * to a safety net.
  */
 function useRepoData(repoName: string | null, changeId: string | null) {
 	const feedKey = repoName;
-	const refreshers = useRef<(() => void)[]>([]);
-	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
+	const refreshers = useRef<Record<RepoPart, () => void>>({ snapshot: noop, audit: noop, change: noop });
+	const liveStatus = useLiveFeed(feedKey, (kinds) => {
+		for (const part of touchedBy(kinds)) refreshers.current[part]();
+	});
 	const every = (intervalMs: number) => (liveStatus === "live" ? 30_000 : intervalMs);
 
 	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
@@ -307,9 +311,11 @@ function useRepoData(repoName: string | null, changeId: string | null) {
 		() => api.change(repoName!, changeId!),
 		every(10_000),
 	);
-	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
+	refreshers.current = { snapshot: snapshot.refresh, audit: audit.refresh, change: change.refresh };
 	return { liveStatus, snapshot, audit, access, change };
 }
+
+const noop = () => undefined;
 
 /** A repo's page, once its snapshot is read; or that it's loading, or why it can't be shown. */
 function RepoRoute(props: {

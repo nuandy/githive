@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { liveFeedUrl } from "../api";
+import { tellLiveEvents, tellLiveStatus } from "../lib/liveEvents";
 import { LiveFeed, type LiveStatus, type SocketLike } from "../lib/liveFeed";
 
 /**
  * Keep a repo's live feed open (its full name, "<owner>/<name>") and call
- * `onPing` when something changed. A null key closes it. Returns whether it's
- * connected, so pages can poll less while it is.
+ * `onPing` with the kinds of change since the last call. The events messages
+ * carry go to the page's listeners (see liveEvents.ts). A null key closes it.
+ * Returns whether it's connected, so pages can poll less while it is.
  */
-export function useLiveFeed(key: string | null, onPing: () => void): LiveStatus {
+export function useLiveFeed(key: string | null, onPing: (kinds: string[]) => void): LiveStatus {
 	const [status, setStatus] = useState<LiveStatus>("off");
 	const pingRef = useRef(onPing);
 	pingRef.current = onPing;
@@ -19,8 +21,12 @@ export function useLiveFeed(key: string | null, onPing: () => void): LiveStatus 
 		const feed = new LiveFeed({
 			url: liveFeedUrl(key),
 			connect: (url) => new WebSocket(url) as unknown as SocketLike,
-			onPing: () => pingRef.current(),
-			onStatus: setStatus,
+			onPing: (kinds) => pingRef.current(kinds),
+			onEvents: (events) => tellLiveEvents(key, events),
+			onStatus: (status) => {
+				tellLiveStatus(key, status === "live");
+				setStatus(status);
+			},
 		});
 		feed.start();
 		return () => feed.stop();

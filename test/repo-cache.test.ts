@@ -3,6 +3,8 @@ import { FakeStorage } from "./fakes/env";
 
 const { RepoCache, RINGS_KEPT } = await import("../src/repo-cache");
 const { TOLD_KEPT } = await import("../src/news-log");
+const { PAGES_KEPT, pageMessagesSince } = await import("../src/page-feed");
+type PageMessage = import("../src/page-feed").PageMessage;
 const { toolContextFor } = await import("../src/toolkit/env");
 type Notice = import("../src/repo-cache").Notice;
 
@@ -12,10 +14,17 @@ type Notice = import("../src/repo-cache").Notice;
 
 const feed = () => {
 	const sent: string[] = [];
-	const socket = { send: (message: string) => sent.push(JSON.parse(message).kind) };
+	const messages: PageMessage[] = [];
+	const socket = {
+		send: (message: string) => {
+			messages.push(JSON.parse(message));
+			sent.push(JSON.parse(message).kind);
+		},
+	};
 	return {
 		live: new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never),
 		sent,
+		messages,
 	};
 };
 
@@ -397,5 +406,33 @@ describe("the doorbell's hold", () => {
 		expect(await live.rungFor("x", 2)).toEqual([]);
 		// A hold with a mark that old can't be checked, so it answers as rung.
 		expect(await live.ringAfter(0, 5_000, "x")).toEqual({ rings: RINGS_KEPT + 2, reasons: [] });
+	});
+});
+
+describe("what pages are sent", () => {
+	it("numbers each message and carries its events, so a page shows them without reading the feed", async () => {
+		const { live, messages } = feed();
+		const at = new Date().toISOString();
+		const claimed = { kind: "claimed" as const, agent: "agent-a", change: "c-1", at };
+		await live.ping("records", true, [claimed], "claim", { for: [] });
+		await live.ping("records", false);
+		expect(messages).toEqual([
+			{ seq: 1, kind: "records", at: expect.any(String), events: [claimed] },
+			{ seq: 2, kind: "records", at: expect.any(String) },
+		]);
+	});
+
+	it("sends a page that reconnects what it missed, or that it missed too much", async () => {
+		const storage = new FakeStorage();
+		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		const since = (seq: number) => pageMessagesSince(storage as never, seq);
+		for (let ping = 0; ping < 3; ping++) await live.ping("records");
+		expect((await since(1)).map((message) => message.seq)).toEqual([2, 3]);
+		expect(await since(3)).toEqual([]);
+		// A count the page had from before the repo's cache was cleared.
+		expect(await since(9)).toEqual([{ seq: 3, kind: "missed", at: expect.any(String) }]);
+		for (let ping = 0; ping < PAGES_KEPT; ping++) await live.ping("records");
+		expect(await since(1)).toEqual([{ seq: PAGES_KEPT + 3, kind: "missed", at: expect.any(String) }]);
+		expect((await since(PAGES_KEPT + 1)).map((message) => message.seq)).toEqual([PAGES_KEPT + 2, PAGES_KEPT + 3]);
 	});
 });
