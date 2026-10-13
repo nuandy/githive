@@ -1,72 +1,41 @@
-import type { RepoLanding, RepoSnapshot } from "../api";
-import { abandoned } from "../../../src/toolkit/staleness";
+import type { RepoSnapshot } from "../api";
 import { claimAgent, claimTitle } from "./claimStatus";
+import { type ClaimState, changeState, type StateContext } from "./status";
 import { normalizePath } from "./tree";
 
 // The repo's overview, drawn as a signal box's track plan: the changes landing
 // on the project's branch, and the territory (the tree) with the parts
-// agents hold lit by where their change is. A lamp means the same thing
-// everywhere: amber while work is under way, green once it passed, red when
-// it failed or waits on a person.
+// agents hold lit by where their change is. A lamp is its change's state, in
+// the colors, glyphs and patterns it has everywhere (status.ts).
 
 type Claim = RepoSnapshot["claims"][number];
 
-/** Where a claim's change is, most urgent first (the order a cell held by several shows). */
-export const LAMPS = ["attention", "abandoned", "checking", "approved", "review", "building"] as const;
+/** Where a claim's change is, most urgent first (the order a cell held by several shows): its state in force. */
+export const LAMPS = [
+	"needs-person",
+	"changes-requested",
+	"checks-failed",
+	"abandoned",
+	"landing",
+	"approved",
+	"in-review",
+	"building",
+] as const satisfies readonly ClaimState[];
 export type Lamp = (typeof LAMPS)[number];
 
-/** How each lamp reads, in a sentence's words. */
-export const LAMP_WORDS: Record<Lamp, string> = {
-	attention: "needs a person",
-	abandoned: "abandoned, free to take",
-	checking: "being checked to land",
-	approved: "approved",
-	review: "waiting for review",
-	building: "being built",
-};
-
-/** Which of the three lamp colors a state shows. */
-export function lampColor(lamp: Lamp): "red" | "amber" | "green" {
-	if (lamp === "attention") return "red";
-	if (lamp === "approved") return "green";
-	return "amber";
-}
-
 /**
- * What else a lamp reads: what's being checked to land, the votes (for when a change went back to its agent),
- * and the time.
+ * What else a lamp reads: what's being checked to land, the votes (for when a change went back to its agent), who
+ * may vote as each role, and the time.
  */
-export interface LampContext {
-	landing?: Pick<RepoLanding, "checking">;
-	votes?: RepoSnapshot["votes"];
-	now?: number;
-}
+export type LampContext = StateContext;
 
 /**
- * Where a claim's change is: waiting on a person, abandoned by its agent (see
- * staleness.ts: the toolkit frees it the same way), being checked to land,
- * approved, pushed for review, or still being built. Failed checks reject its
- * head, which hands it back to its agent like any rejection.
+ * Where a claim's change is (see status.ts): waiting on a person, abandoned by its agent (see staleness.ts: the
+ * toolkit frees it the same way), being checked to land, sent back, approved, pushed for review, or still being
+ * built.
  */
 export function lampOf(claim: Claim, context: LampContext = {}): Lamp {
-	if (claim.attention || claim.approval.vetoedBy.length) return "attention";
-	const { landing, votes = [], now = Date.now() } = context;
-	const isThisHead = (candidate: { change: string; head: string }) =>
-		candidate.change === claim.change && candidate.head === claim.head;
-	const checking = !!claim.head && !!landing?.checking?.changes.some(isThisHead);
-	const onHead = claim.head ? votes.filter((vote) => vote.commit === claim.head && vote.reviewer !== claim.agent) : [];
-	const signs = {
-		active: claim.active,
-		head: claim.head,
-		votes: onHead.map((vote) => ({ verdict: vote.verdict, at: vote.at })),
-		approved: claim.approval.approved,
-		landing: checking,
-		asked: false,
-	};
-	if (abandoned(signs, now).abandoned) return "abandoned";
-	if (checking) return "checking";
-	if (claim.approval.approved) return "approved";
-	return claim.head ? "review" : "building";
+	return changeState(claim, { ...context, now: context.now ?? Date.now() });
 }
 
 /** How many claims show each lamp. */

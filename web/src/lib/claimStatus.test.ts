@@ -18,11 +18,19 @@ describe("changes", () => {
 	it("derives a claim's status from its head, approvals and hosted agents", () => {
 		expect(claimStatus(claim).kind).toBe("changes-requested");
 		expect(claimStatus({ ...claim, hosted: undefined }).kind).toBe("in-review");
-		expect(claimStatus({ ...claim, head: null, hosted: undefined }).kind).toBe("draft");
+		expect(claimStatus({ ...claim, head: null, hosted: undefined })).toMatchObject({
+			kind: "building",
+			label: "Building",
+		});
 		// An agent asked a person: that comes first.
 		expect(
 			claimStatus({ ...claim, attention: { reason: "reviewers disagree", agent: "agent-c", at: "" } }),
-		).toMatchObject({ kind: "needs-you", description: "agent-c asks you: reviewers disagree" });
+		).toMatchObject({
+			kind: "needs-person",
+			label: "Needs a person",
+			tone: "bad",
+			description: "agent-c asks a person: reviewers disagree",
+		});
 		expect(claimStatus({ ...claim, approval: { ...claim.approval, approved: true }, hosted: undefined }).kind).toBe(
 			"approved",
 		);
@@ -32,7 +40,7 @@ describe("changes", () => {
 		});
 		expect(
 			claimStatus({ ...claim, hosted: { builder: { status: "failed", revisions: 0, error: "boom" }, reviewers: [] } }),
-		).toMatchObject({ kind: "needs-you", description: "The builder failed: boom" });
+		).toMatchObject({ kind: "needs-person", description: "GitHive's builder failed: boom" });
 	});
 
 	it("waits for the roles that can block before calling a claim approved", () => {
@@ -43,7 +51,15 @@ describe("changes", () => {
 		};
 		expect(claimStatus(waiting)).toMatchObject({
 			kind: "in-review",
+			label: "In review",
+			tone: "accent",
 			description: "Waiting for security, which can block it.",
+		});
+		// A role only people may vote as needs a person.
+		const people = { required: 2, vetoes: ["security"], grants: { security: ["person:*"] } };
+		expect(claimStatus(waiting, [], { policy: people })).toMatchObject({
+			kind: "needs-person",
+			description: "Waiting for a security vote, which only a person can give.",
 		});
 		expect(claimApprovalLabel(waiting)).toBe("Waiting for security");
 		expect(claimApprovalLabel(claim)).toBe("1/2 approvals");
@@ -101,6 +117,11 @@ describe("rejections on the change's head", () => {
 
 	it("reads as before without votes", () => {
 		expect(claimStatus(approved).kind).toBe("approved");
+	});
+
+	it("says it's landing while its head is checked to land", () => {
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
+		expect(claimStatus(approved, [], { landing })).toMatchObject({ kind: "landing", label: "Landing", tone: "warn" });
 	});
 });
 

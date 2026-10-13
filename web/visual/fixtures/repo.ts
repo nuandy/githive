@@ -9,7 +9,7 @@ import type {
 	RepoSnapshot,
 } from "../../src/api.ts";
 import type { Level } from "../../src/lib/permissions.ts";
-import type { RepoSummary } from "../../src/lib/repos.ts";
+import type { RepoSummary, WaitingItem } from "../../src/lib/repos.ts";
 import { ago } from "./clock.ts";
 import type { Hive } from "./stories.ts";
 
@@ -57,7 +57,7 @@ export function summaryOf(
 	lastActivity: string | undefined,
 	lastStretch: LandingStretch | undefined,
 ): RepoSummary {
-	const waiting = snapshot.claims.filter((claim) => claim.attention);
+	const waiting = snapshot.claims.flatMap((claim) => waitingItem(snapshot, claim) ?? []);
 	return {
 		open: snapshot.claims.length,
 		needsYou: waiting.length,
@@ -66,12 +66,28 @@ export function summaryOf(
 		...(lastActivity ? { lastActivity } : {}),
 		...(lastStretch ? { lastStretch } : {}),
 		countedAt: ago(1),
-		waiting: waiting.map((claim) => ({
-			change: claim.change,
-			title: (claim.intent.split("\n")[0] ?? "").slice(0, 120),
-			reason: claim.attention!.reason.slice(0, 500),
-		})),
+		waiting,
 	};
+}
+
+/**
+ * What a claim waits on a person for, as the server's summary says it: its agent's question, or, pushed and not sent
+ * back, a vote only people may give (the server's waitingOnPerson; the dashboard's status.ts, waitingOn).
+ */
+function waitingItem(snapshot: RepoSnapshot, claim: RepoSnapshot["claims"][number]): WaitingItem | null {
+	const { change, attention, approval, head } = claim;
+	const title = (claim.intent.split("\n")[0] ?? "").slice(0, 120);
+	if (attention) return { kind: "question", change, title, reason: attention.reason.slice(0, 500) };
+	if (!head || approval.approved || approval.vetoedBy.length) return null;
+	const sentBack = snapshot.votes.some(
+		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
+	);
+	if (sentBack) return null;
+	const people = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder) || holder.startsWith("@");
+	const peopleOnly = (role: string) => (snapshot.policy.grants?.[role] ?? ["githive"]).every(people);
+	const role = (approval.awaiting ?? []).find(peopleOnly);
+	if (!role) return null;
+	return { kind: "vote", change, title, role, reason: `Waiting for a ${role} vote, which only a person can give.` };
 }
 
 /** A branch's landing view from a hive. */

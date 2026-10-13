@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
+import { type ChangeState, STATES } from "../../lib/status";
 import { cn } from "../../lib/utils";
 
 // Pills, counters and lamps: the small marks that say how something stands. A tone is one of the lamps' meanings
@@ -71,8 +72,18 @@ const LAMP: Record<LampColor, string> = {
 	neutral: "[--lamp:var(--border-strong)]",
 };
 
-/** A lamp: amber, green or red, and always the same meaning (theme.css). Without a color it takes the one set around it. */
-export function Lamp({ color, className, ...props }: ComponentProps<"span"> & { color?: LampColor }) {
+/**
+ * A lamp: amber, green or red, and always the same meaning (theme.css). Without a color it takes the one set around it.
+ * A change state's lamp (`state`) is in that state's color and pattern with its glyph on it, so color never says it
+ * alone (see status.ts).
+ */
+export function Lamp({
+	color,
+	state,
+	className,
+	...props
+}: ComponentProps<"span"> & { color?: LampColor; state?: ChangeState }) {
+	const look = state ? STATES[state] : undefined;
 	return (
 		<span
 			data-slot="lamp"
@@ -80,9 +91,12 @@ export function Lamp({ color, className, ...props }: ComponentProps<"span"> & { 
 			className={cn(
 				"inline-block size-2.5 flex-none rounded-full bg-[var(--lamp,var(--border-strong))] transition-[background-color] duration-slow",
 				color ? LAMP[color] : "",
+				look && ["inline-grid place-items-center border text-[7px] leading-none font-black", look.mark],
 				className,
 			)}
 			{...props}
-		/>
+		>
+			{look?.glyph}
+		</span>
 	);
 }

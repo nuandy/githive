@@ -14,13 +14,14 @@ export const LANDED_LATELY_MS = 30 * 60_000;
 /** The most cells the map draws; past that, it says how many more. */
 export const MOST_CELLS = 240;
 
-/** What's happening in a cell, loudest first. */
+/** What's happening in a cell, loudest first: its goals' states (see status.ts), then backlog work, then nothing. */
 export const CELL_STATES = [
-	"asking",
-	"revising",
+	"needs-person",
+	"changes-requested",
+	"checks-failed",
 	"landing",
 	"approved",
-	"review",
+	"in-review",
 	"building",
 	"landed",
 	"next",
@@ -28,14 +29,8 @@ export const CELL_STATES = [
 ] as const;
 export type CellState = (typeof CELL_STATES)[number];
 
-const CELL_STATE_OF: Partial<Record<Goal["state"], CellState>> = {
-	asking: "asking",
-	revising: "revising",
-	landing: "landing",
-	approved: "approved",
-	"in-review": "review",
-	building: "building",
-};
+/** A goal lights its cells in its own state. */
+const cellStateOf = (goal: Goal): CellState => (goal.state === "released" ? "free" : goal.state);
 
 export interface Cell {
 	/** A folder's or file's path; "<folder>/*" for the rest of a folder's own files, "*" at the top. */
@@ -228,7 +223,7 @@ function light(cell: Cell, hot: Hot[], cells: Map<string, Cell>, now: number) {
 		if (!goal.finished) inFlight.set(goal.key, goal);
 		else if (landedLately(goal, now) && (!landed || (goal.finished ?? "") > (landed.finished ?? ""))) landed = goal;
 	}
-	const loudness = (goal: Goal) => CELL_STATES.indexOf(CELL_STATE_OF[goal.state] ?? "free");
+	const loudness = (goal: Goal) => CELL_STATES.indexOf(cellStateOf(goal));
 	const working = [...inFlight.values()].sort((a, b) => loudness(a) - loudness(b));
 	cell.goals = working.map((goal) => goal.key);
 	cell.agents = [...new Set(working.map((goal) => goal.agent))];
@@ -237,7 +232,7 @@ function light(cell: Cell, hot: Hot[], cells: Map<string, Cell>, now: number) {
 		cell.goals.push(landed.key);
 	}
 	const loudest = working[0];
-	if (loudest) cell.state = CELL_STATE_OF[loudest.state] ?? "building";
+	if (loudest) cell.state = cellStateOf(loudest);
 	else if (landed) cell.state = "landed";
 	else if (next) cell.state = "next";
 }

@@ -205,8 +205,9 @@ export interface ToolContext {
 		repo: string,
 		patch: {
 			open?: number;
+			/** Changes waiting on a person: questions and votes only people may give. */
 			needsYou?: number;
-			waiting?: { change: string; title: string; reason: string }[];
+			waiting?: WaitingItem[];
 			merged?: number;
 			mergedBy?: number;
 			violations?: number;
@@ -216,6 +217,20 @@ export interface ToolContext {
 	) => Promise<void>;
 	/** Starts GitHive's hosted builder on a claimed change. */
 	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
+}
+
+/**
+ * A change waiting on a person, for the dashboard's Inbox: its agent's question (or GitHive's failed builder), or a
+ * vote as `role`, which only people may vote as. Summaries kept before `kind` are questions.
+ */
+export interface WaitingItem {
+	change: string;
+	title: string;
+	reason: string;
+	/** How urgent Clef found an agent's question, from 0 to 2. */
+	urgency?: number;
+	kind?: "question" | "vote";
+	role?: string;
 }
 
 export interface HostedStatus {

@@ -4,21 +4,20 @@ import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { Territory } from "./Territory";
-import { LAMP_WORDS, lampColor, lampCounts, LAMPS } from "../lib/overview";
+import { needsYou } from "../lib/needsYou";
+import { lampCounts, LAMPS } from "../lib/overview";
+import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { STATES } from "../lib/status";
 import { cn } from "../lib/utils";
 import { Lamp } from "./ui/badge";
 import { Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, Label, NativeSelect } from "./ui/field";
 
-/**
- * What the overview reads: the repo's files and, when the server reports it, what's landing. People who can
- * write can also make a branch.
- */
+/** What the overview reads: the repo's files. People who can write can also make a branch. */
 export interface OverviewApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
-	landing?(repo: string, branch: string): Promise<RepoLanding>;
 	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
@@ -34,6 +33,8 @@ export interface OverviewProps {
 	canWrite?: boolean;
 	/** After a branch is made: read the snapshot again. */
 	onBranchMade?: () => void;
+	/** What's landing on the branch shown, when the server reports it (the Changes tab reads it for the list too). */
+	landing?: RepoLanding;
 }
 
 /** Which branch the overview shows, and making another (for people who can write). */
@@ -183,16 +184,32 @@ function NewBranchForm(props: {
 // A summary in a line: a bold count, then lamp-marked counts beside it.
 const SUMMARY = "m-0 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-lead";
 
-/** The claims in force, in a sentence: how many, and where their changes are. */
-function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: RepoLanding }) {
+/**
+ * The claims in force, in a sentence: how many, what needs a person (see needsYou.ts: questions, votes only people
+ * give, and merges the audit flags), and where the rest are.
+ */
+function Summary({ repo, snapshot, landing }: { repo: string; snapshot: RepoSnapshot; landing?: RepoLanding }) {
 	const total = snapshot.claims.length;
+	const needs = needsYou(snapshot, snapshot.audit);
+	const audit = needs.violations ? (
+		<a href={href.repo(repo, "audit")} className="inline-flex items-center gap-1.75">
+			<Lamp state="needs-person" />
+			{counted(needs.violations, "merge")} for the audit to look at
+		</a>
+	) : null;
 	if (!total)
-		return <p className={SUMMARY}>No claims in force. When an agent claims part of the tree, it lights up below.</p>;
-	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes });
-	const parts = LAMPS.filter((lamp) => counts[lamp]).map((lamp) => (
+		return (
+			<p className={SUMMARY}>
+				No claims in force. When an agent claims part of the tree, it lights up below.
+				{audit}
+			</p>
+		);
+	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes, policy: snapshot.policy });
+	const count = (lamp: (typeof LAMPS)[number]) => (lamp === "needs-person" ? needs.changes.length : counts[lamp]);
+	const parts = LAMPS.filter((lamp) => count(lamp)).map((lamp) => (
 		<span key={lamp} className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp color={lampColor(lamp)} />
-			{counts[lamp]} {lamp === "attention" && counts[lamp] > 1 ? "need a person" : LAMP_WORDS[lamp]}
+			<Lamp state={lamp} />
+			{count(lamp)} {lamp === "needs-person" && count(lamp) > 1 ? "need a person" : STATES[lamp].short}
 		</span>
 	));
 	return (
@@ -201,6 +218,7 @@ function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: Repo
 				{total} {total === 1 ? "claim" : "claims"} in force
 			</strong>
 			{parts}
+			{audit}
 		</p>
 	);
 }
@@ -209,12 +227,20 @@ function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: Repo
  * A repo at a glance, on one of its branches: the claims on it in a sentence and
  * its territory. What's landing and who works where are on the Hive tab.
  */
-export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
+export function Overview({
+	repo,
+	branch,
+	shown: asked,
+	snapshot,
+	api,
+	canWrite = false,
+	onBranchMade,
+	landing,
+}: OverviewProps) {
 	const known =
 		asked === undefined || asked === branch || (snapshot.branches ?? []).some((other) => other.name === asked);
 	const shown = asked && known ? asked : branch;
 	const otherBranch = shown === branch ? undefined : shown;
-	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, otherBranch), 60_000);
 	// Only the claims on this branch, since each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === shown) };
@@ -238,15 +264,8 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 					There's no branch {asked} taking changes here: showing {branch}.
 				</Callout>
 			) : null}
-			<Summary snapshot={onBranch} landing={landing.data} />
-			<Territory
-				repo={repo}
-				branch={shown}
-				snapshot={onBranch}
-				tree={tree.data}
-				error={tree.error}
-				landing={landing.data}
-			/>
+			<Summary repo={repo} snapshot={onBranch} landing={landing} />
+			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing} />
 		</div>
 	);
 }

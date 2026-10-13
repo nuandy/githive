@@ -4,13 +4,14 @@ import { useStagger } from "../hooks/useStagger";
 import { filterRepos, groupRepos, type RepoRow, type RepoState, repoState } from "../lib/repos";
 import { stretchWords } from "../lib/stretch";
 import { splitRepo } from "../lib/repoName";
+import type { ChangeState } from "../lib/status";
 import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
 import { cn } from "../lib/utils";
 import { DemoCard, type DemoApi } from "./DemoRun";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
-import { Lamp, type LampColor } from "./ui/badge";
+import { Lamp } from "./ui/badge";
 import { Box } from "./ui/box";
 import { Button } from "./ui/button";
 import { Fold } from "./ui/collapse";
@@ -25,18 +26,19 @@ export interface RepoListProps {
 	demo?: DemoApi;
 }
 
-const LAMP: Record<RepoState, LampColor> = {
-	"needs-you": "red",
-	"at-work": "amber",
-	done: "green",
-	quiet: "neutral",
+/** A repo's lamp: what needs a person, work being built, or work landed, as a change's lamp says each; quiet is unlit. */
+const LAMP: Record<RepoState, ChangeState | undefined> = {
+	"needs-you": "needs-person",
+	"at-work": "building",
+	done: "landed",
+	quiet: undefined,
 };
 
 /** A count beside the total, marked by its lamp. */
-function Count({ color, children }: { color: LampColor; children: ReactNode }) {
+function Count({ state, children }: { state: ChangeState; children: ReactNode }) {
 	return (
 		<span className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp color={color} />
+			<Lamp state={state} />
 			{children}
 		</span>
 	);
@@ -53,16 +55,16 @@ function Summary({ rows, className }: { rows: RepoRow[]; className?: string }) {
 				{rows.length} {rows.length === 1 ? "repository" : "repositories"}
 			</strong>
 			{needsYou ? (
-				<Count color="red">
+				<Count state="needs-person">
 					{needsYou} {needsYou === 1 ? "change needs" : "changes need"} you
 				</Count>
 			) : null}
 			{violations ? (
-				<Count color="red">
+				<Count state="needs-person">
 					{violations} audit {violations === 1 ? "violation" : "violations"}
 				</Count>
 			) : null}
-			<Count color="amber">
+			<Count state="building">
 				{open} open {open === 1 ? "change" : "changes"}
 			</Count>
 		</p>
@@ -100,12 +102,12 @@ function RepoLine({ row, ruled }: { row: RepoRow; ruled: boolean }) {
 			</span>,
 		);
 	if (row.open) parts.push(<span key="open">{row.open} open</span>);
-	if (row.merged) parts.push(<span key="merged">{row.merged} merged</span>);
+	if (row.merged) parts.push(<span key="landed">{row.merged} landed</span>);
 	return (
 		<div className={cn("flex items-start gap-3.5 px-0.5 py-3.5", ruled && "border-t border-border")}>
 			{/* A quiet repo's lamp is unlit: an empty ring rather than a grey dot. */}
 			<Lamp
-				color={LAMP[state]}
+				state={LAMP[state]}
 				className={cn(
 					"mt-1.75",
 					state === "quiet" && "bg-transparent [box-shadow:inset_0_0_0_1.5px_var(--border-strong)]",
@@ -191,7 +193,7 @@ function NoRepos({ canCreate }: { canCreate: boolean }) {
 			<h2 className="mt-3 mb-2 text-title">No repositories yet</h2>
 			<p className="mx-auto mt-0 mb-2 max-w-130 text-muted-foreground">
 				Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
-				will change, push their changes to their own forks, and merge them after review and checks, just like pull
+				will change, push their changes to their own forks, and land them after review and checks, just like pull
 				requests.
 			</p>
 			{canCreate ? (

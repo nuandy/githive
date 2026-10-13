@@ -86,6 +86,14 @@ describe("the building blocks", () => {
 		expect(amber).toContain("dark:inset-ring-0");
 	});
 
+	it("marks a change state's lamp with its glyph as well as its color", () => {
+		const needs = renderToStaticMarkup(<Lamp state="needs-person" />);
+		expect(needs).toContain("bg-bad");
+		expect(needs).toContain(">!</span>");
+		expect(renderToStaticMarkup(<Lamp state="approved" />)).toContain(">✓</span>");
+		expect(renderToStaticMarkup(<Lamp state="in-review" />)).toContain("border-dashed");
+	});
+
 	it("rules boxes and callouts", () => {
 		const html = renderToStaticMarkup(
 			<Box>
@@ -231,9 +239,9 @@ describe("overlays", () => {
 	});
 
 	it("says a status's words in a tooltip, not a title", () => {
-		const html = renderToStaticMarkup(<StatusIcon status={{ kind: "merged", tone: "good", label: "Merged" }} />);
+		const html = renderToStaticMarkup(<StatusIcon status={{ kind: "landed", tone: "good", label: "Landed" }} />);
 		expect(html).toContain('data-slot="tooltip-trigger"');
-		expect(html).toContain('aria-label="Merged"');
+		expect(html).toContain('aria-label="Landed"');
 		expect(html).not.toContain("title=");
 	});
 
@@ -316,7 +324,8 @@ describe("the dashboard's source", () => {
 
 	it("sizes text from the theme's scale, but where the Hive draws its marks", () => {
 		// The Hive's map and the goals' chips and clock set type inside shapes of their own size; later work redraws them.
-		const marks = ["HiveMap.tsx", "GoalsPanel.tsx", "Territory.tsx"];
+		// A state's glyph sits inside its mark the same way: a lamp's, a swatch's, a Territory square's.
+		const marks = ["HiveMap.tsx", "GoalsPanel.tsx", "Territory.tsx", "StateMark.tsx", "HiveStrip.tsx", "badge.tsx"];
 		const offenders = Object.keys(sources).filter(
 			(file) => !marks.some((mark) => file.endsWith(`/${mark}`)) && /\btext-\[[\d.]+(px|em|rem)\]/.test(sources[file]!),
 		);

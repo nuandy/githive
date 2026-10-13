@@ -9,15 +9,16 @@ import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
-import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
+import { DEFAULT_GRANT, type FlagRecord, openFlag, peopleOnly, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
 import { giveUpGitHubChange } from "./github-tools";
-import type { HostedStatus, ToolContext } from "./context";
+import type { HostedStatus, ToolContext, WaitingItem } from "./context";
 import {
 	branchSettings,
+	claimPolicy,
 	claimsRef,
 	DEFAULT_POLICY,
 	recordLog,
@@ -301,17 +302,12 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			),
 		),
 	);
-	const waiting = claims.filter((claim) => claim.attention);
+	const waiting = claims.flatMap((claim) => waitingOnPerson(claim, votes.votes, claimPolicy(state, claim)) ?? []);
 	await ctx
 		.summarize?.(repo, {
 			open: claims.length,
 			needsYou: waiting.length,
-			waiting: waiting.slice(0, 20).map((claim) => ({
-				change: claim.change,
-				title: (claim.intent.split("\n")[0] ?? "").slice(0, 120),
-				reason: claim.attention!.reason.slice(0, 500),
-				...(claim.attention!.urgency === undefined ? {} : { urgency: claim.attention!.urgency }),
-			})),
+			waiting: waiting.slice(0, 20),
 			countedAt: new Date().toISOString(),
 		})
 		.catch(() => undefined);
@@ -457,6 +453,32 @@ function attentionFor(flag: FlagRecord | null, hosted: HostedStatus | undefined,
 	if (hosted?.builder?.status !== "failed") return null;
 	const error = hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : "";
 	return { reason: `GitHive's builder failed${error}`, agent: "githive-builder", at: claim.active };
+}
+
+/**
+ * What a change waits on a person for, for the Inbox: its agent's question (or GitHive's failed builder), or, pushed
+ * and not sent back, a vote as a role only people may vote as. Failed checks are its agent's to fix. The dashboard
+ * decides the same (web/src/lib/status.ts, waitingOn).
+ */
+function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: ReviewPolicy): WaitingItem | null {
+	const { change, attention, approval, head } = claim;
+	const title = (claim.intent.split("\n")[0] ?? "").slice(0, 120);
+	if (attention)
+		return {
+			kind: "question",
+			change,
+			title,
+			reason: attention.reason.slice(0, 500),
+			...(attention.urgency === undefined ? {} : { urgency: attention.urgency }),
+		};
+	if (!head || approval.approved || approval.vetoedBy.length) return null;
+	const sentBack = votes.some(
+		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
+	);
+	if (sentBack || claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject")) return null;
+	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
+	if (!role) return null;
+	return { kind: "vote", change, title, role, reason: `Waiting for a ${role} vote, which only a person can give.` };
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */

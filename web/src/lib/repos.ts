@@ -9,7 +9,7 @@ export interface RepoRow {
 	name: string;
 	/** Claims in force. */
 	open: number;
-	/** Changes waiting on a person. */
+	/** Changes waiting on a person: agents' questions, and votes only people may give. */
 	needsYou: number;
 	merged: number;
 	/** Open audit violations. */
@@ -23,17 +23,32 @@ export interface RepoRow {
 	public?: boolean;
 }
 
+/**
+ * A change waiting on a person, as the server's summary keeps it: its agent's question (or GitHive's failed builder),
+ * or a vote as `role`, which only people may give. Summaries kept before `kind` are questions.
+ */
+export interface WaitingItem {
+	change: string;
+	title: string;
+	reason: string;
+	/** How urgent Clef found an agent's question, from 0 (can wait) to 2 (urgent). */
+	urgency?: number;
+	kind?: "question" | "vote";
+	role?: string;
+}
+
 /** What the server keeps per repo for this list (GET /summaries); counts are absent until first taken. */
 export interface RepoSummary {
 	open?: number;
+	/** Changes waiting on a person: agents' questions, and votes only people may give. */
 	needsYou?: number;
 	merged?: number;
 	violations?: number;
 	lastActivity?: string;
 	lastStretch?: LandingStretch;
 	countedAt?: string;
-	/** Changes waiting on a person, with why: the Inbox. */
-	waiting?: { change: string; title: string; reason: string; urgency?: number }[];
+	/** Those changes, with why: the Inbox. */
+	waiting?: WaitingItem[];
 }
 
 export interface Summaries {
@@ -41,14 +56,26 @@ export interface Summaries {
 	repos: { repo: string; id?: string; since: string; summary: RepoSummary | null; public?: boolean }[];
 }
 
+/**
+ * What in a repo waits on a person, from its summary: its changes (agents' questions and votes only people may give,
+ * as the Hive's needsYou.ts finds them) and the audit's open violations. The Inbox and this list count the same.
+ */
+export function waitingIn(summary: RepoSummary | null | undefined): { changes: number; violations: number } {
+	return {
+		changes: Math.max(summary?.needsYou ?? 0, summary?.waiting?.length ?? 0),
+		violations: summary?.violations ?? 0,
+	};
+}
+
 function summaryRow(name: string, since: string, summary: RepoSummary | null, others?: boolean): RepoRow {
+	const waiting = waitingIn(summary);
 	return {
 		...(others ? { public: true } : {}),
 		name,
 		open: summary?.open ?? 0,
-		needsYou: summary?.needsYou ?? 0,
+		needsYou: waiting.changes,
 		merged: summary?.merged ?? 0,
-		violations: summary?.violations ?? 0,
+		violations: waiting.violations,
 		lastActivity: latest(since, summary?.lastActivity),
 		...(summary?.lastStretch ? { stretch: summary.lastStretch } : {}),
 		detailed: summary?.open !== undefined,

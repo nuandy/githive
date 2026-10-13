@@ -28,10 +28,13 @@ markup, drawn from the theme.
   too), `surface-2`, `surface-3`, `border`, `border-strong`, `input` (a control's edge: every field, button, segmented
   control and top-bar pill is `border-input`).
 - Actions: `primary` (the ink fill of a primary action), `link` and `link-soft` (links, focus, "in progress"), `ring`.
-- The lamps, always the same meaning: `amber` (claimed, in line, checking), `good` (approved, passed, landed), `bad`
-  (failed, vetoed), `needs` (waits on a person), plus `warn` (amber dark enough for text) and `neutral`. Each has a
-  `-soft` background. Text on a solid `good`, `bad`, `warn` or `needs` fill is that color's `-foreground`
-  (`bg-good text-good-foreground`), never `text-white`: dark mode's lamps are bright, and take dark text.
+- The lamps, always the same meaning: `amber` only for what's being checked to land, `good` (approved, passed,
+  landed), `bad` (failed, sent back, or needing a person), `needs` (what asks the reader: a question's callout, the
+  Inbox), plus `warn` (amber dark enough for text, and warnings) and `neutral`. Each has a `-soft` background. Text on a
+  solid `good`, `bad`, `warn` or `needs` fill is that color's `-foreground` (`bg-good text-good-foreground`), never
+  `text-white`: dark mode's lamps are bright, and take dark text.
+- The Hive's stages, `stage-building`, `stage-review`, `stage-landing`, `stage-landed` and `stage-asking`, name the
+  lamps a change's state takes (below).
 - Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
   `mark-line`, `mark-dot`).
 
@@ -44,6 +47,29 @@ lamp), and what marks a control or focus at 3:1 (`input` and `border-strong` on 
 surface). A new color, or a new pair that sets text on a color, goes into that test. Content that's out of play
 (a revoked agent, a resolved violation) says so in a badge at full contrast; it never fades with `opacity`. The amber
 lamp, pale on light paper, carries a ring of `warn`.
+
+**A change's state** has one noun, one color, one icon and one mark everywhere it shows: pills, lamps, the Hive's cells,
+strip and goal rows, Territory's squares and every legend. They're one table, `STATES` in `web/src/lib/status.ts`, and
+one derivation, `changeState()`; read them, never a tone map of your own. Color never says it alone (WCAG 1.4.1): each
+mark has a glyph or a pattern too.
+
+| State | Color | Mark |
+| --- | --- | --- |
+| Building | `link` (`stage-building`) | solid edge, tinted |
+| In review | `link` (`stage-review`) | dashed edge |
+| Needs a person | `bad` | filled, `!` |
+| Changes requested, Checks failed | `bad` | soft, `×` |
+| Approved | `good` | soft, `✓` |
+| Landing (being checked to land) | `amber` (`stage-landing`) | tinted, `●` |
+| Landed | `good` (`stage-landed`) | filled, `✓` |
+| Released, Abandoned, free to take | `neutral` | a hollow ring |
+
+Pills and headings use the noun ("Needs a person"); cells, goal rows and legends the same words in lowercase. A change
+lands: "Land", "Landed on main"; "merge" is only git's own (a merge commit, a conflict with main). "Needs you" is only
+for counts addressed to the reader: the Inbox's count, "2 changes need you". What needs you is agents' questions,
+changes waiting on a vote only people may give, and the audit's open violations, never failed checks (the agent's own
+work): `waitingOn()` in `status.ts` and `needsYou()` in `needsYou.ts` decide it, and the server's repo summaries count
+the same for the Inbox and Repositories.
 
 **Light and dark.** `:root` is light and `.dark` on `<html>` is dark; `dark:` variants follow it. Under "Same as this
 device" the page follows the system live. Another palette is another block of the same variables.
@@ -69,7 +95,8 @@ Reach for `components/ui` before writing a control by hand:
 - `Button`: `variant` default, `primary` (ink, and saving), `go` (green: land and approve, nothing else), `danger`,
   `ghost`, `link`; `size` default, `sm`, `icon`; `asChild` to give a link a button's look.
 - `Badge` (a pill: `tone` good, bad, warn, needs, accent, neutral; `solid`, `outline`; `size="sm"` beside a row's
-  title, `size="lg"`), `Counter`, `Lamp`.
+  title, `size="lg"`), `Counter`, `Lamp` (`state` lights it as a change's state, glyph and all). For a change, use
+  `StatusPill` and `StatusIcon`; for a state's square or swatch, `StateMark`.
 - `Box`, `BoxHeader`, `BoxTitle`, `BoxBody`, `BoxRow`: ruled sections, not cards (`asChild` rules a form). `BoxTitle`
   is a section's title at `title-sm`, semibold, an `h2` (or the heading it's given, `asChild`). `Callout` with a
   `tone`. `Empty`: nothing to show yet, an icon, an `h2` and a line or two, centered (`<Box asChild><Empty>` boxes it).

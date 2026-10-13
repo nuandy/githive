@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createdAtOf } from "./artifacts";
 import { retryTransient } from "./retry";
 import type { StretchSummary } from "./toolkit/stretch";
+import type { WaitingItem } from "./toolkit/tools/context";
 
 // One instance lists every repo with its counts, so the dashboard's repo list is one read.
 // The counts are hints; the records in Git are the source of truth.
@@ -13,9 +14,10 @@ import type { StretchSummary } from "./toolkit/stretch";
 export interface RepoSummary {
 	/** Changes with claims in force. */
 	open?: number;
-	/** Changes waiting on a person. */
+	/** Changes waiting on a person: an agent's question, or a vote only people may give. */
 	needsYou?: number;
-	waiting?: { change: string; title: string; reason: string; urgency?: number }[];
+	/** Those changes, with why: the Inbox. */
+	waiting?: WaitingItem[];
 	merged?: number;
 	abandoned?: number;
 	violations?: number;

@@ -70,8 +70,9 @@ const STATE_MOTION: Partial<Record<Goal["state"], Motion>> = {
 	landing: "checking",
 	landed: "landed",
 	released: "released",
-	asking: "asking",
-	revising: "changes-asked",
+	"needs-person": "asking",
+	"changes-requested": "changes-asked",
+	"checks-failed": "changes-asked",
 	approved: "approved",
 };
 

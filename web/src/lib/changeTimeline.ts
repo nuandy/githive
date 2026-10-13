@@ -3,10 +3,11 @@ import { identityName } from "./agent";
 import type { ChangeStatus } from "./changeStatus";
 import { timeOf } from "./model";
 import { href } from "./routes";
+import { STATES } from "./status";
 import type { TimelineItem } from "./timeline";
 
 // A change's Conversation, from its history in Git: claimed,
-// each commit pushed, each vote, and how it ended (merged or released).
+// each commit pushed, each vote, and how it ended (landed or released).
 
 export type Vote = ChangeHistory["votes"][number];
 type Release = ChangeHistory["released"][number];
@@ -38,16 +39,14 @@ export function changeEnding(history: Pick<ChangeHistory, "claim" | "released">)
 	return last ? { kind: "released" as const, release: last } : null;
 }
 
+/** How a change that's no longer in force ended, as its state (see status.ts): landed, or released. */
 export function historyStatus(history: Pick<ChangeHistory, "claim" | "released">): ChangeStatus | null {
 	const ending = changeEnding(history);
 	if (!ending) return null;
-	if (ending.kind === "merged") return { kind: "merged", label: "Merged", tone: "good", description: "Merged." };
-	return {
-		kind: "abandoned",
-		label: "Released",
-		tone: "neutral",
-		description: `Its claim was released: ${ending.release.reason}`,
-	};
+	const kind = ending.kind === "merged" ? "landed" : "released";
+	const { label, tone } = STATES[kind];
+	const description = kind === "landed" ? "Landed." : `Its claim was released: ${ending.release.reason}`;
+	return { kind, label, tone, description };
 }
 
 export function buildTimeline(history: ChangeHistory, repo: string): TimelineItem[] {
@@ -100,7 +99,7 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 			kind: "merged",
 			at: ending.release.at,
 			tone: "good",
-			text: `merged into ${history.branch || "main"} as`,
+			text: `landed on ${history.branch || "main"} as`,
 			commit: sha,
 			commitHref: href.code(repo, "", sha),
 		});

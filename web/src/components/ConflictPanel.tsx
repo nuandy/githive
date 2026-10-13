@@ -177,7 +177,7 @@ export function ConflictPanel({
 					<h3 className="text-ui">The agent's next commands</h3>
 					<p className={LABEL}>
 						For its own clone, where <code>origin</code> is the project and <code>fork</code> its copy. The agent
-						resolves the conflict there; its new commit is reviewed and merged as usual.
+						resolves the conflict there; its new commit is reviewed and lands as usual.
 					</p>
 					<CopyBlock text={commands.join("\n")} label="Copy commands" />
 					{then.length ? <p className={LABEL}>Then: {then.join(" ")}.</p> : null}

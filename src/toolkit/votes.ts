@@ -164,6 +164,15 @@ export const personOf = (by: string | undefined) => by?.match(/^person:[^/]+/)?.
 
 export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.test(by);
 
+/** A grant only people hold: people, one person, or an org team (a team is people, however many it has). */
+const peopleGrant = (holder: string) => holder === "person:*" || isPerson(holder) || holder.startsWith("@");
+
+/** Whether only people may vote as a role: every one of its holders is a person, people, or a team. */
+export function peopleOnly(policy: ReviewPolicy, role: string): boolean {
+	const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
+	return holders.length > 0 && holders.every(peopleGrant);
+}
+
 // The identity behind a pool grant ("service:<id>/*"), or null for any other grant.
 const poolOf = (grant: string) => grant.match(/^((?:person|service):[^/*]+)\/\*$/)?.[1] ?? null;
 
@@ -178,8 +187,8 @@ export const blockingRoles = (policy: ReviewPolicy) => [
 export function grantWarnings(policy: ReviewPolicy): string[] {
 	return blockingRoles(policy).flatMap((role) => {
 		const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
-		// A team is people, however many it has; a pool of one person's agents isn't.
-		const people = holders.some((holder) => holder === "person:*" || isPerson(holder) || holder.startsWith("@"));
+		// A pool of one person's agents isn't people.
+		const people = holders.some(peopleGrant);
 		const many = holders.some((holder) => poolOf(holder) || holder.startsWith("@")) || holders.length > 1;
 		const warnings: string[] = [];
 		if (!many && !people)

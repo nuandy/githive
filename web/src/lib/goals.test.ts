@@ -150,7 +150,13 @@ describe("the hive's goals", () => {
 	it("tells a change waiting for a veto role apart from one waiting for any review", () => {
 		const approval = { approved: false, approvals: 1, required: 1, vetoedBy: [], awaiting: ["security"] };
 		const [goal] = hiveGoals({ claims: [claim("deps", { head: "d1", approval })], votes: [] });
-		expect(goalStatus(goal!)).toEqual({ words: "waiting for a security vote", tone: "bad" });
+		// An agent may hold the role: it's in review.
+		expect(goalStatus(goal!)).toEqual({ words: "in review · waiting for a security vote", tone: "accent" });
+		// Only people may: it needs a person.
+		const policy = { required: 1, vetoes: ["security"], grants: { security: ["person:*"] } };
+		const [waiting] = hiveGoals({ claims: [claim("deps", { head: "d1", approval })], votes: [], policy });
+		expect(waiting?.state).toBe("needs-person");
+		expect(goalStatus(waiting!)).toEqual({ words: "needs a person for a security vote", tone: "bad" });
 	});
 
 	it("tells two agents' stories apart when one released a change and the other took it up", () => {
@@ -188,7 +194,7 @@ describe("the hive's goals", () => {
 			at: ago(1),
 		};
 		const [goal] = hiveGoals({ claims: [claim("c", { head: "h1", approval })], votes: [checks] });
-		expect(goal?.state).toBe("revising");
+		expect(goal?.state).toBe("checks-failed");
 		expect(goalStatus(goal!).words).toBe("checks failed, fixing");
 	});
 
@@ -216,7 +222,8 @@ describe("the hive's goals", () => {
 	it("asks a person when the claim says so", () => {
 		const attention = { reason: "should sendFile follow symlinks?", agent: "agent-12", at: ago(1) };
 		const [goal] = hiveGoals({ claims: [claim("ask", { attention })], votes: [] });
-		expect(goal?.state).toBe("asking");
+		expect(goal?.state).toBe("needs-person");
+		expect(goalStatus(goal!)).toEqual({ words: "needs a person: should sendFile follow symlinks?", tone: "bad" });
 		expect(goal?.steps.at(-1)).toMatchObject({ kind: "asked", text: "should sendFile follow symlinks?" });
 	});
 });
@@ -247,6 +254,7 @@ describe("free work and the stage counts", () => {
 			next: 3,
 			building: 1,
 			review: 1,
+			approved: 0,
 			landing: 0,
 			landed: 1,
 		});
