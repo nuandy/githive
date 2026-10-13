@@ -6,6 +6,7 @@
 
 import type { Page } from "playwright-core";
 import type { Who } from "./fixtures.ts";
+import { FIXED_NOW } from "./fixtures/clock.ts";
 
 export type Scheme = "light" | "dark";
 
@@ -138,7 +139,7 @@ const page = (name: string, hash: string, more: Partial<Scene> = {}): Scene => (
 });
 
 const click =
-	(name: string | RegExp, role: "button" | "link" = "button") =>
+	(name: string | RegExp, role: "button" | "link" | "radio" = "button") =>
 	async (p: Page) => {
 		await p.getByRole(role, { name }).first().click();
 	};
@@ -147,6 +148,42 @@ const openSummary = (text: string) => async (p: Page) => {
 };
 const openUserMenu = async (p: Page) => {
 	await p.getByRole("button", { name: /^Signed in as/ }).click();
+};
+const fill = (label: string | RegExp, text: string) => async (p: Page) => {
+	await p.getByLabel(label).first().fill(text);
+};
+const steps =
+	(...each: ((p: Page) => Promise<void>)[]) =>
+	async (p: Page) => {
+		for (const step of each) await step(p);
+	};
+
+/** From here on, `method` requests to `path` get `body` (what the fixtures don't hold); then, for a GET, the page
+ * loads again to ask. */
+const answering =
+	(path: string, body: unknown, { status = 200, method = "GET" } = {}) =>
+	async (p: Page) => {
+		await p.route(`**${path}`, (route) =>
+			route.request().method() === method
+				? route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
+				: route.fallback(),
+		);
+		if (method === "GET") await p.reload();
+	};
+
+/** A demo run on acme/storefront, finished with every piece landed, so there's a game to play. */
+const LANDED_RUN = {
+	id: "run-3",
+	number: 3,
+	fullName: "acme/storefront",
+	by: "robin",
+	startedAt: FIXED_NOW - 20 * 60_000,
+	endedAt: FIXED_NOW - 60_000,
+	status: "done",
+	pieces: 1,
+	agents: [
+		{ name: "githive-forager", finished: [{ piece: "board", at: FIXED_NOW - 60_000 }], reviewed: 0, done: true },
+	],
 };
 
 const STOREFRONT = "/repos/acme/storefront";
@@ -174,10 +211,42 @@ const CHANGES = [
 const APP: Scene[] = [
 	page("repos", "/"),
 	page("repos-menu", "/", { act: openUserMenu }),
+	page("repos-search", "/", { act: fill("Find a repository", "acme") }),
+	page("repos-search-none", "/", { act: fill("Find a repository", "zzz") }),
+	page("repos-empty", "/", { act: answering("/summaries", { repos: [] }) }),
+	page("repos-demo-running", "/", {
+		act: answering("/demo/runs", { running: { fullName: "acme/storefront" }, newest: LANDED_RUN }),
+	}),
+	page("repos-demo-error", "/", {
+		act: steps(
+			answering("/demo/runs", { error: "another demo run is going" }, { status: 409, method: "POST" }),
+			click("Start a demo run"),
+		),
+	}),
 	page("new-repo", "/new"),
 	page("new-repo-org", "/new?owner=acme"),
+	page("new-repo-copy", "/new", { act: click(/A copy of a repository here/, "radio") }),
+	page("new-repo-fresh", "/new", { act: click(/Start fresh/, "radio") }),
+	page("new-repo-bad-name", "/new", { act: fill(/^Name/, "my project") }),
+	page("new-repo-error", "/new", {
+		act: steps(
+			answering("/repos", { error: "robin/widgets exists already" }, { status: 409, method: "POST" }),
+			fill(/^Name/, "widgets"),
+			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
+			click("Make repository"),
+		),
+	}),
 	page("inbox", "/inbox"),
 	page("orgs", "/orgs"),
+	page("orgs-new", "/orgs", { act: fill("Name in URLs", "acme-labs") }),
+	page("orgs-bad-slug", "/orgs", { act: fill("Name in URLs", "-acme") }),
+	page("orgs-error", "/orgs", {
+		act: steps(
+			answering("/orgs", { error: "acme-labs is taken" }, { status: 409, method: "POST" }),
+			fill("Name in URLs", "acme-labs"),
+			click("Create organization"),
+		),
+	}),
 	page("org-acme", "/orgs/acme"),
 	page("org-acme-confirm", "/orgs/acme", { act: click("Remove") }),
 	page("org-acme-team-confirm", "/orgs/acme", { act: click("Delete team") }),
@@ -198,6 +267,8 @@ const APP: Scene[] = [
 		act: async (p) => p.locator('section[aria-labelledby="goals-title"] button[aria-expanded="false"]').first().click(),
 	}),
 	page("storefront-hive-timeline", STOREFRONT, { storage: { "githive.hive.view": "timeline" } }),
+	// The demo run's banner, as on the demo repo's Hive tab.
+	page("storefront-hive-demo", STOREFRONT, { act: answering("/demo/runs/acme/storefront", LANDED_RUN) }),
 	page("storefront-changes", `${STOREFRONT}/changes`),
 	page("storefront-changes-release", `${STOREFRONT}/changes?branch=release%2F2.4`),
 	page("storefront-history", `${STOREFRONT}/history`),
@@ -247,6 +318,7 @@ const APP: Scene[] = [
 	page("visitor-change", `${STOREFRONT}/changes/stock-sync`, { who: "visitor" }),
 	page("visitor-private", "/repos/acme/docs", { who: "visitor" }),
 	page("visitor-sign-in", STOREFRONT, { who: "visitor", act: click("Sign in") }),
+	{ name: "visitor-sign-in-failed", url: "/?signin_error=not-invited#/", who: "visitor" },
 ];
 
 export const SCENES: Scene[] = [...APP, ...HIVE];

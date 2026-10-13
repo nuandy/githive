@@ -63,9 +63,7 @@ describe("the Repositories page", () => {
 	it("shows each repo's owner, and offers making only to people signed in", () => {
 		const row = { name: "acme/web", open: 0, needsYou: 0, merged: 0, violations: 0, detailed: false };
 		const html = renderToStaticMarkup(<RepoList rows={[row]} loaded />);
-		expect(html).toContain(
-			'<a class="repo-row__name" href="#/repos/acme/web"><span class="repo-row__owner">acme/</span>web</a>',
-		);
+		expect(html).toMatch(/<a [^>]*href="#\/repos\/acme\/web"><span [^>]*>acme\/<\/span>web<\/a>/);
 		expect(html).not.toContain("New repository");
 	});
 });

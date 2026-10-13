@@ -1,11 +1,17 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import type { ManageApi, MyOrg, Org } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { realOrgs, SLUG_HINT, slugProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
 import { messageOf } from "../lib/errors";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import "./Manage.css";
+import { Page } from "./Page";
+import { Badge } from "./ui/badge";
+import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { Field, FieldHint, Input, Label } from "./ui/field";
 
 export interface OrgsViewProps {
 	me: { handle: string };
@@ -17,10 +23,10 @@ export interface OrgsViewProps {
 /** Your repositories and the organizations you're in, and making an organization. */
 export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 	return (
-		<main className="page manage" id="main">
+		<Page id="main" className="grid gap-5">
 			<header>
-				<h1>Your organizations</h1>
-				<p className="muted manage__lede">
+				<h1 className="text-display-sm tracking-[-0.01em]">Your organizations</h1>
+				<p className="mt-1 mb-0 text-muted-foreground">
 					An organization is a shared owner for repositories, with members and teams. You don't need one: your own
 					repositories are under {me.handle}.
 				</p>
@@ -29,44 +35,53 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 			<OrgList me={me} orgs={orgs} />
 
 			<NewOrgForm createOrg={createOrg} onCreated={onCreated} />
-		</main>
+		</Page>
 	);
 }
+
+// A row in the list, ruled off from the one above (the first, too, from the box's header): where repositories live,
+// and in which role.
+const ROW = "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-0.5 py-3";
+const ROW_MAIN = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 wrap-anywhere";
 
 /** Where your repositories live: under your own name, and in each organization you're in. */
 function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 	const memberOf = orgs ? realOrgs(orgs) : [];
+	// The orgs fade in as they take the place of "Loading…".
+	const appear = useChanged(orgs === undefined) && "animate-appear";
 	return (
-		<section className="box" aria-labelledby="orgs-title">
-			<div className="box__header">
-				<h2 id="orgs-title">Where your repositories live</h2>
-			</div>
-			<ul className="manage__rows">
-				<li className="box__row manage__row">
-					<div className="manage__row-main">
-						<Icon name="user" className="muted" />
+		<Box aria-labelledby="orgs-title">
+			<BoxHeader>
+				<h2 id="orgs-title" className="text-lead">
+					Where your repositories live
+				</h2>
+			</BoxHeader>
+			<ul className="m-0 list-none p-0">
+				<li className={ROW}>
+					<div className={ROW_MAIN}>
+						<Icon name="user" className="text-muted-foreground" />
 						<a href={href.org(me.handle)}>{me.handle}</a>
-						<span className="muted">your repositories</span>
+						<span className="text-muted-foreground">your repositories</span>
 					</div>
 				</li>
 				{orgs === undefined ? (
-					<li className="box__row muted" role="status">
+					<li className="border-t border-border px-0.5 py-3 text-muted-foreground" role="status">
 						Loading…
 					</li>
 				) : (
 					memberOf.map((org) => (
-						<li key={org.slug} className="box__row manage__row">
-							<div className="manage__row-main">
-								<Icon name="repo" className="muted" />
+						<li key={org.slug} className={cn(ROW, appear)}>
+							<div className={ROW_MAIN}>
+								<Icon name="repo" className="text-muted-foreground" />
 								<a href={href.org(org.slug)}>{org.slug}</a>
-								{org.name ? <span className="muted">{org.name}</span> : null}
+								{org.name ? <span className="text-muted-foreground">{org.name}</span> : null}
 							</div>
-							<span className="pill pill--neutral">{org.role}</span>
+							<Badge tone="neutral">{org.role}</Badge>
 						</li>
 					))
 				)}
 			</ul>
-		</section>
+		</Box>
 	);
 }
 
@@ -92,62 +107,80 @@ function NewOrgForm({ createOrg, onCreated }: Pick<OrgsViewProps, "createOrg" | 
 	};
 
 	return (
-		<form className="box" onSubmit={submit} aria-labelledby="new-org-title">
-			<div className="box__header">
-				<h2 id="new-org-title">Create an organization</h2>
-			</div>
-			<div className="box__body manage__form">
-				<div className="manage__field">
-					<label htmlFor="new-org-slug">Name in URLs</label>
-					<input
-						id="new-org-slug"
-						type="text"
-						value={slug}
-						onChange={(event) => setSlug(event.target.value.toLowerCase())}
-						placeholder="acme"
-						autoComplete="off"
-						spellCheck={false}
-						aria-describedby="new-org-slug-hint"
-					/>
-					<p className="manage__hint" id="new-org-slug-hint">
+		<Box asChild>
+			<form onSubmit={submit} aria-labelledby="new-org-title">
+				<BoxHeader>
+					<h2 id="new-org-title" className="text-lead">
+						Create an organization
+					</h2>
+				</BoxHeader>
+				<BoxBody className="grid gap-4">
+					<Field>
+						<Label htmlFor="new-org-slug" className="text-body-sm">
+							Name in URLs
+						</Label>
+						<Input
+							id="new-org-slug"
+							type="text"
+							className="w-full max-w-120"
+							value={slug}
+							onChange={(event) => setSlug(event.target.value.toLowerCase())}
+							placeholder="acme"
+							autoComplete="off"
+							spellCheck={false}
+							aria-describedby="new-org-slug-hint"
+						/>
 						<NewOrgHint slug={slug} problem={problem} />
-					</p>
-				</div>
-				<div className="manage__field">
-					<label htmlFor="new-org-name">Display name (optional)</label>
-					<input
-						id="new-org-name"
-						type="text"
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-						placeholder="Acme Inc."
-						autoComplete="off"
-					/>
-				</div>
-				{error ? (
-					<p className="error" role="alert">
-						{error}
-					</p>
-				) : null}
-				<div className="manage__actions">
-					<button type="submit" className="accent" disabled={!slug || !!problem || busy}>
-						{busy ? "Creating…" : "Create organization"}
-					</button>
-				</div>
-				<p className="manage__hint">
-					You'll be its owner. Then add members by email, and make teams to grant roles to, like @{slug || "acme"}
-					/security.
-				</p>
-			</div>
-		</form>
+					</Field>
+					<Field>
+						<Label htmlFor="new-org-name" className="text-body-sm">
+							Display name (optional)
+						</Label>
+						<Input
+							id="new-org-name"
+							type="text"
+							className="w-full max-w-120"
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+							placeholder="Acme Inc."
+							autoComplete="off"
+						/>
+					</Field>
+					{error ? (
+						<p className="my-3.75 animate-appear text-bad" role="alert">
+							{error}
+						</p>
+					) : null}
+					<div className="flex flex-wrap gap-2">
+						<Button type="submit" variant="primary" disabled={!slug || !!problem || busy}>
+							{busy ? "Creating…" : "Create organization"}
+						</Button>
+					</div>
+					<FieldHint>
+						You'll be its owner. Then add members by email, and make teams to grant roles to, like @{slug || "acme"}
+						/security.
+					</FieldHint>
+				</BoxBody>
+			</form>
+		</Box>
 	);
 }
 
-/** Under the new org's name: what's wrong with it, where its repositories will be, or what a name may be. */
+/**
+ * Under the new org's name: what's wrong with it, where its repositories will be, or what a name may be. As it says
+ * something else (a problem, say), it fades in.
+ */
 function NewOrgHint({ slug, problem }: { slug: string; problem: string | null }) {
-	if (problem) return <span className="error">{problem}</span>;
-	if (slug) return <>{`Its repositories will be ${slug}/<name>.`}</>;
-	return <>{SLUG_HINT}</>;
+	let said: ReactNode = SLUG_HINT;
+	if (problem) said = <span className="text-bad">{problem}</span>;
+	else if (slug) said = `Its repositories will be ${slug}/<name>.`;
+	const say = problem ?? (slug ? "where" : "rules");
+	const changed = useChanged(say);
+	return (
+		<FieldHint key={say} id="new-org-slug-hint" className={cn(changed && "animate-appear")}>
+			{said}
+		</FieldHint>
+	);
 }
 
 /** The page, with its data. */

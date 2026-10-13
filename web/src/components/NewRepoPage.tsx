@@ -1,15 +1,18 @@
 import { type FormEvent, type ReactNode, useState } from "react";
 import type { ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { creatableOwners, repoNameProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
 import { messageOf } from "../lib/errors";
+import { cn } from "../lib/utils";
 import {
 	CopySource,
 	DEFAULT_FIRST_COMMIT,
 	emptyFirstCommit,
 	type FirstCommit,
 	FirstCommitFields,
+	Folding,
 	ImportSource,
 	NewRepoFrame,
 	OwnerAndName,
@@ -18,7 +21,8 @@ import {
 	SOURCES,
 	VISIBILITIES,
 } from "./NewRepoFields";
-import "./Manage.css";
+import { Box, BoxBody } from "./ui/box";
+import { Button } from "./ui/button";
 
 export interface NewRepoViewProps {
 	/** The caller's namespaces and orgs; undefined while loading. */
@@ -86,6 +90,8 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const [first, setFirst] = useState<FirstCommit>(DEFAULT_FIRST_COMMIT);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// The form, or why there's none, fades in as it takes the place of "Loading…".
+	const appear = useChanged(orgs === undefined) && "animate-appear";
 
 	const nameProblem = name ? repoNameProblem(name.trim()) : null;
 	const ready =
@@ -112,7 +118,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	if (orgs === undefined)
 		return (
 			<NewRepoFrame>
-				<p className="muted" role="status">
+				<p className="my-3.75 text-muted-foreground" role="status">
 					Loading…
 				</p>
 			</NewRepoFrame>
@@ -120,72 +126,90 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	if (owners.length === 0)
 		return (
 			<NewRepoFrame>
-				<div className="box empty">
-					<h2>You can't make repositories here</h2>
-					<p>Ask an owner of an organization to let members make repositories, or make one under your own name.</p>
-				</div>
+				<Box className={cn("px-6 py-10 text-center", appear)}>
+					<h2 className="mt-3 mb-2 text-title">You can't make repositories here</h2>
+					<p className="mx-auto mt-0 mb-2 max-w-130 text-muted-foreground">
+						Ask an owner of an organization to let members make repositories, or make one under your own name.
+					</p>
+				</Box>
 			</NewRepoFrame>
 		);
 
 	let nameHint: ReactNode = "Letters, digits, dots, underscores and dashes.";
-	if (nameProblem) nameHint = <span className="error">{nameProblem}</span>;
-	else if (chosen && name.trim()) nameHint = `It will be ${chosen}/${name.trim()}.`;
+	let hintKey = "rules";
+	if (nameProblem) {
+		nameHint = <span className="text-bad">{nameProblem}</span>;
+		hintKey = nameProblem;
+	} else if (chosen && name.trim()) {
+		nameHint = `It will be ${chosen}/${name.trim()}.`;
+		hintKey = "name";
+	}
 	let submitLabel = "Make repository";
 	if (busy) submitLabel = source === "import" ? "Importing… (a big project takes a minute)" : "Making…";
 
 	return (
 		<NewRepoFrame>
-			<form className="box manage__form" onSubmit={submit}>
-				<div className="box__body manage__form">
-					<OwnerAndName
-						owners={owners}
-						chosen={chosen}
-						setOwner={setOwner}
-						name={name}
-						setName={setName}
-						hint={nameHint}
-					/>
-					<RadioChoices
-						legend="Start from"
-						name="new-repo-source"
-						value={source}
-						onChange={setSource}
-						options={SOURCES}
-					/>
-					{source === "import" ? (
-						<ImportSource
-							url={url}
-							setUrl={setUrl}
-							branch={branch}
-							setBranch={setBranch}
-							token={token}
-							setToken={setToken}
+			<Box asChild className={cn("grid gap-4", appear)}>
+				<form onSubmit={submit}>
+					<BoxBody className="grid gap-4">
+						<OwnerAndName
+							owners={owners}
+							chosen={chosen}
+							setOwner={setOwner}
+							name={name}
+							setName={setName}
+							hint={nameHint}
+							hintKey={hintKey}
 						/>
-					) : null}
-					{source === "copy" ? <CopySource repos={repos} copyFrom={copyFrom} setCopyFrom={setCopyFrom} /> : null}
-					{source === "empty" ? <FirstCommitFields first={first} setFirst={setFirst} /> : null}
-					<RadioChoices
-						legend="Who can see it"
-						name="new-repo-visibility"
-						value={visibility}
-						onChange={setVisibility}
-						options={VISIBILITIES}
-					/>
-					{error ? (
-						<p className="error" role="alert">
-							{error}
-						</p>
-					) : null}
-					<div className="manage__actions">
-						<button type="submit" className="accent" disabled={!ready || busy}>
-							{submitLabel}
-						</button>
-						<a className="button" href={href.repos()}>
-							Cancel
-						</a>
-					</div>
-				</div>
-			</form>
+						<RadioChoices
+							legend="Start from"
+							name="new-repo-source"
+							value={source}
+							onChange={setSource}
+							options={SOURCES}
+						/>
+						{/* What each source asks for folds open in its place as it's chosen, and the last one folds away. */}
+						<div>
+							<Folding open={source === "import"}>
+								<ImportSource
+									url={url}
+									setUrl={setUrl}
+									branch={branch}
+									setBranch={setBranch}
+									token={token}
+									setToken={setToken}
+								/>
+							</Folding>
+							<Folding open={source === "copy"}>
+								<CopySource repos={repos} copyFrom={copyFrom} setCopyFrom={setCopyFrom} />
+							</Folding>
+							<Folding open={source === "empty"}>
+								<FirstCommitFields first={first} setFirst={setFirst} />
+							</Folding>
+						</div>
+						<RadioChoices
+							legend="Who can see it"
+							name="new-repo-visibility"
+							value={visibility}
+							onChange={setVisibility}
+							options={VISIBILITIES}
+						/>
+						{error ? (
+							<p className="my-3.75 animate-appear text-bad" role="alert">
+								{error}
+							</p>
+						) : null}
+						<div className="flex flex-wrap gap-2">
+							<Button type="submit" variant="primary" disabled={!ready || busy}>
+								{submitLabel}
+							</Button>
+							<Button asChild>
+								<a href={href.repos()}>Cancel</a>
+							</Button>
+						</div>
+					</BoxBody>
+				</form>
+			</Box>
 		</NewRepoFrame>
 	);
 }

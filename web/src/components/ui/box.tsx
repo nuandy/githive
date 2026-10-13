@@ -1,12 +1,21 @@
 import { cva, type VariantProps } from "class-variance-authority";
+import { Slot } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
 // Boxes are ruled sections, not cards: a heavy rule above, a light one between rows, no panel or shadow. A callout
 // is a note with a colored rule down its side.
 
-export function Box({ className, ...props }: ComponentProps<"section">) {
-	return <section data-slot="box" className={cn("min-w-0 border-t-2 border-foreground", className)} {...props} />;
+export function Box({
+	className,
+	asChild = false,
+	...props
+}: ComponentProps<"section"> & {
+	/** Rule the one child instead (a form that is a box). */
+	asChild?: boolean;
+}) {
+	const Comp = asChild ? Slot.Root : "section";
+	return <Comp data-slot="box" className={cn("min-w-0 border-t-2 border-foreground", className)} {...props} />;
 }
 
 export function BoxHeader({ className, ...props }: ComponentProps<"div">) {

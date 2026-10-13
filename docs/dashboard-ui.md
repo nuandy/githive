@@ -54,9 +54,11 @@ Reach for `components/ui` before writing a control by hand:
 - `Button`: `variant` default, `primary` (ink), `go` (green: merge, approve), `danger`, `ghost`, `link`; `size` default,
   `sm`, `icon`; `asChild` to give a link a button's look.
 - `Badge` (a pill: `tone` good, bad, warn, needs, accent, neutral; `solid`, `outline`, `size="lg"`), `Counter`, `Lamp`.
-- `Box`, `BoxHeader`, `BoxBody`, `BoxRow`: ruled sections, not cards. `Callout` with a `tone`.
-- `Input`, `Textarea`, `NativeSelect`, `Label`.
-- `Collapse`: anything that opens and closes. `DropdownMenu`: menus from a button.
+- `Box`, `BoxHeader`, `BoxBody`, `BoxRow`: ruled sections, not cards (`asChild` rules a form). `Callout` with a
+  `tone`.
+- `Input`, `Textarea`, `NativeSelect`, `Label`; `Field` holds a label, its control and a `FieldHint` under them.
+- `Collapse`: anything that opens and closes; `Fold` drops what it holds once folded, and unfolds it again as it comes
+  back (a row a search leaves out, the fields for a choice). `DropdownMenu`: menus from a button.
 - Native `<details>` take the `disclosure` class to unfold instead of jumping open.
 
 To add a shadcn component, run from the repository root: `npx shadcn@latest add <name>` (`components.json` points it
@@ -69,7 +71,7 @@ lucide icons for `Icon`, and restyle it from the theme.
 - What appears (loaded content, a message, a confirm) fades in: `animate-appear`. A page fades in as you go to it
   (`PageBoundary`); what's there from its first render comes with that fade, so what fades in on its own later (a
   tab's content, a bumped count) waits until it has changed (`useChanged`).
-- What opens and closes folds its height: `Collapse`, `disclosure`, or grid rows `0fr ↔ 1fr`.
+- What opens and closes folds its height: `Collapse` or `Fold`, `disclosure`, or grid rows `0fr ↔ 1fr`.
 - Menus and other overlays grow from their trigger and fade, both ways.
 - Swapped content cross-fades; what leaves goes before it's removed (`useLingering`).
 - Changing numbers bump (`animate-bump`); reordered rows glide (FLIP).
