@@ -34,7 +34,10 @@ export class ScrollMemory {
 	private held = false;
 	current: string;
 
-	constructor(current?: string, private makeKey: () => string = newKey) {
+	constructor(
+		current?: string,
+		private makeKey: () => string = newKey,
+	) {
 		this.current = current ?? makeKey();
 	}
 

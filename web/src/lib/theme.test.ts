@@ -33,7 +33,8 @@ function fakeWindow({ stored, systemDark = false }: { stored?: string | null; sy
 		}),
 		addEventListener: () => {},
 		getComputedStyle: () => ({
-			getPropertyValue: (name: string) => (name === "--card" ? (classes.has("dark") ? " #dark-card" : "#light-card") : ""),
+			getPropertyValue: (name: string) =>
+				name === "--card" ? (classes.has("dark") ? " #dark-card" : "#light-card") : "",
 		}),
 	});
 	return {
