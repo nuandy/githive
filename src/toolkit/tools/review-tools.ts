@@ -1,6 +1,7 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { questionHints, voteHints } from "../clef-hints";
 import { effectivePolicy } from "../votes";
+import { holds } from "./merge-tools";
 import { holdKey } from "../work";
 import type { ToolHandlers } from "./context";
 import { branchSettings, hostedRoles, shardVotesIfBusy, votesFor } from "./repo";
@@ -17,13 +18,20 @@ export const reviewTools: ToolHandlers = {
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
 		const change = optionalString(args, "change");
 		const evidence = requiredString(args, "evidence");
+		const role = requiredString(args, "role");
+		// A vote without a review taken first (credentials) still counts against the owner's limit.
+		if (ctx.ownerLimits) {
+			const counted = await holds({ ctx, repo }, commit, role, reviewer);
+			const refused = counted ? null : await ctx.ownerLimits.take("review");
+			if (refused) fail(403, refused);
+		}
 		const { vague, thin } = await voteHints(ctx, { verdict, evidence });
 		const outcome = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
 			{
 				commit,
 				...(change ? { change } : {}),
 				reviewer,
-				role: requiredString(args, "role"),
+				role,
 				verdict,
 				evidence,
 				...(thin ? { thin: true as const } : {}),
@@ -32,7 +40,7 @@ export const reviewTools: ToolHandlers = {
 			stamper,
 		);
 		// The review is done, so drop the hold credentials placed when the review began.
-		await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
+		await ctx.reviews?.release(repo, holdKey(commit, role), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
 		// The vote counts either way; the reply only says its evidence may not do its job.
 		if (vague) return { ...(outcome as Record<string, unknown>), vagueEvidence: true };

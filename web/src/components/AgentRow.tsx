@@ -14,6 +14,7 @@ import type { AgentActions } from "./AgentsPage";
 import { Steps } from "./AgentsConnect";
 import { ConfirmButton } from "./Confirm";
 import { CopyBlock } from "./CopyBlock";
+import { AgentLimitsPanel } from "./AgentLimitsPanel";
 import { Icon } from "./Icon";
 
 type Token = MyAgent["tokens"][number];
@@ -84,6 +85,7 @@ export function AgentRow(props: AgentRowProps) {
 					</div>
 				</div>
 			) : null}
+			{active ? <AgentLimitsPanel {...props} /> : null}
 			<AgentTokens {...props} active={active} />
 		</li>
 	);

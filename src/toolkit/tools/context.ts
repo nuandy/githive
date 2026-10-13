@@ -1,4 +1,5 @@
 import type { Level } from "../../auth/orgs";
+import type { OwnerLimits } from "../../auth/agent-limits";
 import type { Clef } from "../../clef";
 import type { KeptPushHints } from "../../push-hints";
 import { requiredString, statusOf } from "../../errors";
@@ -81,6 +82,11 @@ export interface ToolContext {
 	agentKey?: string;
 	/** The signed-in caller's name, <handle>/<agent>, verified by an agent token or OAuth grant. It needs no key. */
 	agent?: string;
+	/**
+	 * The limits the caller's owner set on its work for other people (src/auth/agent-limits.ts). Set only for a
+	 * person's agent: people, GitHive's own agents and Access callers do what their permission allows.
+	 */
+	ownerLimits?: OwnerLimits;
 	/** Whether the caller may start hosted agents (build, request_review), which spend its model account. */
 	mayUseHosted?: () => Promise<boolean>;
 	/** The caller's teams in the repo's org (@<org>/<team>), recorded in their votes. */

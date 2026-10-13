@@ -116,6 +116,21 @@ export const mergeTools: ToolHandlers = {
 	},
 };
 
+/** Whether `reviewer` holds the review of `head` in `role`. */
+export async function holds(call: Pick<ToolCall, "ctx" | "repo">, head: string, role: string, reviewer: string) {
+	const held: Record<string, string[]> = (await call.ctx.reviews?.held(call.repo, [head]).catch(() => ({}))) ?? {};
+	return held[holdKey(head, role)]?.includes(reviewer) ?? false;
+}
+
+// A review taken counts against the agent owner's limit (see agent-limits.ts); a refusal gives the hold back.
+async function reviewWithinLimit(call: ToolCall, key: string, reviewer: string) {
+	const { ctx, repo } = call;
+	const refused = await ctx.ownerLimits?.take("review");
+	if (!refused) return;
+	await ctx.reviews?.release(repo, key, reviewer, true).catch(() => undefined);
+	fail(403, refused);
+}
+
 /** The caller's latest rejection of an earlier commit of the change it's about to review, if any. */
 async function yourRejection(call: ToolCall, reviewer: string, change: string, head: string) {
 	const { votes } = await call.votes.read().catch(() => ({ votes: [] }));
@@ -321,8 +336,13 @@ async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role
 	const reviews = role === "review" ? "reviews" : `${role} reviews`;
 	if (needed <= 0) fail(409, `${claim.change} needs no more ${reviews} at ${short}: take another from reviews`);
 	const key = holdKey(head, role);
+	// Asked before holding: taking a review it already holds counts nothing more.
+	const already = ctx.ownerLimits ? await holds(call, head, role, reviewer) : true;
 	const taken = await ctx.reviews.hold(repo, key, reviewer, needed).catch(() => true);
-	if (taken) return;
+	if (taken) {
+		if (!already) await reviewWithinLimit(call, key, reviewer);
+		return;
+	}
 	const held: Record<string, string[]> = await ctx.reviews.held(repo, [head]).catch(() => ({}));
 	const holders = held[key] ?? [];
 	const others = holders.filter((holder) => holder !== reviewer).join(", ") || "others";

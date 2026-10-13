@@ -132,7 +132,10 @@ const STEPS: Record<string, Step> = {
 	},
 	vote: voteStep,
 	add_work: addedStep,
-	reviews: (reply) => (isEmpty(reply.reviews) ? NONE_NOW : undefined),
+	reviews: (reply) => {
+		if (text(reply.limit)) return "Your owner's limit leaves you no reviews of others' changes today (see limit).";
+		return isEmpty(reply.reviews) ? NONE_NOW : undefined;
+	},
 	backlog: (reply) => (isEmpty(reply.open) ? NONE_NOW : undefined),
 	wait: waitStep,
 	request_review: (reply) => {

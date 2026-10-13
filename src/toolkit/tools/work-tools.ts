@@ -10,7 +10,7 @@ import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
 import { pieceHints } from "../clef-hints";
 import { addDependencies, addWork, addWorks } from "../backlog-records";
-import { backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
+import { type BacklogView, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
 import { changeList, workItemFrom } from "./claim-input";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
@@ -22,6 +22,8 @@ import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONC
 export const workTools: ToolHandlers = {
 	async reviews({ ctx, repo, votes, registered, actAs, openWork }) {
 		const agent = actAs("agent");
+		const limit = await ctx.ownerLimits?.reached("review");
+		if (limit) return { reviews: [], limit };
 		const state = await openWork(agent);
 		const heads = state.open.flatMap((entry) => (entry.head ? [entry.head] : []));
 		const held = ctx.reviews ? await ctx.reviews.held(repo, heads).catch(() => ({})) : {};
@@ -42,8 +44,8 @@ export const workTools: ToolHandlers = {
 			...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
 		};
 	},
-	async backlog({ actAs, openWork }) {
-		const { open, waiting } = backlogFor(await openWork(actAs("agent")));
+	async backlog({ ctx, actAs, openWork }) {
+		const { open, waiting } = await withinOwnerLimits(ctx, backlogFor(await openWork(actAs("agent"))));
 		return {
 			open: open.slice(0, LISTED_AT_MOST),
 			...(open.length > LISTED_AT_MOST ? { more: open.length - LISTED_AT_MOST } : {}),
@@ -58,7 +60,8 @@ export const workTools: ToolHandlers = {
 		if (args.items !== undefined) {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
 				fail(400, `items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
-			const items = args.items.map((item) => workItemFrom(item as Record<string, unknown>));
+			const owned = (item: ReturnType<typeof workItemFrom>) => (ctx.identity ? { ...item, owner: ctx.identity } : item);
+			const items = args.items.map((item) => owned(workItemFrom(item as Record<string, unknown>)));
 			const ids = items.map((item) => item.id);
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
@@ -69,7 +72,9 @@ export const workTools: ToolHandlers = {
 		}
 		const item = workItemFrom(args);
 		const hints = await piecesLikeOpenWork(call, [item]);
-		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...sized([item], hints.big)[0]!, by });
+		const owner = ctx.identity ? { owner: ctx.identity } : {};
+		const piece = { ...sized([item], hints.big)[0]!, by, ...owner };
+		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), piece);
 		if (!added.ok) return { ok: false, reason: added.refused };
 		return withPieceHints({ ok: true, id: item.id }, hints);
 	},
@@ -187,6 +192,18 @@ async function dependOn(call: ToolCall, by: string) {
 	if (claim) fail(409, `${piece} is claimed by ${claim.agent}: its claim's after is its agent's to set`);
 	const added = await addDependencies(recordLog<Work>(ctx, repo, workRef(repo)), by, { piece, after, landsAfter });
 	return added.ok ? { ok: true, piece, after, landsAfter } : { ok: false, reason: added.refused };
+}
+
+/**
+ * The backlog as the caller's owner allows it: once the agent may build no more of other people's pieces today, they
+ * wait, saying why. A piece with no recorded owner counts as someone else's.
+ */
+async function withinOwnerLimits(ctx: ToolContext, backlog: BacklogView): Promise<BacklogView> {
+	const limit = await ctx.ownerLimits?.reached("build");
+	if (!limit) return backlog;
+	const others = (piece: BacklogView["open"][number]) => piece.owner !== ctx.identity;
+	const held = backlog.open.filter(others).map((piece) => ({ id: piece.id, reason: `your owner's limit: ${limit}` }));
+	return { open: backlog.open.filter((piece) => !others(piece)), waiting: [...backlog.waiting, ...held] };
 }
 
 /** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */

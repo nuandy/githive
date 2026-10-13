@@ -181,6 +181,20 @@ describe("a signed-in person", () => {
 		).toBe(401);
 	});
 
+	it("lists each agent's limits on work for other people, which only its owner sets", async () => {
+		const session = await signedIn();
+		const agent = await json(call("/me/agents", { ...post({ name: "builder" }), cookie: session }));
+		const listed = await json(call("/me/agents", { cookie: session }));
+		expect(listed[0]).toMatchObject({ limits: { build: 0, review: null }, today: { build: 0, review: 0 } });
+		const patch = (body: unknown) => ({ ...post(body), method: "PATCH", cookie: session });
+		expect(await json(call(`/me/agents/${agent.id}/limits`, patch({ build: 3 })))).toEqual({
+			agent: agent.id,
+			limits: { build: 3, review: null },
+		});
+		expect((await call(`/me/agents/${agent.id}/limits`, patch({ review: -1 }))).status).toBe(400);
+		expect((await call("/me/agents/someone-elses/limits", patch({ build: 1 }))).status).toBe(404);
+	});
+
 	it("refuses a write that comes from another site, even with the session cookie", async () => {
 		const session = await signedIn();
 		const forged = await call("/me/agents", {

@@ -9,7 +9,8 @@ import type { ClaimOutcome } from "../claim-store";
 import { BUILDING_IDLE_MS } from "../staleness";
 import type { Args, ToolCall, ToolHandlers } from "./context";
 import { giveUpGitHubChange } from "./github-tools";
-import { containerChecks, shardIfBusy, STALE_AFTER_MS, storeFor } from "./repo";
+import type { Work } from "../work";
+import { containerChecks, recordLog, shardIfBusy, STALE_AFTER_MS, storeFor, workRef } from "./repo";
 
 // Tools for claims: claim, release, claims, and build (a claim worked by GitHive's hosted builder).
 
@@ -58,7 +59,11 @@ export const claimTools: ToolHandlers = {
 		const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 		// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
 		const claimedAt = Date.now();
-		const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
+		// Asked before claiming: claiming again renews what was counted then.
+		const renewing = (await call.claimOf(change))?.agent === agent;
+		const claimStore = sharded ? storeFor(ctx, repo, sharded) : store;
+		const outcome = await claimStore.claim(input, stamper);
+		if (outcome.ok) await keepToOwnerLimit(call, claimStore, { change, agent, renewing });
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
 		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
@@ -130,6 +135,29 @@ async function sameWorkAs(call: ToolCall, claim: { change: string; agent: string
 	if (!match) return undefined;
 	const intent = match.intent.split("\n")[0] ?? "";
 	return { change: match.change, agent: match.agent, intent, likelihood: same.likelihood };
+}
+
+/**
+ * Counts a claimed piece of someone else's backlog against the agent owner's limit (see agent-limits.ts). Counted
+ * once claimed, so losing a race for a piece costs nothing; a refusal gives the claim back.
+ */
+async function keepToOwnerLimit(
+	call: ToolCall,
+	claimStore: ToolCall["store"],
+	claimed: { change: string; agent: string; renewing: boolean },
+) {
+	const { ctx, repo, stamper } = call;
+	if (!ctx.ownerLimits) return;
+	if (claimed.renewing) return;
+	const backlog = await recordLog<Work>(ctx, repo, workRef(repo)).read();
+	const piece = backlog?.commit.state.items.find((item) => item.id === claimed.change);
+	// Not a backlog piece: the agent's own new work.
+	if (!piece) return;
+	if (piece.owner === ctx.identity) return;
+	const refused = await ctx.ownerLimits.take("build");
+	if (!refused) return;
+	await claimStore.release({ change: claimed.change, agent: claimed.agent, reason: "its owner's limit" }, stamper);
+	fail(403, refused);
 }
 
 // GitHive's copies of GitHub's branches (github/<branch>) are written by the toolkit, forced at each import: no change

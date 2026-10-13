@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { AgentLimitStore } from "../auth/agent-limits";
 import { type Principal, agentNameOf, byOf } from "../auth/principal";
 import { type RepoRef, resolveRepo } from "../auth/access-control";
 import { type Level, OrgStore } from "../auth/orgs";
@@ -49,12 +50,16 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 	const githubAccount = person
 		? async () => (env.DB ? new IdentityStore(env.DB).githubAccountOf(person.id) : null)
 		: undefined;
+	// A person's agent works for other people only as far as its owner allows (see agent-limits.ts).
+	const ownerLimits =
+		principal?.kind === "agent" ? new AgentLimitStore(env.DB).ownerLimits(principal.agent.id) : undefined;
 	const caller: Parameters<typeof toolContextFor>[2] = {};
 	if (agent) caller.agent = agent;
 	else if (agentKey) caller.agentKey = agentKey;
 	if (teamsOf) caller.teamsOf = teamsOf;
 	if (mayUseHosted) caller.mayUseHosted = mayUseHosted;
 	if (githubAccount) caller.githubAccount = githubAccount;
+	if (ownerLimits) caller.ownerLimits = ownerLimits;
 	return toolContextFor(env, principal ? byOf(principal) : undefined, caller);
 };
 

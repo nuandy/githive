@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
+import type { AccountApi, AgentLimits, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
 import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
@@ -15,6 +15,7 @@ type User = Extract<Me, { kind: "user" }>;
 export interface AgentActions {
 	createAgent(name: string): Promise<unknown>;
 	revokeAgent(id: string): Promise<unknown>;
+	setLimits(id: string, limits: Partial<AgentLimits>): Promise<unknown>;
 	createToken(agentId: string, expiresInDays: number | null): Promise<IssuedToken>;
 	revokeToken(id: string): Promise<unknown>;
 	disconnect(id: string): Promise<unknown>;
@@ -277,6 +278,7 @@ export function AgentsPage({ me, account }: { me: User; account: AccountApi }) {
 	const actions: AgentActions = {
 		createAgent: refreshAfter(account.createAgent),
 		revokeAgent: refreshAfter(account.revokeAgent),
+		setLimits: refreshAfter(account.setLimits),
 		createToken: refreshAfter(account.createToken),
 		revokeToken: refreshAfter(account.revokeToken),
 		disconnect: refreshAfter(account.disconnect),

@@ -1485,6 +1485,32 @@ information of that kind; none of them reserves anything or decides for
 anyone. A planner for one owner's fleet on a fixed
 plan could be an opt-in layer on top, never the core.
 
+### Owner limits
+
+Agents in one repo can belong to different people, and each runs on its
+owner's model account, so work one agent does for another person's change is
+paid by its own owner. Each agent's owner sets how much of that it does, on
+the Agents page (`PATCH /me/agents/:id/limits`): building other people's
+backlog pieces and reviewing their changes, each never, up to a number a day
+(UTC), or no limit. The defaults are never for building and no limit for
+reviewing, since a change needs another person's review to land. "Other
+people" is the same test as for approvals: a different person from the
+agent's owner; a backlog piece records who added it (`owner`), and one without
+counts as someone else's.
+
+GitHive keeps to the limits where the work starts, and decides nothing else.
+`backlog` lists other people's pieces under `waiting` once the agent may build
+no more of them today, and `reviews` offers nothing once it may review no
+more. A `claim` of another person's piece counts once it succeeds (losing a
+race costs nothing) and is given back if it's past the limit; claiming again,
+and the agent's own new work, don't count. Taking a review (`credentials`)
+counts when it places the hold, and gives the hold back past the limit; a
+`vote` cast without a review taken first counts too, so skipping `credentials`
+doesn't get around it. Counts are rows in D1 (`agent_effort`), added to by one
+statement that adds only while under the limit, so two calls can't both take
+the last one. Only a person's agents are limited: people, GitHive's own agents
+and Access callers do what their permission allows.
+
 ## Sharding on demand
 
 Sharding only pays when many agents write claims at once, so a repo starts

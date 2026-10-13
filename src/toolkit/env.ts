@@ -1,4 +1,5 @@
 import type { ChangeAwareness } from "../footprint-cache";
+import type { OwnerLimits } from "../auth/agent-limits";
 import { clefOn } from "../clef";
 import type { Conversation } from "../sandbox";
 import { type GitHubImportResult, githubGate } from "../gate-github";
@@ -219,6 +220,7 @@ export function toolContextFor(
 		teamsOf?: (repo: string) => Promise<string[]>;
 		mayUseHosted?: () => Promise<boolean>;
 		githubAccount?: () => Promise<string | null>;
+		ownerLimits?: OwnerLimits;
 	} = {},
 ): ToolContext {
 	return {

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { AgentLimitStore, limitsFrom } from "./agent-limits";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
@@ -171,7 +172,29 @@ function accountRoutes(app: Hono<AuthEnv>) {
 		return c.json({ ...describe(principal), hostedAgents: hosted });
 	});
 
-	app.get("/me/agents", async (c) => c.json(await store(c.env).agents(signedInUser(c.get("principal")).id)));
+	// Each agent with how much it may do for other people, and how much it did today.
+	app.get("/me/agents", async (c) => {
+		const agents = await store(c.env).agents(signedInUser(c.get("principal")).id);
+		const limits = new AgentLimitStore(c.env.DB);
+		const today = await limits.countsToday(agents.map((agent) => agent.id));
+		const described = agents.map(async (agent) => ({
+			...agent,
+			limits: await limits.limitsOf(agent.id),
+			today: today[agent.id],
+		}));
+		return c.json(await Promise.all(described));
+	});
+
+	// The owner's limits on an agent's work for other people: build and review, each a number a day or null.
+	app.patch("/me/agents/:id/limits", async (c) => {
+		const user = signedInUser(c.get("principal"));
+		const agent = await store(c.env).ownAgent(user.id, c.req.param("id"));
+		const body = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+		const limits = new AgentLimitStore(c.env.DB);
+		const next = limitsFrom(body, await limits.limitsOf(agent.id));
+		await limits.setLimits(agent.id, next);
+		return c.json({ agent: agent.id, limits: next });
+	});
 
 	app.post("/me/agents", async (c) => {
 		const user = signedInUser(c.get("principal"));

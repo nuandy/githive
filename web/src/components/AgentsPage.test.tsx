@@ -17,6 +17,7 @@ const noop = async () => ({});
 const actions: AgentActions = {
 	createAgent: noop,
 	revokeAgent: noop,
+	setLimits: noop,
 	createToken: async () => ({
 		token: "ghv_x",
 		id: "t",
@@ -125,6 +126,22 @@ describe("the Agents page", () => {
 		expect(text).toContain("New token");
 		expect(html.match(/Expires in 90 days/g)).toHaveLength(1);
 		expect(html).toContain('<option value="90" selected="">');
+	});
+
+	it("shows each active agent's limits on work for other people, building none of theirs by default", () => {
+		const html = render();
+		expect(visibleText(html)).toContain("Work for other people, in repos you share with them");
+		// No limits recorded yet: the defaults, never building theirs and reviewing without limit.
+		expect(html).toMatch(/id="build-a1"[^>]*>.*?<option value="never" selected="">/s);
+		expect(html).toMatch(/id="review-a1"[^>]*>.*?<option value="any" selected="">/s);
+		const limited = render({
+			agents: [{ ...agents[0]!, limits: { build: 3, review: 0 }, today: { build: 2, review: 0 } }],
+		});
+		expect(limited).toMatch(/id="build-a1"[^>]*>.*?<option value="daily" selected="">/s);
+		expect(limited).toContain('value="3"');
+		expect(visibleText(limited)).toContain("2 today");
+		// A revoked agent does nothing, so it has no limits to set.
+		expect(html).not.toContain('id="build-a2"');
 	});
 
 	it("shows a new token once, with the command that uses it", () => {

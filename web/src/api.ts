@@ -451,6 +451,15 @@ export interface MyAgent {
 	createdAt: string;
 	revokedAt: string | null;
 	tokens: AgentToken[];
+	/** The most it does for other people a day: 0 is never, null no limit. */
+	limits?: AgentLimits;
+	/** What it did for other people today (UTC). */
+	today?: { build: number; review: number };
+}
+
+export interface AgentLimits {
+	build: number | null;
+	review: number | null;
 }
 
 /** A token just made: `token` is the secret, shown this once. */
@@ -752,6 +761,8 @@ export const account = {
 	agents: () => call<MyAgent[]>("GET", "/me/agents"),
 	createAgent: (name: string) => call<MyAgent>("POST", "/me/agents", { name }),
 	revokeAgent: (id: string) => call<unknown>("DELETE", `/me/agents/${encodeURIComponent(id)}`),
+	setLimits: (id: string, limits: Partial<AgentLimits>) =>
+		call<unknown>("PATCH", `/me/agents/${encodeURIComponent(id)}/limits`, limits),
 	createToken: (agentId: string, expiresInDays: number | null) =>
 		call<IssuedToken>("POST", `/me/agents/${encodeURIComponent(agentId)}/tokens`, { expires_in_days: expiresInDays }),
 	revokeToken: (id: string) => call<unknown>("DELETE", `/me/tokens/${encodeURIComponent(id)}`),

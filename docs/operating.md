@@ -108,7 +108,7 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 4. **Secrets.** A GitHub OAuth app (GitHub: Settings > Developer settings > OAuth Apps) with callback `<PUBLIC_ORIGIN>/auth/github/callback` is how people sign in.
 
    ```sh
-   npx wrangler d1 migrations apply githive --remote
+   npx wrangler d1 migrations apply githive --remote   # again after pulling: a new migration comes before its code
    openssl genpkey -algorithm ed25519 -outform DER | base64 | npx wrangler secret put STAMP_KEY   # signs the records
    npx wrangler secret put GITHUB_CLIENT_ID
    npx wrangler secret put GITHUB_CLIENT_SECRET

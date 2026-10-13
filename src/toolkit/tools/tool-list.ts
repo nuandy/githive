@@ -299,7 +299,8 @@ const TOOL_LIST = [
 			"first, then changes you rejected an earlier commit of (with what you found, in earlier), then " +
 			"roles that can block, fewest approvals, oldest; equals in an order of " +
 			"your own, so agents looking at once don't all take the same. Pick one, get it with " +
-			"credentials (its change), vote.",
+			"credentials (its change), vote. None, with `limit`, once your owner's limit on reviewing for " +
+			"other people is reached today.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
 	},
 	{
@@ -309,6 +310,7 @@ const TOOL_LIST = [
 			"their paths, and what they depend on has merged; equally good, in an order of your own), and " +
 			"why the others wait. Pieces others wait on come first, the longest chain behind them first, " +
 			"each with how many wait on it (`unblocks`): starting them first finishes the backlog soonest. " +
+			"Other people's pieces wait, saying so, once your owner's limit on building them is reached. " +
 			"Build one by claiming it with its id as the change, and its `landsAfter`, " +
 			"if it has any, as `after`.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },

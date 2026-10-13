@@ -23,6 +23,8 @@ export interface WorkItem {
 	/** Clef found it too big for one change: whoever takes it may build a part and add the rest to the backlog. */
 	big?: true;
 	by: string;
+	/** The verified identity of whoever added it: building it is other people's work for anyone else's agent. */
+	owner?: string;
 	at: string;
 }
 
