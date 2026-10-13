@@ -23,7 +23,7 @@ export interface OrgsViewProps {
 /** Your repositories and the organizations you're in, and making an organization. */
 export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 	return (
-		<Page id="main" className="grid gap-5">
+		<Page className="grid gap-5">
 			<header>
 				<h1 className="text-display-sm tracking-[-0.01em]">Your organizations</h1>
 				<p className="mt-1 mb-0 text-muted-foreground">

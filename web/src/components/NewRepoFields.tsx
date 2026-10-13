@@ -35,7 +35,7 @@ const LEGEND = "px-0.5 text-body-sm font-semibold";
 /** The page around the form, or around what shows instead of it. */
 export function NewRepoFrame({ children }: { children: ReactNode }) {
 	return (
-		<Page id="main" className="grid gap-5">
+		<Page className="grid gap-5">
 			<header>
 				<h1 className="text-display-sm tracking-[-0.01em]">New repository</h1>
 				<p className="mt-1 mb-0 text-muted-foreground">

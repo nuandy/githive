@@ -55,3 +55,29 @@ describe("the top bar, signed in", () => {
 		expect(tag("Admin")).not.toMatch(/\bml-auto\b/);
 	});
 });
+
+describe("the breadcrumbs", () => {
+	const crumbs = [
+		{ label: "Repositories", href: "#/" },
+		{ label: "acme/storefront", href: "#/repos/acme/storefront" },
+		{ label: "Let shoppers apply a coupon code in the cart drawer." },
+	];
+	const items = (html: string) => [...html.matchAll(/<li class="([^"]*)"/g)].map((match) => match[1]!);
+
+	it("lets only the last crumb shrink, so the others never print under it", () => {
+		const [first, second, last] = items(renderToStaticMarkup(<TopBar crumbs={crumbs} />));
+		expect(first).toMatch(/\bshrink-0\b/);
+		expect(second).toMatch(/\bshrink-0\b/);
+		expect(last).toMatch(/\bmin-w-0\b/);
+		expect(last).not.toMatch(/\bshrink-0\b/);
+	});
+
+	it("keeps only the last crumb on a phone, and a lone crumb always", () => {
+		const [first, second, last] = items(renderToStaticMarkup(<TopBar crumbs={crumbs} />));
+		expect(first).toMatch(/\bto-560:hidden\b/);
+		expect(second).toMatch(/\bto-560:hidden\b/);
+		expect(last).not.toMatch(/\bto-560:hidden\b/);
+		const [only] = items(renderToStaticMarkup(<TopBar crumbs={[{ label: "Inbox" }]} />));
+		expect(only).not.toMatch(/\bto-560:hidden\b/);
+	});
+});

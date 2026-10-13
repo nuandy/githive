@@ -100,7 +100,7 @@ export function AgentsView({
 	);
 
 	return (
-		<Page id="main" className="grid gap-4">
+		<Page className="grid gap-4">
 			<header>
 				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Agents</h1>
 				<p className="m-0 text-muted-foreground">

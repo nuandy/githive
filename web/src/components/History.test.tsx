@@ -32,7 +32,7 @@ const landed: BranchHistory = {
 		},
 	],
 };
-const render = (history: BranchHistory | undefined, error?: unknown) =>
+const render = (history: BranchHistory | undefined, error?: string) =>
 	visibleText(renderToStaticMarkup(<History repo="acme/web" history={history} error={error} />));
 
 describe("the History tab", () => {
@@ -56,6 +56,16 @@ describe("the History tab", () => {
 	it("says when nothing has landed, while it loads, and when it couldn't load", () => {
 		expect(render({ branch: "main", total: 0, changes: [] })).toContain("Nothing has landed on main yet");
 		expect(render(undefined)).toContain("Loading history");
-		expect(render(undefined, new Error("offline"))).toContain("history couldn t be loaded");
+		expect(render(undefined, "offline")).toContain("history couldn t be loaded");
+	});
+
+	it("says why the history couldn't load, and offers to try again", () => {
+		const text = visibleText(
+			renderToStaticMarkup(
+				<History repo="acme/docs" history={undefined} error="the server timed out" onRetry={() => undefined} />,
+			),
+		);
+		expect(text).toContain("The history couldn t be loaded: the server timed out.");
+		expect(text).toContain("Try again");
 	});
 });

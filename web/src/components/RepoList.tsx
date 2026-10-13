@@ -242,7 +242,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 	let shownAbove = phase !== "list" || noMatch;
 
 	return (
-		<Page id="main">
+		<Page>
 			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
 				<div className="grid min-w-0 gap-2">
 					<h1 className="text-display tracking-[-0.01em]">Repositories</h1>

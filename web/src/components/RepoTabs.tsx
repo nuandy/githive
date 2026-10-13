@@ -24,6 +24,7 @@ import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
+import { LoadError } from "./LoadError";
 import { StatusIcon, StatusPill, TONE_TEXT } from "./StatusPill";
 import { Badge, Counter } from "./ui/badge";
 import { Box, BoxBody, BoxHeader, Callout } from "./ui/box";
@@ -350,16 +351,28 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 }
 
 /** The Audit tab: rules broken on the project's branch, read from Git, and the reviews recorded. */
-export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
+export function AuditTab({
+	snapshot,
+	error,
+	onRetry,
+}: {
+	snapshot: RepoSnapshot;
+	/** Why the audit couldn't be read, while there's none to show. */
+	error?: string;
+	onRetry?: () => void;
+}) {
 	const { audit, votes } = snapshot;
-	// Once the records are replayed, what they found fades in where "Replaying" was.
-	const replayed = useChanged(Boolean(audit));
-	if (!audit)
+	// Once the records are replayed, what they found, or why they couldn't be, fades in where "Replaying" was.
+	const replayed = useChanged(audit ? "audit" : error ? "error" : "replaying");
+	if (!audit) {
+		if (error)
+			return <LoadError what="The audit" error={error} onRetry={onRetry} className={cn(replayed && "animate-fade")} />;
 		return (
 			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
 				Replaying the records from Git…
 			</p>
 		);
+	}
 	const open = audit.violations.filter((violation) => !violation.resolvedBy);
 	const resolved = audit.violations.filter((violation) => violation.resolvedBy);
 	const openHeadline = open.length ? counted(open.length, "open violation") : "No open violations";

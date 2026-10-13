@@ -301,7 +301,7 @@ export function Playground() {
 					</NarrowFrame>
 				</div>
 			) : (
-				<Page id="main">{hive}</Page>
+				<Page>{hive}</Page>
 			)}
 		</Shell>
 	);
