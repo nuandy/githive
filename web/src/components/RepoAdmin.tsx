@@ -93,6 +93,8 @@ export function RepoAdmin({
 						visibility={access.visibility}
 						manage={manage}
 						onChanged={onChanged}
+						confirming={confirming}
+						setConfirming={setConfirming}
 					/>
 				) : null}
 			</BoxBody>
@@ -231,19 +233,41 @@ interface VisibilityToggleProps extends RunProps {
 	visibility: "private" | "public";
 	manage: RepoManageApi;
 	onChanged: () => void;
+	confirming: string | null;
+	setConfirming: (id: string | null) => void;
 }
 
-function VisibilityToggle({ repo, visibility, manage, onChanged, run, busy, errorFor }: VisibilityToggleProps) {
-	const toggle = () => {
-		const next = visibility === "public" ? "private" : "public";
-		return run("visibility", () => manage.setVisibility(repo, next)).then((ok) => ok && onChanged());
-	};
+/** Making a repo public opens its code to everyone signed in, so it asks first; making it private doesn't. */
+export function VisibilityToggle({
+	repo,
+	visibility,
+	manage,
+	onChanged,
+	confirming,
+	setConfirming,
+	run,
+	busy,
+	errorFor,
+}: VisibilityToggleProps) {
+	const make = (next: "private" | "public") =>
+		run("visibility", () => manage.setVisibility(repo, next)).then((ok) => ok && onChanged());
 	return (
 		<div className={INLINE}>
-			<span className="text-body-sm font-semibold">Make it</span>
-			<Button size="sm" disabled={busy === "visibility"} onClick={toggle}>
-				{visibility === "public" ? "Private" : "Public"}
-			</Button>
+			{visibility === "private" ? (
+				<ConfirmButton
+					id="visibility"
+					confirming={confirming}
+					setConfirming={setConfirming}
+					label="Make public"
+					question={`Make ${repo} public? Anyone signed in to GitHive can read its code and history.`}
+					busy={busy === "visibility"}
+					onConfirm={() => make("public")}
+				/>
+			) : (
+				<Button size="sm" disabled={busy === "visibility"} onClick={() => make("private")}>
+					Make private
+				</Button>
+			)}
 			{errorFor("visibility")}
 		</div>
 	);
