@@ -8,7 +8,8 @@ import { identityName } from "./agent";
 export type Claim = RepoSnapshot["claims"][number];
 export type Vote = RepoSnapshot["votes"][number];
 
-export function claimStatus(claim: Claim): ChangeStatus {
+/** How a change stands, from its claim and the votes cast: rejections on its head come before its approval. */
+export function claimStatus(claim: Claim, votes: Vote[] = []): ChangeStatus {
 	if (claim.attention)
 		return {
 			kind: "needs-you",
@@ -30,6 +31,22 @@ export function claimStatus(claim: Claim): ChangeStatus {
 			label: "Changes requested",
 			tone: "bad",
 			description: `Blocked by ${claim.approval.vetoedBy.join(", ")}.`,
+		};
+	// A batch that failed leaves the change approved ("checks" blocks nothing) and its head rejected.
+	const rejected = rejectionsOnHead(claim, votes);
+	if (rejected.some((vote) => vote.role === "checks"))
+		return {
+			kind: "checks-failed",
+			label: "Checks failed",
+			tone: "bad",
+			description: "Its checks failed on this commit; its agent fixes it and pushes again.",
+		};
+	if (rejected.length)
+		return {
+			kind: "changes-requested",
+			label: "Changes requested",
+			tone: "bad",
+			description: "A reviewer asked for changes.",
 		};
 	if (claim.approval.approved)
 		return {
@@ -57,6 +74,14 @@ export function claimStatus(claim: Claim): ChangeStatus {
 			description: `Waiting for ${awaiting.join(", ")}, which can block it.`,
 		};
 	return { kind: "in-review", label: "In review", tone: "warn", description: "Waiting for approvals." };
+}
+
+/** Rejections on the change's current head from anyone but its agent: a reviewer's, or failed checks'. */
+export function rejectionsOnHead(claim: Claim, votes: Vote[]): Vote[] {
+	if (!claim.head) return [];
+	return votes.filter(
+		(vote) => vote.commit === claim.head && vote.reviewer !== claim.agent && vote.verdict === "reject",
+	);
 }
 
 /** Roles that can block the change and haven't approved yet (older servers don't say). */

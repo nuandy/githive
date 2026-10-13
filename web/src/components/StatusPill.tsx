@@ -13,6 +13,8 @@ export function statusIconName(kind: StatusKind): IconName {
 			return "ban";
 		case "needs-you":
 			return "alert";
+		case "checks-failed":
+			return "x";
 		default:
 			return "pull";
 	}

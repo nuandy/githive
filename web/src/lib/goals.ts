@@ -1,5 +1,5 @@
 import type { BacklogItem, HiveEvent, RepoLanding, RepoSnapshot } from "../api";
-import { claimAgent } from "./claimStatus";
+import { claimAgent, rejectionsOnHead } from "./claimStatus";
 import { timeOf } from "./model";
 
 // The Hive tab's goals: each change an agent announced, and everything that has happened to it since, put together
@@ -369,8 +369,7 @@ function stateOf(claim: Claim, votes: Vote[], landing: RepoLanding | undefined):
 	);
 	if (checking) return "landing";
 	// Before approval: a batch that failed leaves the change approved ("checks" blocks nothing) and its head rejected.
-	const onHead = votes.filter((vote) => vote.commit === claim.head && vote.reviewer !== claim.agent);
-	if (onHead.some((vote) => vote.verdict === "reject") || claim.approval.vetoedBy.length) return "revising";
+	if (rejectionsOnHead(claim, votes).length || claim.approval.vetoedBy.length) return "revising";
 	if (claim.approval.approved) return "approved";
 	return "in-review";
 }

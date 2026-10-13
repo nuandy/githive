@@ -9,6 +9,7 @@ import {
 	shardingSummary,
 	votesShardingSummary,
 	recordsBadge,
+	type Vote,
 } from "./claimStatus";
 
 const claim = repoSnapshot.claims[0]!;
@@ -64,6 +65,42 @@ describe("changes", () => {
 		expect(votesForClaim({ ...claim, head: "b1c2d3e4" }, repoSnapshot.votes)).toHaveLength(1);
 		expect(votesForClaim({ ...claim, head: null }, repoSnapshot.votes)).toEqual([]);
 		expect(votesForClaim(claim, [{ ...repoSnapshot.votes[0]!, commit: "" }])).toEqual([]);
+	});
+});
+
+describe("rejections on the change's head", () => {
+	const approved = { ...claim, hosted: undefined, approval: { ...claim.approval, approved: true, vetoedBy: [] } };
+	const head = approved.head!;
+	const vote = (over: Partial<Vote>): Vote => ({
+		commit: head,
+		reviewer: "githive-checks",
+		role: "checks",
+		verdict: "reject",
+		evidence: "checks failed: npm test exited 1",
+		at: "2026-10-13T10:00:00Z",
+		...over,
+	});
+
+	it("reads an approved change whose checks failed on its head as failed, not approved", () => {
+		expect(claimStatus(approved, [vote({})])).toMatchObject({
+			kind: "checks-failed",
+			label: "Checks failed",
+			tone: "bad",
+		});
+	});
+
+	it("reads a reviewer's rejection on the head as changes requested", () => {
+		expect(claimStatus(approved, [vote({ reviewer: "ines/claude", role: "review" })]).kind).toBe("changes-requested");
+	});
+
+	it("ignores rejections on an earlier head, and the author's own votes", () => {
+		expect(claimStatus(approved, [vote({ commit: "0000000old" })]).kind).toBe("approved");
+		expect(claimStatus(approved, [vote({ reviewer: approved.agent })]).kind).toBe("approved");
+		expect(claimStatus(approved, [vote({ verdict: "approve" })]).kind).toBe("approved");
+	});
+
+	it("reads as before without votes", () => {
+		expect(claimStatus(approved).kind).toBe("approved");
 	});
 });
 
