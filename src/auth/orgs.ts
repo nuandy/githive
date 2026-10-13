@@ -232,15 +232,20 @@ export class OrgStore {
 		}));
 	}
 
+	/** An org's invitations, each saying whether it waits on a GitHive admin approving the email. */
 	async invites(orgId: string) {
 		const { results } = await this.db
-			.prepare("SELECT email, role, created_at FROM org_invites WHERE org_id = ? ORDER BY created_at")
+			.prepare(
+				"SELECT o.email, o.role, o.created_at, i.email AS approved FROM org_invites o " +
+					"LEFT JOIN invites i ON i.email = o.email WHERE o.org_id = ? ORDER BY o.created_at",
+			)
 			.bind(orgId)
 			.all<Row>();
 		return results.map((row) => ({
 			email: String(row.email),
 			role: String(row.role) as Role,
 			createdAt: String(row.created_at),
+			...(row.approved === null ? { awaitingApproval: true } : {}),
 		}));
 	}
 
