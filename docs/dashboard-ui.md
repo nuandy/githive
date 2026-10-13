@@ -268,7 +268,9 @@ fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline befo
   choice, a tab, `-outline-offset-2`), a menu's items light up instead, and a hive cell draws it around its hexagon.
 - **A map of many things is one stop for Tab.** The Hive's map takes focus once (a roving `tabIndex`); the arrow keys go
   to the nearest cell that way (`nearestInDirection`), Enter or Space does what a click does, and a cell's details open
-  in a `Popover` that Escape closes, back to the cell.
+  in a `Popover` that Escape closes, back to the cell. A cell's name starts with what it shows, in full
+  ("OrderSummary.tsx: approved, …" for "Ord…mary.tsx"), so speech can click it (WCAG 2.5.3); the words and chips it
+  shows cut to fit are drawn over its button, not in it.
 - **Links in running text are underlined** (WCAG 1.4.1): a link in a paragraph, a callout, a `<blockquote>` or
   `<figcaption>`, or a block marked `prose` (a list of sentences, a timeline entry's body) is underlined at 40% of the
   link's color, by the base rule. Links that stand on their own (navigation, tabs, breadcrumbs, pills, a row's title, a
