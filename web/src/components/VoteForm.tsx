@@ -3,7 +3,15 @@ import type { RepoSnapshot, VoteInput } from "../api";
 import { messageOf } from "../lib/errors";
 import { shortSha } from "../lib/model";
 import type { Claim, Vote } from "../lib/claimStatus";
-import { blockingRolesFor, listed, type Reader, voteRoles } from "../lib/decision";
+import {
+	blockingRolesFor,
+	holdersWords,
+	listed,
+	type Reader,
+	rolesBeyondReader,
+	startingRole,
+	voteRoles,
+} from "../lib/decision";
 import { roleName } from "../lib/roles";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
@@ -62,7 +70,8 @@ export function VoteForm({
 	className?: string;
 }) {
 	const { roles, exact } = voteRoles(policy, claim, reader);
-	const [role, setRole] = useState(initialRole ?? roles[0]?.role ?? "review");
+	// As the role it waits on, when that's the reader's: the Inbox's "Vote as payments" opens it as payments.
+	const [role, setRole] = useState(initialRole ?? startingRole(roles, claim.approval.awaiting) ?? "review");
 	const [choice, setChoice] = useState<Choice | null>(null);
 	const [evidence, setEvidence] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -133,6 +142,7 @@ export function VoteForm({
 	};
 
 	const unknown = exact ? [] : roles.filter((each) => each.granted !== true);
+	const beyond = rolesBeyondReader(policy, claim, reader);
 	return (
 		<form
 			id="vote"
@@ -153,6 +163,15 @@ export function VoteForm({
 				</span>
 			</div>
 			<div className="grid gap-2 px-4 pt-3.5 pb-4">
+				{beyond.map(({ role: waitsOn, holders }) => (
+					<p key={waitsOn} className="m-0 mb-1 flex max-w-measure items-start gap-2 text-ui text-muted-foreground">
+						<Icon name="alert" size={14} className="mt-0.75 shrink-0" />
+						<span>
+							This change waits on a {waitsOn} vote, which you can't give.
+							{holders.length ? ` ${capitalized(holdersWords(holders, reader))} can.` : null}
+						</span>
+					</p>
+				))}
 				{roles.length > 1 ? (
 					<div className="grid gap-1.5">
 						<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -242,6 +261,8 @@ function rolesHint(
 }
 
 const FEEDBACK = "m-0 pt-2 text-ui wrap-anywhere";
+
+const capitalized = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
 
 /** The submit button once a verdict is chosen: green to approve, red to send it back or block it. */
 const SUBMIT = {

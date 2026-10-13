@@ -5,6 +5,7 @@ import type { Claim, Vote } from "./claimStatus";
 import {
 	checksFor,
 	conflictOf,
+	holdersWords,
 	landQuestion,
 	landable,
 	landsWith,
@@ -14,6 +15,8 @@ import {
 	readerVote,
 	roleLines,
 	roleSaying,
+	rolesBeyondReader,
+	startingRole,
 	voteRoles,
 } from "./decision";
 
@@ -311,5 +314,30 @@ describe("the reader's part", () => {
 			"review",
 			"security",
 		]);
+	});
+
+	it("starts a vote as the first role the change waits on that the reader may vote as", () => {
+		const roles = [
+			{ role: "review", granted: true },
+			{ role: "security", granted: true },
+			{ role: "payments", granted: null },
+		];
+		expect(startingRole(roles, ["payments", "security"])).toBe("security");
+		expect(startingRole(roles, ["payments"])).toBe("payments");
+		expect(startingRole(roles, ["legal"])).toBe("review");
+		expect(startingRole(roles)).toBe("review");
+	});
+
+	it("says which roles it waits on that the reader can't give, and who can, in words", () => {
+		const paying = claim({ paths: ["src/payments/refunds.ts"] });
+		const waiting = { ...paying, approval: { ...paying.approval, awaiting: ["payments", "security"] } };
+		expect(rolesBeyondReader(policy, waiting, { by: "person:bob", teams: [] })).toEqual([
+			{ role: "payments", holders: ["@acme/payments"] },
+		]);
+		expect(rolesBeyondReader(policy, waiting, {})).toEqual([]);
+		expect(holdersWords(["@acme/payments", "person:lee", "githive"])).toBe(
+			"people in @acme/payments, a person and githive",
+		);
+		expect(holdersWords(["person:*", "person:lee"], { by: "person:lee" })).toBe("any person and you");
 	});
 });

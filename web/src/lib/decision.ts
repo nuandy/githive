@@ -320,3 +320,37 @@ export function voteRoles(
 	const exact = marked.every((each) => each.granted !== null);
 	return { roles: exact ? marked.filter((each) => each.granted) : marked, exact };
 }
+
+/**
+ * The role a vote starts as: the first the change waits on that the reader may vote as (theirs, else perhaps theirs),
+ * else the first offered.
+ */
+export function startingRole(
+	roles: { role: string; granted: boolean | null }[],
+	awaiting: string[] = [],
+): string | undefined {
+	const offered = (granted: boolean | null) =>
+		awaiting.find((role) => roles.some((each) => each.role === role && each.granted === granted));
+	return offered(true) ?? offered(null) ?? roles[0]?.role;
+}
+
+/** The roles the change waits on that the reader can't vote as, with who can. */
+export function rolesBeyondReader(
+	policy: Policy,
+	claim: Pick<Claim, "approval">,
+	reader: Reader,
+): { role: string; holders: string[] }[] {
+	return (claim.approval.awaiting ?? [])
+		.filter((role) => mayVoteAs(policy, role, reader) === false)
+		.map((role) => ({ role, holders: policy.grants?.[role] ?? [] }));
+}
+
+/** Who holds a role, in words: "people in @acme/payments", "any person", "you", an agent by its name. */
+export function holdersWords(holders: string[], reader: Reader = {}): string {
+	const words = holders.map((holder) => {
+		if (holder === "person:*") return "any person";
+		if (holder.startsWith("@")) return `people in ${holder}`;
+		return voterName(holder, reader);
+	});
+	return listed([...new Set(words)]);
+}
