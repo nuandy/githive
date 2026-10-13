@@ -467,6 +467,20 @@ const APP: Scene[] = [
 	page("visitor-private", "/repos/acme/docs", { who: "visitor" }),
 	page("visitor-sign-in", STOREFRONT, { who: "visitor", act: click("Sign in") }),
 	{ name: "visitor-sign-in-failed", url: "/?signin_error=not-invited#/", who: "visitor" },
+	// A request to join, noted under the account the server sent back in the fragment.
+	{
+		name: "visitor-sign-in-requested",
+		url: "/?signin_error=not-invited#signin-as=taylor%40mail.example",
+		who: "visitor",
+	},
+	// A session that ends while a repo is open: the next read answers 401, and the sign-in screen says so.
+	page("session-ended", STOREFRONT, {
+		act: async (p) => {
+			const ended = { status: 401, contentType: "application/json", body: JSON.stringify({ error: "signed out" }) };
+			await p.route("**/repos/**", (route) => route.fulfill(ended));
+			await p.waitForTimeout(6_000);
+		},
+	}),
 ];
 
 export const SCENES: Scene[] = [...APP, ...HIVE];

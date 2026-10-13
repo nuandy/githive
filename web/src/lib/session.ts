@@ -26,11 +26,25 @@ export function signinErrorOf(search: string): string | null {
 	return new URLSearchParams(search).get("signin_error");
 }
 
-/** The same URL without `signin_error`, for history.replaceState once the message is shown. */
+// A request to join comes back with the email it's noted under in the fragment, which the browser never sends on.
+const ACCOUNT_FRAGMENT = "#signin-as=";
+
+/** The email a request to join is noted under (`#signin-as=`), if the address carries it. */
+export function signinAccountOf(hash: string): string | null {
+	if (!hash.startsWith(ACCOUNT_FRAGMENT)) return null;
+	try {
+		return decodeURIComponent(hash.slice(ACCOUNT_FRAGMENT.length)) || null;
+	} catch {
+		return null;
+	}
+}
+
+/** The same URL without `signin_error` (or the account a request is noted under), for history.replaceState. */
 export function withoutSigninError(url: string): string {
 	const parsed = new URL(url);
 	parsed.searchParams.delete("signin_error");
-	return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+	const hash = parsed.hash.startsWith(ACCOUNT_FRAGMENT) ? "" : parsed.hash;
+	return `${parsed.pathname}${parsed.search}${hash}`;
 }
 
 /**
