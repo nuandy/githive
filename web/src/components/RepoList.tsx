@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { filterRepos, groupRepos, type RepoRow, type RepoState, repoState } from "../lib/repos";
 import { stretchWords } from "../lib/stretch";
 import { splitRepo } from "../lib/repoName";
@@ -153,6 +154,7 @@ function RepoGroup(props: {
 }) {
 	const { id, title, rows, matches, spaced } = props;
 	const shown = rows.filter(matches);
+	const staggers = useStagger(rows.length > 0);
 	// While it folds away, it still counts what it last showed.
 	const [count, setCount] = useState(shown.length);
 	if (shown.length && shown.length !== count) setCount(shown.length);
@@ -163,7 +165,7 @@ function RepoGroup(props: {
 				<h2 id={id} className="flex items-baseline gap-2 border-b border-border px-0.5 pt-2.5 pb-2.25 text-body">
 					{title} <GroupCount count={count} />
 				</h2>
-				<ul className="m-0 list-none p-0">
+				<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 					{rows.map((row) => {
 						const match = matches(row);
 						const ruled = match && above++ > 0;

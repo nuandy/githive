@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import type { OrgDetail, OrgRole } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
+import { useStagger } from "../hooks/useStagger";
 import { addedMessage, assignableRoles } from "../lib/orgs";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
@@ -58,6 +59,7 @@ export function MembersSection({
 		...org.members.map((member) => member.handle),
 		...org.invites.map((invite) => `invite:${invite.email}`),
 	]);
+	const staggers = useStagger(org.members.length > 0);
 
 	return (
 		<Box aria-labelledby="org-members">
@@ -66,7 +68,7 @@ export function MembersSection({
 					People
 				</h2>
 			</BoxHeader>
-			<ul className={ROWS}>
+			<ul className={cn(ROWS, staggers && "stagger")}>
 				{org.members.map((member) => {
 					const isMe = member.handle === me.handle;
 					// Only an owner changes or removes an owner.

@@ -2,6 +2,7 @@ import type { BranchHistory, LandedChange } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
+import { useStagger } from "../hooks/useStagger";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -76,8 +77,9 @@ export function History({ repo, history, error }: HistoryProps) {
 /** The changes, newest first; one landed since they first showed fades in. */
 function HistoryRows({ repo, changes }: { repo: string; changes: LandedChange[] }) {
 	const arrived = useArrivals(changes.map((landed) => landed.commit));
+	const staggers = useStagger(changes.length > 0);
 	return (
-		<ol className={COMMIT_LIST}>
+		<ol className={cn(COMMIT_LIST, staggers && "stagger")}>
 			{changes.map((landed) => (
 				<HistoryRow key={landed.commit} repo={repo} landed={landed} arrived={arrived(landed.commit)} />
 			))}

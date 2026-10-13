@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { RepoAudit, RepoSnapshot } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { identityName } from "../lib/agent";
 import type { Tone } from "../lib/changeStatus";
 import {
@@ -173,8 +174,9 @@ function Bumping({ count }: { count: number }) {
 /** The rows of a list that has some: those that come after it first showed fade in as they do. */
 function ChangeRows({ claims, repo, now, fades }: { claims: Claim[]; repo: string; now?: number; fades: boolean }) {
 	const arrived = useArrivals(claims.map((claim) => claim.change));
+	const staggers = useStagger(claims.length > 0);
 	return (
-		<ul className={cn("m-0 list-none p-0", fades && "animate-appear")}>
+		<ul className={cn("m-0 list-none p-0", staggers ? "stagger" : fades && "animate-appear")}>
 			{claims.map((claim) => (
 				<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} arrived={arrived(claim.change)} />
 			))}
@@ -245,6 +247,7 @@ const AUDIT_ICON = "mt-0.5 inline-flex shrink-0";
 
 function Violations({ title, violations }: { title: string; violations: RepoAudit["violations"] }) {
 	const changed = useChanged(violations.length);
+	const staggers = useStagger(violations.length > 0);
 	return (
 		<Box>
 			<BoxHeader>
@@ -253,7 +256,7 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 					{violations.length}
 				</Counter>
 			</BoxHeader>
-			<ul className="m-0 list-none p-0">
+			<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 				{violations.map((violation, index) => (
 					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} violation={violation} />
 				))}
@@ -289,9 +292,10 @@ function ViolationRow({ violation }: { violation: RepoAudit["violations"][number
 function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 	const key = (vote: RepoSnapshot["votes"][number]) => `${vote.reviewer}-${vote.commit}-${vote.at}`;
 	const arrived = useArrivals(votes.map(key));
+	const staggers = useStagger(votes.length > 0);
 	if (votes.length === 0) return <p className="my-3.75 px-0.5 py-3 text-muted-foreground">No reviews yet.</p>;
 	return (
-		<ul className="m-0 list-none p-0">
+		<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 			{votes.map((vote) => (
 				<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
 					<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>

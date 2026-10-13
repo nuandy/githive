@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
 import { ROW, ROW_ACTIONS, ROW_MAIN, ROWS } from "./ui/manage";
 
@@ -24,9 +25,12 @@ export function AdminRows<Item>({
 }) {
 	const read = useChanged(items === undefined) && "animate-appear";
 	const arrived = useArrivals((items ?? []).map(keyOf));
+	const staggers = useStagger(!!items?.length);
 	if (items === undefined) return <p className={LINE}>Loading…</p>;
 	if (items.length === 0) return <p className={cn(LINE, read)}>{empty}</p>;
-	return <ul className={ROWS}>{items.map((item) => children(item, arrived(keyOf(item))))}</ul>;
+	return (
+		<ul className={cn(ROWS, staggers && "stagger")}>{items.map((item) => children(item, arrived(keyOf(item))))}</ul>
+	);
 }
 
 /** One row on the Admin page: who it is, a line about them, any error, and the actions on them. */

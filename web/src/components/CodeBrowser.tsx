@@ -1,6 +1,7 @@
 import type { RepoFile, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
+import { useStagger } from "../hooks/useStagger";
 import { shortSha } from "../lib/model";
 import { counted } from "../lib/plural";
 import { splitRepo } from "../lib/repoName";
@@ -167,10 +168,11 @@ const ENTRY = cn(
 
 function FolderView({ files, path, link }: { files: string[]; path: string; link(path: string): string }) {
 	const parent = path.split("/").slice(0, -1).join("/");
+	const staggers = useStagger(true);
 	return (
 		<Box asChild>
 			<div>
-				<ul className="m-0 list-none p-0">
+				<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 					{path ? (
 						<li>
 							<a href={link(parent)} className={ENTRY}>

@@ -6,6 +6,7 @@ import { messageOf } from "../lib/errors";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useRowActions } from "../hooks/useRowActions";
+import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Box, BoxBody, BoxHeader } from "./ui/box";
@@ -151,6 +152,7 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 
 	// What's read fades in as it takes the place of "Loading…", and a collaborator added later on its own.
 	const arrived = useArrivals((collaborators ?? []).map((collaborator) => collaborator.handle));
+	const staggers = useStagger(!!collaborators?.length);
 	const read = useChanged(collaborators === undefined && !listError);
 	const line = cn(LINE, read && "animate-appear");
 
@@ -168,7 +170,7 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 					No collaborators: the owner's members have what the owner gives them.
 				</p>
 			) : null}
-			<ul className={ROWS} aria-labelledby="repo-collaborators">
+			<ul className={cn(ROWS, staggers && "stagger")} aria-labelledby="repo-collaborators">
 				{(collaborators ?? []).map((collaborator) => (
 					<CollaboratorRow
 						key={collaborator.handle}

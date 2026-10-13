@@ -128,6 +128,8 @@
 	--motion-fast: 150ms;
 	--motion-base: 250ms;
 	--motion-slow: 400ms;
+	/* How far behind the row above a list's row comes in, as the list first shows (the stagger utility). */
+	--stagger-step: 35ms;
 
 	--page-width: 1180px;
 	/* How far the sticky top bar reaches down the window; what sticks under it starts below this. */
@@ -191,6 +193,7 @@
 		--motion-fast: 0ms;
 		--motion-base: 0ms;
 		--motion-slow: 0ms;
+		--stagger-step: 0ms;
 	}
 }
 
@@ -350,6 +353,44 @@
 @utility duration-slow {
 	transition-duration: var(--motion-slow);
 	animation-duration: var(--motion-slow);
+}
+
+/* A list whose rows come in one after another as it first shows, each a step behind the one above. Only the first
+   ten step; the rest come with the tenth, so a long list is all in within half a second. useStagger says when: from the
+   moment the list has rows, for as long as that takes, and never for rows that come later. */
+@utility stagger {
+	& > * {
+		--stagger: 9;
+		animation: appear var(--motion-base) var(--ease-out) backwards;
+		animation-delay: calc(var(--stagger) * var(--stagger-step));
+	}
+	& > :nth-child(1) {
+		--stagger: 0;
+	}
+	& > :nth-child(2) {
+		--stagger: 1;
+	}
+	& > :nth-child(3) {
+		--stagger: 2;
+	}
+	& > :nth-child(4) {
+		--stagger: 3;
+	}
+	& > :nth-child(5) {
+		--stagger: 4;
+	}
+	& > :nth-child(6) {
+		--stagger: 5;
+	}
+	& > :nth-child(7) {
+		--stagger: 6;
+	}
+	& > :nth-child(8) {
+		--stagger: 7;
+	}
+	& > :nth-child(9) {
+		--stagger: 8;
+	}
 }
 
 /* A <details> that unfolds: its content's height grows from nothing and it fades in, and folds back the same way.

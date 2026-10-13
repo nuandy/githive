@@ -1,6 +1,7 @@
 import { identityName } from "../lib/agent";
 import { Fragment, type ReactNode } from "react";
 import { useArrivals } from "../hooks/useArrivals";
+import { useStagger } from "../hooks/useStagger";
 import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
@@ -227,10 +228,11 @@ export function Timeline({
 }) {
 	// What happens after the timeline first showed fades in as it joins.
 	const arrived = useArrivals(items.map((item) => item.key));
+	const staggers = useStagger(items.length > 0);
 	if (!items.length) return null;
 	const withLinks = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
-		<TimelineList className={className}>
+		<TimelineList className={cn(className, staggers && "stagger")}>
 			{items.map((item) => (
 				<TimelineEntry
 					key={item.key}

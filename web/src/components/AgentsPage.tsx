@@ -7,6 +7,7 @@ import { timeAgo } from "../lib/relativeTime";
 import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
 import { cn } from "../lib/utils";
 import { type RunAction, useRowActions } from "../hooks/useRowActions";
+import { useStagger } from "../hooks/useStagger";
 import { AgentRow, type RowShared } from "./AgentRow";
 import { ConfirmButton } from "./Confirm";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
@@ -207,6 +208,7 @@ function AgentList({
 	// What's read fades in as it takes the place of "Loading…"; an agent made later fades in on its own.
 	const read = useChanged(agents === undefined) && "animate-appear";
 	const arrived = useArrivals((agents ?? []).map((agent) => agent.id));
+	const staggers = useStagger(!!agents?.length);
 	if (agents === undefined)
 		return (
 			<p className={LINE} role="status">
@@ -223,7 +225,11 @@ function AgentList({
 		);
 	const live = agents.filter((agent) => !agent.revokedAt);
 	const revoked = agents.filter((agent) => agent.revokedAt);
-	return <ul className={ROWS}>{[...live, ...revoked].map((agent) => agentRow(agent, arrived(agent.id)))}</ul>;
+	return (
+		<ul className={cn(ROWS, staggers && "stagger")}>
+			{[...live, ...revoked].map((agent) => agentRow(agent, arrived(agent.id)))}
+		</ul>
+	);
 }
 
 interface ConnectedAppsProps extends RowShared {
@@ -247,6 +253,7 @@ function ConnectedApps({
 	// What's read fades in as it takes the place of "Loading…"; an app connected later fades in on its own.
 	const read = useChanged(connections === undefined) && "animate-appear";
 	const arrived = useArrivals((connections ?? []).map((connection) => connection.id));
+	const staggers = useStagger(!!connections?.length);
 	if (connections === undefined)
 		return (
 			<p className={LINE} role="status">
@@ -255,7 +262,7 @@ function ConnectedApps({
 		);
 	if (connections.length === 0) return <p className={cn(LINE, read)}>No apps connected over OAuth yet.</p>;
 	return (
-		<ul className={ROWS}>
+		<ul className={cn(ROWS, staggers && "stagger")}>
 			{connections.map((connection) => {
 				const key = `conn:${connection.id}`;
 				const error = errorFor(connection.id);

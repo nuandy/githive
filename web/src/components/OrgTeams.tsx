@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import type { OrgDetail } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { SLUG_HINT, slugProblem } from "../lib/orgs";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
@@ -32,6 +33,7 @@ export function TeamsSection({
 	const rowProps = { org, manager, actions, run, busy, confirming, setConfirming, errorFor };
 	// A team made since the page showed fades in.
 	const arrived = useArrivals(org.teams.map((team) => team.slug));
+	const staggers = useStagger(org.teams.length > 0);
 
 	const create = async (event: FormEvent) => {
 		event.preventDefault();
@@ -57,7 +59,7 @@ export function TeamsSection({
 				<code>{`security = @${org.slug}/security`}</code>: anyone on the team when they vote counts as that role.
 			</p>
 			{org.teams.length === 0 ? <p className={cn(LINE, "text-muted-foreground")}>No teams yet.</p> : null}
-			<ul className={ROWS}>
+			<ul className={cn(ROWS, staggers && "stagger")}>
 				{org.teams.map((team) => (
 					<TeamRow
 						key={team.id}

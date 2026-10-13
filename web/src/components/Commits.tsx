@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ChangeHistory } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -85,8 +86,9 @@ function When({ at }: { at: string }) {
 /** The commits of a list that has some, newest first, with their messages; a longer message unfolds. */
 function CommitRows({ commits, repo }: { commits: ChangeHistory["commits"]; repo: string }) {
 	const arrived = useArrivals(commits.map((commit) => commit.commit));
+	const staggers = useStagger(commits.length > 0);
 	return (
-		<ol className={COMMIT_LIST}>
+		<ol className={cn(COMMIT_LIST, staggers && "stagger")}>
 			{commits.map((commit) => {
 				const [subject, ...bodyLines] = commit.message.split("\n");
 				const body = bodyLines.join("\n").trim();

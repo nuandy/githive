@@ -1,6 +1,7 @@
 import type { InboxGroup } from "../lib/inbox";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
@@ -62,6 +63,7 @@ function InboxBody({ groups, loaded, error }: { groups: InboxGroup[]; loaded: bo
 
 function InboxRepo({ group, arrived }: { group: InboxGroup; arrived: boolean }) {
 	const items = useArrivals(group.items.map((item) => item.change));
+	const staggers = useStagger(group.items.length > 0);
 	return (
 		<Box className={cn("[&+&]:mt-4", arrived && "animate-appear")} aria-labelledby={`inbox-${group.repo}`}>
 			<BoxHeader>
@@ -71,7 +73,7 @@ function InboxRepo({ group, arrived }: { group: InboxGroup; arrived: boolean }) 
 				</h2>
 				<Counter>{group.items.length}</Counter>
 			</BoxHeader>
-			<ul className="m-0 list-none p-0">
+			<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 				{group.items.map((item) => (
 					<li
 						key={item.change}
