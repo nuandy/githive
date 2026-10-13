@@ -3,8 +3,6 @@ import type { LiveStatus } from "../lib/liveFeed";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Tabs, type TabItem } from "./Tabs";
-// Only the all-landed badge RepoPage puts by the name, until that page moves to utilities.
-import "./RepoHeader.css";
 
 const LIVE_WORDS: Record<Exclude<LiveStatus, "off">, { label: string; title: string }> = {
 	live: { label: "Live", title: "Connected: this page updates as soon as anything changes." },

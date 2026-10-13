@@ -18,7 +18,8 @@ export function statusIconName(kind: StatusKind): IconName {
 	}
 }
 
-const TONE_TEXT: Record<Tone, string> = {
+/** A tone as a text color. */
+export const TONE_TEXT: Record<Tone, string> = {
 	good: "text-good",
 	bad: "text-bad",
 	warn: "text-warn",
@@ -35,27 +36,27 @@ export function StatusIcon({
 	size?: number;
 }) {
 	return (
-		<span className={cn("mt-0.75 inline-flex shrink-0", TONE_TEXT[status.tone])} title={status.label}>
+		<span
+			className={cn("mt-0.75 inline-flex shrink-0 transition-colors duration-base", TONE_TEXT[status.tone])}
+			title={status.label}
+		>
 			<Icon name={statusIconName(status.kind)} size={size} label={status.label} />
 		</span>
 	);
 }
 
-// In a change row's title the pill is a size smaller, as ChangeList.css has it until the change list moves.
-const IN_CHANGE_ROW = String.raw`in-[.change-row\_\_title]:py-0 in-[.change-row\_\_title]:text-micro`;
-
-/** A colored status pill, e.g. "● Open", "Merged", "Needs you". */
+/** A colored status pill, e.g. "● Open", "Merged", "Needs you"; a size smaller beside a change row's title (sm). */
 export function StatusPill({
 	status,
 	size = "md",
 	solid = false,
 }: {
 	status: Pick<ChangeStatus, "kind" | "tone" | "label">;
-	size?: "md" | "lg";
+	size?: "sm" | "md" | "lg";
 	solid?: boolean;
 }) {
 	return (
-		<Badge tone={status.tone} solid={solid} size={size === "lg" ? "lg" : "default"} className={IN_CHANGE_ROW}>
+		<Badge tone={status.tone} solid={solid} size={size === "md" ? "default" : size}>
 			<Icon name={statusIconName(status.kind)} size={size === "lg" ? 16 : 13} />
 			{status.label}
 		</Badge>

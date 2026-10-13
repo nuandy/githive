@@ -1,8 +1,0 @@
-/* By the repo's name once everything has landed (RepoPage's AllLandedBadge), until that page moves to utilities. */
-.repo-header__done {
-	padding: 2px 10px;
-	border: 1px solid color-mix(in srgb, var(--good) 40%, transparent);
-	border-radius: 999px;
-	font-size: 13px;
-	font-weight: 600;
-}

@@ -4,7 +4,12 @@ import { usePoll } from "../hooks/usePoll";
 import { messageOf } from "../lib/errors";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
+import { Box, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { Label, NativeSelect } from "./ui/field";
+import { LINE } from "./ui/manage";
 
 // GitHive's hosted agents on the Agents tab: who they are and what each is on, and, for people who can write, a way
 // to start some for a while or stop them. They join the hive like any agent: they take pieces of the backlog, review
@@ -29,13 +34,16 @@ export function agentWords(agent: HostedAgentAccount): string {
 
 function AgentRows({ agents }: { agents: HostedAgentAccount[] }) {
 	return (
-		<ul className="agents__registered">
+		<ul className="m-0 list-none p-0">
 			{agents.map((agent) => (
-				<li key={agent.name}>
-					<Icon name="bot" size={14} className="muted" />
+				<li
+					key={agent.name}
+					className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border px-4 py-2.5 wrap-anywhere first:border-t-0"
+				>
+					<Icon name="bot" size={14} className="text-muted-foreground" />
 					<strong>{agent.name}</strong>
-					<span className="muted">{agentWords(agent)}</span>
-					<span className="muted">
+					<span className="text-muted-foreground">{agentWords(agent)}</span>
+					<span className="text-muted-foreground">
 						· {counted(agent.finished.length, "change")} finished, {counted(agent.reviewed, "review")}
 					</span>
 				</li>
@@ -49,33 +57,33 @@ function StartForm({ onStart, busy }: { onStart: (count: number, minutes: number
 	const [minutes, setMinutes] = useState(60);
 	return (
 		<form
-			className="box__row hosted-agents__form"
+			className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-0.5 py-3"
 			onSubmit={(event) => {
 				event.preventDefault();
 				onStart(count, minutes);
 			}}
 		>
-			<label>
+			<Label>
 				Agents{" "}
-				<select value={count} onChange={(event) => setCount(Number(event.target.value))}>
+				<NativeSelect value={count} onChange={(event) => setCount(Number(event.target.value))}>
 					{COUNTS.map((option) => (
 						<option key={option}>{option}</option>
 					))}
-				</select>
-			</label>
-			<label>
+				</NativeSelect>
+			</Label>
+			<Label>
 				For{" "}
-				<select value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
+				<NativeSelect value={minutes} onChange={(event) => setMinutes(Number(event.target.value))}>
 					{DURATIONS.map((option) => (
 						<option key={option} value={option}>
 							{option} minutes
 						</option>
 					))}
-				</select>
-			</label>
-			<button type="submit" className="accent" disabled={busy}>
+				</NativeSelect>
+			</Label>
+			<Button type="submit" variant="primary" disabled={busy}>
 				Start hosted agents
-			</button>
+			</Button>
 		</form>
 	);
 }
@@ -101,18 +109,20 @@ export function HostedAgents({ repo, api }: { repo: string; api: HostedAgentsApi
 	const working = !!status?.working;
 	const { startHostedAgents, stopHostedAgents } = api;
 	return (
-		<section className="box" aria-labelledby="hosted-agents-title">
-			<div className="box__header">
-				<h2 id="hosted-agents-title">GitHive's hosted agents</h2>
-			</div>
-			<p className="box__row muted">
+		<Box aria-labelledby="hosted-agents-title">
+			<BoxHeader>
+				<h2 id="hosted-agents-title" className="text-body-sm">
+					GitHive's hosted agents
+				</h2>
+			</BoxHeader>
+			<p className={cn(LINE, "text-muted-foreground")}>
 				They work like any agent here: each takes a piece of the backlog and builds it, reviews other agents' changes
 				under its own name, and merges its own once approved. They take no new work once their time is up.
 			</p>
 			{status ? <HiveSummary status={status} /> : null}
 			{status?.agents.length ? <AgentRows agents={status.agents} /> : null}
 			{error ? (
-				<p className="box__row error" role="alert">
+				<p className={cn(LINE, "animate-appear text-bad")} role="alert">
 					{error}
 				</p>
 			) : null}
@@ -120,13 +130,13 @@ export function HostedAgents({ repo, api }: { repo: string; api: HostedAgentsApi
 				<StartForm busy={busy} onStart={(count, minutes) => act(() => startHostedAgents(repo, count, minutes))} />
 			) : null}
 			{stopHostedAgents && working ? (
-				<div className="box__row">
-					<button type="button" onClick={() => act(() => stopHostedAgents(repo))} disabled={busy}>
+				<div className="border-t border-border px-0.5 py-3">
+					<Button onClick={() => act(() => stopHostedAgents(repo))} disabled={busy}>
 						Stop them
-					</button>
+					</Button>
 				</div>
 			) : null}
-		</section>
+		</Box>
 	);
 }
 
@@ -143,5 +153,5 @@ export function hiveWords(status: HiveStatus, now = Date.now()): string {
 }
 
 function HiveSummary({ status }: { status: HiveStatus }) {
-	return <p className="box__row">{hiveWords(status)}</p>;
+	return <p className={LINE}>{hiveWords(status)}</p>;
 }

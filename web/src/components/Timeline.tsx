@@ -1,11 +1,12 @@
 import { identityName } from "../lib/agent";
 import { Fragment, type ReactNode } from "react";
+import { useArrivals } from "../hooks/useArrivals";
 import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import type { TimelineItem, TimelineKind } from "../lib/timeline";
+import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
-import "./Timeline.css";
 
 export function kindIcon(kind: TimelineKind, tone: Tone): IconName {
 	switch (kind) {
@@ -68,8 +69,10 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	const review = item.review!;
 	const approved = review.verdict === "approve";
 	return (
-		<div className={`timeline-card timeline-card--${approved ? "good" : "bad"}`}>
-			<div className="timeline-card__header">
+		<div className="-mt-1.5 overflow-hidden rounded-md border border-border bg-card">
+			<div
+				className={cn("border-b border-border px-3.5 py-2.25 wrap-anywhere", approved ? "bg-good-soft" : "bg-bad-soft")}
+			>
 				{review.by ? (
 					<>
 						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer){" "}
@@ -86,16 +89,18 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 						<code>{shortSha(review.head)}</code>
 					</>
 				) : null}
-				<span className="muted"> · </span>
-				<span className="muted">
+				<span className="text-muted-foreground"> · </span>
+				<span className="text-muted-foreground">
 					<When at={review.at} />
 				</span>
 			</div>
-			{review.summary ? <div className="timeline-card__body">{review.summary}</div> : null}
+			{review.summary ? <div className="px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div> : null}
 			{review.evidence ? (
-				<details className="timeline-card__evidence">
-					<summary>Evidence</summary>
-					<pre tabIndex={0}>{review.evidence}</pre>
+				<details className="disclosure px-3.5 pb-3">
+					<summary className="mb-1.5 cursor-pointer text-ui text-muted-foreground">Evidence</summary>
+					<pre tabIndex={0} className="max-h-90">
+						{review.evidence}
+					</pre>
 				</details>
 			) : null}
 		</div>
@@ -104,7 +109,7 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 
 /** A commit's short sha, linked when the item says where to. */
 function CommitSha({ commit, commitHref }: { commit: string; commitHref: string | undefined }) {
-	const sha = <code className="timeline__sha">{shortSha(commit)}</code>;
+	const sha = <code className="text-caption">{shortSha(commit)}</code>;
 	return commitHref ? <a href={commitHref}>{sha}</a> : sha;
 }
 
@@ -114,7 +119,7 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 	const commit = item.commit && !item.text.includes(shortSha(item.commit)) ? item.commit : undefined;
 	return (
 		<>
-			<p className="timeline__line">
+			<p className="m-0 wrap-anywhere">
 				<span>{withLinks(item.text)}</span>
 				{commit ? (
 					<>
@@ -123,14 +128,22 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 					</>
 				) : null}
 				{item.at ? (
-					<span className="muted">
+					<span className="text-muted-foreground">
 						{" · "}
 						<When at={item.at} />
 					</span>
 				) : null}
 			</p>
 			{item.body ? (
-				<div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>
+				<div
+					className={cn(
+						"mt-1.5 text-foreground whitespace-pre-wrap wrap-anywhere",
+						// A commit's message in a box of its own, in the code's face; anything else, set off by a rule.
+						item.kind === "pushed"
+							? "rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-meta"
+							: "border-l-3 border-border px-3 py-2 text-ui-lg",
+					)}
+				>
 					{withLinks(item.body)}
 				</div>
 			) : null}
@@ -138,29 +151,97 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 	);
 }
 
+/** The timeline's column: its entries on a rule that runs down through their badges. */
+export function TimelineList({ className, children }: { className?: string; children: ReactNode }) {
+	return (
+		<ol
+			className={cn(
+				"relative m-0 list-none px-0 py-1",
+				"before:absolute before:inset-y-0 before:left-3.75 before:w-0.5 before:bg-border before:content-['']",
+				className,
+			)}
+		>
+			{children}
+		</ol>
+	);
+}
+
+/** A badge's colors by tone; neutral, or none, is the rule's own grey. */
+const BADGE: Partial<Record<Tone, string>> = {
+	good: "bg-good text-white",
+	bad: "bg-bad text-white",
+	warn: "bg-warn-soft text-warn",
+	needs: "bg-needs text-white",
+	accent: "bg-link-soft text-link",
+};
+
+/** Pushes and notes sit on the page's own paper, whatever their tone; a merge is always green. */
+const KIND_BADGE: Partial<Record<TimelineKind, string>> = {
+	pushed: "bg-background text-muted-foreground",
+	note: "bg-background text-muted-foreground",
+	merged: "bg-good text-white",
+};
+
+/** One entry: its badge on the rule, and what happened beside it. */
+export function TimelineEntry({
+	icon,
+	tone,
+	kind,
+	className,
+	children,
+}: {
+	icon: IconName;
+	tone?: Tone;
+	kind?: TimelineKind;
+	className?: string;
+	children: ReactNode;
+}) {
+	return (
+		<li className={cn("relative flex min-w-0 gap-3 py-2", kind === "review" && "py-2.5", className)}>
+			<span
+				className={cn(
+					"relative z-1 inline-flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-background",
+					"bg-surface-3 text-muted-foreground transition-colors duration-base",
+					tone && BADGE[tone],
+					kind && KIND_BADGE[kind],
+				)}
+				aria-hidden="true"
+			>
+				<Icon name={icon} size={14} />
+			</span>
+			<div className="min-w-0 flex-1 pt-1.5">{children}</div>
+		</li>
+	);
+}
+
 export function Timeline({
 	items,
 	ids = [],
 	link,
+	className,
 }: {
 	items: TimelineItem[];
 	ids?: string[];
 	link?: (id: string) => string;
+	className?: string;
 }) {
+	// What happens after the timeline first showed fades in as it joins.
+	const arrived = useArrivals(items.map((item) => item.key));
 	if (!items.length) return null;
 	const withLinks = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
-		<ol className="timeline">
+		<TimelineList className={className}>
 			{items.map((item) => (
-				<li key={item.key} className={`timeline__item timeline__item--${item.kind}`}>
-					<span className={`timeline__badge timeline__badge--${item.tone}`} aria-hidden="true">
-						<Icon name={kindIcon(item.kind, item.tone)} size={14} />
-					</span>
-					<div className="timeline__content">
-						{item.review ? <ReviewCard item={item} /> : <TimelineEvent item={item} withLinks={withLinks} />}
-					</div>
-				</li>
+				<TimelineEntry
+					key={item.key}
+					icon={kindIcon(item.kind, item.tone)}
+					tone={item.tone}
+					kind={item.kind}
+					className={cn(arrived(item.key) && "animate-appear")}
+				>
+					{item.review ? <ReviewCard item={item} /> : <TimelineEvent item={item} withLinks={withLinks} />}
+				</TimelineEntry>
 			))}
-		</ol>
+		</TimelineList>
 	);
 }

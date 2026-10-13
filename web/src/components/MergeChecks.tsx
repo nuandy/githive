@@ -1,5 +1,16 @@
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import type { DraftSectionProps } from "./MergeSettings";
+import {
+	COMMAND,
+	type DraftSectionProps,
+	SETTINGS_FIELDS,
+	SettingField,
+	SettingHint,
+	SettingsSection,
+} from "./MergeSettings";
+import { BoxBody, Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Input, Label, Textarea } from "./ui/field";
 
 interface MergeChecksProps extends DraftSectionProps {
 	branch: string;
@@ -15,84 +26,86 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 		update({ verify: draft.verify.filter((_, checkIndex) => checkIndex !== index) });
 
 	return (
-		<section className="box" aria-labelledby="settings-checks">
-			<div className="box__header">
-				<h2 id="settings-checks">Merge checks</h2>
-			</div>
-			<div className="box__body repo-settings__fields">
-				<p className="muted">
+		<SettingsSection id="settings-checks" title="Merge checks">
+			<BoxBody className={SETTINGS_FIELDS}>
+				<p className="m-0 text-muted-foreground">
 					Commands that must pass on a change merged into {branch} before it lands, run by GitHive in its own container.
 					None: a change merges once approved, and no container runs.
 				</p>
 				{draft.verify.some((command) => command.trim()) ? null : <NoChecksHint />}
 				{draft.verify.map((command, index) => (
-					<div key={index} className="repo-settings__add">
+					<div key={index} className="flex min-w-0 items-center gap-2">
 						<label className="sr-only" htmlFor={`check-${index}`}>
 							Check {index + 1}
 						</label>
-						<input
+						<Input
 							id={`check-${index}`}
-							className="repo-settings__command"
+							className={cn(COMMAND, "max-w-105 flex-1")}
 							value={command}
 							onChange={(event) => changeCheck(index, event.target.value)}
 							placeholder="npm test"
 							spellCheck={false}
 							disabled={busy}
 						/>
-						<button
-							type="button"
-							className="link"
+						<Button
+							variant="link"
 							onClick={() => removeCheck(index)}
 							disabled={busy}
 							aria-label={`Remove check ${index + 1}`}
 						>
 							Remove
-						</button>
+						</Button>
 					</div>
 				))}
 				<div>
-					<button type="button" onClick={() => update({ verify: [...draft.verify, ""] })} disabled={busy}>
+					<Button onClick={() => update({ verify: [...draft.verify, ""] })} disabled={busy}>
 						<Icon name="plus" />
 						Add a check
-					</button>
+					</Button>
 				</div>
-				<div className="repo-settings__field">
-					<label htmlFor="skip-checks">Skipped for changes that only touch</label>
-					<textarea
+				<SettingField>
+					<Label htmlFor="skip-checks">Skipped for changes that only touch</Label>
+					<Textarea
 						id="skip-checks"
-						className="repo-settings__command"
+						className={cn(COMMAND, "leading-[1.45]")}
 						value={draft.skipChecks}
 						onChange={(event) => update({ skipChecks: event.target.value })}
 						spellCheck={false}
 						disabled={busy}
 					/>
-					<p className="muted">
+					<SettingHint>
 						One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top
 						(site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.
-					</p>
-				</div>
+					</SettingHint>
+				</SettingField>
 				<CheckEnvironment branch={branch} />
-			</div>
-		</section>
+			</BoxBody>
+		</SettingsSection>
 	);
 }
 
 /** Why a repo with agents working in parallel wants checks, shown while it has none. */
 function NoChecksHint() {
 	return (
-		<p className="callout callout--warn">
+		<Callout tone="warn" className="block">
 			Without checks, nothing catches two changes that merge cleanly but break together, like one agent renaming a
 			function while another adds a call to its old name. A build or a typecheck catches most of these:{" "}
 			<code>npm run build</code>, <code>npx tsc --noEmit</code>, <code>go build ./...</code> or <code>cargo check</code>
 			.
-		</p>
+		</Callout>
 	);
 }
 
 /** What the checks run in: the shell, the tools installed, the limits, and what isn't there. */
 function CheckEnvironment({ branch }: { branch: string }) {
 	return (
-		<details className="repo-settings__details">
+		<details
+			className={cn(
+				"disclosure mt-4 border-t border-border pt-3",
+				"[&>summary]:cursor-pointer [&>summary]:font-medium [&>summary]:text-muted-foreground",
+				"[&_p]:my-2 [&_ul]:my-0 [&_ul]:pl-5 [&_li]:my-1 [&_li]:wrap-anywhere",
+			)}
+		>
 			<summary>What the checks run in</summary>
 			<p>
 				Each check is a shell command, run with bash at the top of the repo, on {branch} with the changes merged in.

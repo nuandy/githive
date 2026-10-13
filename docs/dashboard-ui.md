@@ -8,11 +8,11 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | What | Where |
 | --- | --- |
 | Every design value (colors, radius, type, shadows, motion), light and dark | `web/src/theme.css` |
-| Shared components (Button, Badge, Box, Callout, fields, Collapse, DropdownMenu, …) | `web/src/components/ui/` |
+| Shared components (Button, Badge, Box, Callout, Empty, fields, Collapse, DropdownMenu, …) | `web/src/components/ui/` |
 | The frame every page sits in (`Shell`, `Page`, `EmptyPage`) | `web/src/components/Page.tsx` |
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `ThemeMenu.tsx` |
-| Motion hooks (`useLingering`, `useChanged`, …) | `web/src/hooks/` |
+| Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) | `web/src/hooks/` |
 | The visual regression check | `web/visual/` |
 
 Screens are written in Tailwind CSS v4 utilities. There are no per-component stylesheets: a component's look is in its
@@ -53,9 +53,10 @@ Reach for `components/ui` before writing a control by hand:
 
 - `Button`: `variant` default, `primary` (ink), `go` (green: merge, approve), `danger`, `ghost`, `link`; `size` default,
   `sm`, `icon`; `asChild` to give a link a button's look.
-- `Badge` (a pill: `tone` good, bad, warn, needs, accent, neutral; `solid`, `outline`, `size="lg"`), `Counter`, `Lamp`.
+- `Badge` (a pill: `tone` good, bad, warn, needs, accent, neutral; `solid`, `outline`; `size="sm"` beside a row's
+  title, `size="lg"`), `Counter`, `Lamp`.
 - `Box`, `BoxHeader`, `BoxBody`, `BoxRow`: ruled sections, not cards (`asChild` rules a form). `Callout` with a
-  `tone`.
+  `tone`. `Empty`: nothing to show yet, an icon, an `h2` and a line or two, centered (`<Box asChild><Empty>` boxes it).
 - `Input`, `Textarea`, `NativeSelect`, `Label`; `Field` holds a label, its control and a `FieldHint` under them.
 - `Collapse`: anything that opens and closes; `Fold` drops what it holds once folded, and unfolds it again as it comes
   back (a row a search leaves out, the fields for a choice). `DropdownMenu`: menus from a button.
@@ -70,7 +71,8 @@ lucide icons for `Icon`, and restyle it from the theme.
 - State changes (hover, press, focus, selected) transition at `duration-fast`.
 - What appears (loaded content, a message, a confirm) fades in: `animate-appear`. A page fades in as you go to it
   (`PageBoundary`); what's there from its first render comes with that fade, so what fades in on its own later (a
-  tab's content, a bumped count) waits until it has changed (`useChanged`).
+  tab's content, a bumped count) waits until it has changed (`useChanged`), and a row that joins a list after it
+  first showed fades in by itself (`useArrivals`).
 - What opens and closes folds its height: `Collapse` or `Fold`, `disclosure`, or grid rows `0fr ↔ 1fr`.
 - Menus and other overlays grow from their trigger and fade, both ways.
 - Swapped content cross-fades; what leaves goes before it's removed (`useLingering`).

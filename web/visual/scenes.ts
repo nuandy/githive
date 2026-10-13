@@ -7,6 +7,8 @@
 import type { Page } from "playwright-core";
 import type { Who } from "./fixtures.ts";
 import { FIXED_NOW } from "./fixtures/clock.ts";
+import { DOCS_REPO } from "./fixtures/small-repos.ts";
+import { STOREFRONT as STOREFRONT_REPO } from "./fixtures/storefront.ts";
 
 export type Scheme = "light" | "dark";
 
@@ -208,6 +210,29 @@ const CHANGES = [
 	"footer-links",
 ];
 
+/** acme/storefront's tree grown past what the Territory names entry by entry: src/ a grid of lamps, assets/ more than
+ * a region draws, the whole tree more than one read holds. */
+const BIG_TREE = {
+	ref: "main",
+	commit: STOREFRONT_REPO.heads.main,
+	files: [
+		...STOREFRONT_REPO.files,
+		...Array.from({ length: 10 }, (_, i) => `src/feature-${String(i + 1).padStart(2, "0")}.ts`),
+		...Array.from({ length: 420 }, (_, i) => `assets/icon-${String(i + 1).padStart(3, "0")}.svg`),
+	].sort(),
+	truncated: true,
+};
+
+/** acme/storefront with one change claiming all of docs/. */
+const WHOLE_FOLDER = {
+	...STOREFRONT_REPO.hive!.snapshot,
+	claims: STOREFRONT_REPO.hive!.snapshot.claims.map((claim) =>
+		claim.change === "footer-links" ? { ...claim, paths: ["docs/"] } : claim,
+	),
+};
+
+const DOCS_HISTORY = DOCS_REPO.hive!.histories.main!;
+
 const APP: Scene[] = [
 	page("repos", "/"),
 	page("repos-menu", "/", { act: openUserMenu }),
@@ -271,6 +296,22 @@ const APP: Scene[] = [
 	page("storefront-hive-demo", STOREFRONT, { act: answering("/demo/runs/acme/storefront", LANDED_RUN) }),
 	page("storefront-changes", `${STOREFRONT}/changes`),
 	page("storefront-changes-release", `${STOREFRONT}/changes?branch=release%2F2.4`),
+	page("storefront-changes-unknown-branch", `${STOREFRONT}/changes?branch=nope`),
+	page("storefront-changes-new-branch", `${STOREFRONT}/changes`, { act: click("New branch") }),
+	page("storefront-changes-new-branch-error", `${STOREFRONT}/changes`, {
+		act: steps(
+			answering(`${STOREFRONT}/branches`, { error: "release/2.4 exists already" }, { status: 409, method: "POST" }),
+			click("New branch"),
+			fill("Name of the new branch", "release/2.4"),
+			click("Make branch"),
+		),
+	}),
+	page("storefront-changes-tree-error", `${STOREFRONT}/changes`, {
+		act: answering(`${STOREFRONT}/tree`, { error: "the tree is too big to read" }, { status: 500 }),
+	}),
+	page("storefront-changes-big-tree", `${STOREFRONT}/changes`, {
+		act: steps(answering(`${STOREFRONT}/tree`, BIG_TREE), answering(STOREFRONT, WHOLE_FOLDER)),
+	}),
 	page("storefront-history", `${STOREFRONT}/history`),
 	page("storefront-claims", `${STOREFRONT}/claims`),
 	// The account menu open over the Claims tab: what its baselines show, as the first <summary> on the page, which
@@ -298,13 +339,32 @@ const APP: Scene[] = [
 				.click(),
 	}),
 	page("storefront-audit", `${STOREFRONT}/audit`),
+	// The audit not read yet: here, never.
+	page("storefront-audit-loading", `${STOREFRONT}/audit`, {
+		act: answering(`${STOREFRONT}/audit`, { error: "the records couldn't be replayed" }, { status: 500 }),
+	}),
 	...CHANGES.map((change) => page(`change-${change}`, `${STOREFRONT}/changes/${change}`)),
 	page("change-checkout-tax-commits", `${STOREFRONT}/changes/checkout-tax/commits`),
+	page("change-wishlist-commits", `${STOREFRONT}/changes/wishlist/commits`),
 	page("change-cart-coupons-commits", `${STOREFRONT}/changes/cart-coupons/commits`, { act: openSummary("More") }),
 	page("change-session-cookies-evidence", `${STOREFRONT}/changes/session-cookies`, { act: openSummary("Evidence") }),
 
 	page("docs-hive", "/repos/acme/docs"),
 	page("docs-history", "/repos/acme/docs/history"),
+	page("docs-history-more", "/repos/acme/docs/history", {
+		act: answering("/repos/acme/docs/history?branch=main", { ...DOCS_HISTORY, total: DOCS_HISTORY.total + 12 }),
+	}),
+	page("docs-history-empty", "/repos/acme/docs/history", {
+		act: answering("/repos/acme/docs/history?branch=main", { branch: "main", total: 0, changes: [] }),
+	}),
+	page("docs-history-error", "/repos/acme/docs/history", {
+		act: answering("/repos/acme/docs/history?branch=main", { error: "offline" }, { status: 500 }),
+	}),
+	page("docs-changes", "/repos/acme/docs/changes"),
+	// No violations and no reviews yet.
+	page("docs-audit-quiet", "/repos/acme/docs/audit", {
+		act: answering("/repos/acme/docs", { ...DOCS_REPO.hive!.snapshot, votes: [] }),
+	}),
 	page("notes-hive", "/repos/robin/notes"),
 	page("new-thing-hive", "/repos/acme/new-thing"),
 	page("new-thing-code", "/repos/acme/new-thing/code"),

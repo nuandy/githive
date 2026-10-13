@@ -1,6 +1,6 @@
 // Captures every scene of the dashboard as screenshots, for comparing one build with another (compare.ts).
 //
-//   node web/visual/capture.ts <label> [--only <regex>] [--jobs <n>]
+//   node web/visual/capture.ts <label> [--only <regex>] [--jobs <n>] [--port <n>]
 //
 // Starts the dashboard's dev server, answers every API request from fixtures.ts with the clock frozen at FIXED_NOW,
 // and writes web/visual/out/<label>/<scene>.<light|dark>.<width>.png. Motion scenes also write one frame per sampled
@@ -251,7 +251,7 @@ async function captureMotion(page: Page, job: Job) {
 async function main() {
 	const server = await createServer({
 		configFile: join(ROOT, "web/vite.config.ts"),
-		server: { port: 5191, strictPort: true },
+		server: { port: Number(flag("--port") ?? 5191), strictPort: true },
 		logLevel: "error",
 	});
 	await server.listen();

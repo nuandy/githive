@@ -1,5 +1,8 @@
 import { type ConnectStep, MCP_CLIENTS, type McpClient, connectSteps, isMcpClient } from "../lib/session";
+import { cn } from "../lib/utils";
 import { CopyBlock } from "./CopyBlock";
+import { Badge } from "./ui/badge";
+import { Box, BoxBody } from "./ui/box";
 
 const CLIENT_KEY = "githive:mcp-client";
 
@@ -32,16 +35,19 @@ function WithCode({ text }: { text: string }) {
 /** Numbered steps, each with what to copy. */
 export function Steps({ steps }: { steps: ConnectStep[] }) {
 	return (
-		<ol className="agents__steps">
+		<ol className="m-0 grid list-decimal gap-2.5 pl-[1.3em]">
 			{steps.map((step, index) => (
-				<li key={index}>
+				<li key={index} className="min-w-0">
 					<WithCode text={step.text} />
-					{step.copy ? <CopyBlock text={step.copy} /> : null}
+					{step.copy ? <CopyBlock text={step.copy} className="mt-1.5" /> : null}
 				</li>
 			))}
 		</ol>
 	);
 }
+
+// A way to connect's title, with a pill beside it.
+const WAY_TITLE = "mt-0 mb-2.5 flex flex-wrap items-center gap-2 text-[14.5px]";
 
 interface ConnectSectionProps {
 	client: McpClient;
@@ -55,13 +61,28 @@ interface ConnectSectionProps {
 /** How to connect an agent from the chosen app: signing in, or a token. */
 export function ConnectSection({ client, chooseClient, origin, yourClient, clientLabel }: ConnectSectionProps) {
 	return (
-		<section className="agents__connect" aria-labelledby="connect-title">
-			<h2 id="connect-title">Connect an agent</h2>
-			<div className="agents__clients" role="radiogroup" aria-label="Your agent's app">
+		<section className="grid gap-3" aria-labelledby="connect-title">
+			<h2 id="connect-title" className="text-body-sm">
+				Connect an agent
+			</h2>
+			<div
+				className="inline-flex flex-wrap gap-1 justify-self-start rounded-md border border-border bg-surface-2 p-0.75"
+				role="radiogroup"
+				aria-label="Your agent's app"
+			>
 				{MCP_CLIENTS.map((option) => (
-					<label key={option.id} className={`agents__client${client === option.id ? " is-selected" : ""}`}>
+					<label
+						key={option.id}
+						className={cn(
+							"inline-flex cursor-pointer items-center rounded-md px-3 py-1.25 text-ui-lg font-medium",
+							"transition-[color,background-color] duration-fast ease-out",
+							"has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-1 has-[input:focus-visible]:outline-link",
+							client === option.id ? "bg-card text-foreground" : "text-muted-foreground",
+						)}
+					>
 						<input
 							type="radio"
+							className="pointer-events-none absolute opacity-0"
 							name="mcp-client"
 							value={option.id}
 							checked={client === option.id}
@@ -71,25 +92,28 @@ export function ConnectSection({ client, chooseClient, origin, yourClient, clien
 					</label>
 				))}
 			</div>
-			<div className="agents__ways">
-				<div className="box agents__way">
-					<div className="box__body">
-						<h3>
-							Sign in from {client === "other" ? "the client" : clientLabel}{" "}
-							<span className="pill pill--accent">Recommended</span>
-						</h3>
-						<Steps steps={connectSteps(client, origin)} />
+			<div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
+				<Box asChild>
+					<div>
+						<BoxBody className="min-w-0">
+							<h3 className={WAY_TITLE}>
+								Sign in from {client === "other" ? "the client" : clientLabel} <Badge tone="accent">Recommended</Badge>
+							</h3>
+							<Steps steps={connectSteps(client, origin)} />
+						</BoxBody>
 					</div>
-				</div>
-				<div className="box agents__way">
-					<div className="box__body">
-						<h3>Or use a token</h3>
-						<p className="muted">
-							For a client that can't sign in through your browser. Make an agent below and choose New token. GitHive
-							shows the token once, with the setup for {yourClient} filled in, ready to copy.
-						</p>
+				</Box>
+				<Box asChild>
+					<div>
+						<BoxBody className="min-w-0">
+							<h3 className={WAY_TITLE}>Or use a token</h3>
+							<p className="mt-2.5 mb-0 text-muted-foreground">
+								For a client that can't sign in through your browser. Make an agent below and choose New token. GitHive
+								shows the token once, with the setup for {yourClient} filled in, ready to copy.
+							</p>
+						</BoxBody>
 					</div>
-				</div>
+				</Box>
 			</div>
 		</section>
 	);

@@ -1,7 +1,9 @@
+import { Button } from "./ui/button";
+
 /**
  * A destructive action asked twice, in the page (never confirm()): the first
  * click asks the question, the second does it. One question is open at a
- * time; `confirming` says which.
+ * time; `confirming` says which. The question fades in where the button was.
  */
 export function ConfirmButton({
 	id,
@@ -11,7 +13,6 @@ export function ConfirmButton({
 	question,
 	busy,
 	onConfirm,
-	block = "manage",
 }: {
 	id: string;
 	confirming: string | null;
@@ -20,24 +21,26 @@ export function ConfirmButton({
 	question: string;
 	busy: boolean;
 	onConfirm: () => void;
-	/** The CSS block its classes belong to: manage__small and manage__confirm by default. */
-	block?: string;
 }) {
 	if (confirming !== id)
 		return (
-			<button type="button" className={`danger ${block}__small`} onClick={() => setConfirming(id)} disabled={busy}>
+			<Button variant="danger" size="sm" onClick={() => setConfirming(id)} disabled={busy}>
 				{label}
-			</button>
+			</Button>
 		);
 	return (
-		<span className={`${block}__confirm`} role="group" aria-label={question}>
+		<span
+			className="inline-flex animate-appear flex-wrap items-center gap-1.5 text-ui"
+			role="group"
+			aria-label={question}
+		>
 			<span>{question}</span>
-			<button type="button" className={`danger ${block}__small`} onClick={onConfirm} disabled={busy}>
+			<Button variant="danger" size="sm" onClick={onConfirm} disabled={busy}>
 				{busy ? "Working…" : `Yes, ${label.toLowerCase()}`}
-			</button>
-			<button type="button" className={`${block}__small`} onClick={() => setConfirming(null)} disabled={busy}>
+			</Button>
+			<Button size="sm" onClick={() => setConfirming(null)} disabled={busy}>
 				Cancel
-			</button>
+			</Button>
 		</span>
 	);
 }

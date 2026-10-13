@@ -5,7 +5,8 @@ import { type RunAction, useRowActions } from "../hooks/useRowActions";
 import { AdminHosted } from "./AdminHosted";
 import { AdminInvites } from "./AdminInvites";
 import { AdminRequests } from "./AdminRequests";
-import "./Manage.css";
+import { Callout } from "./ui/box";
+import { ManageHeader, ManagePage } from "./ui/manage";
 
 export type AdminActions = Pick<AdminApi, "approve" | "removeInvite" | "decline" | "allowHosted" | "disallowHosted">;
 
@@ -41,24 +42,20 @@ export interface AdminSectionProps {
 export function AdminView({ requests, invites, hosted, error, actions, now = Date.now() }: AdminViewProps) {
 	const sectionProps: AdminSectionProps = { actions, now, ...useRowActions() };
 	return (
-		<main className="page manage" id="main">
-			<header className="manage__header">
-				<div>
-					<h1>Admin</h1>
-					<p className="muted manage__lede">
-						Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access.
-					</p>
-				</div>
-			</header>
+		<ManagePage>
+			<ManageHeader
+				title="Admin"
+				lede="Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access."
+			/>
 			{error ? (
-				<div className="callout callout--bad" role="alert">
+				<Callout tone="bad" className="animate-appear" role="alert">
 					{error}
-				</div>
+				</Callout>
 			) : null}
 			<AdminRequests requests={requests} {...sectionProps} />
 			<AdminInvites invites={invites} {...sectionProps} />
 			<AdminHosted hosted={hosted} {...sectionProps} />
-		</main>
+		</ManagePage>
 	);
 }
 

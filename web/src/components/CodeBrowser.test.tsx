@@ -45,8 +45,8 @@ describe("the Code tab", () => {
 			),
 		);
 		expect(html).toContain("2 lines");
-		expect(html).toMatch(/<td class="code__no" aria-hidden="true">1<\/td><td class="code__text">const a = 1;<\/td>/);
-		expect(html).toMatch(/<td class="code__no" aria-hidden="true">2<\/td>/);
+		expect(html).toMatch(/<td class="[^"]*" aria-hidden="true">1<\/td><td class="[^"]*">const a = 1;<\/td>/);
+		expect(html).toMatch(/<td class="[^"]*" aria-hidden="true">2<\/td>/);
 		expect(html).not.toMatch(/aria-hidden="true">3</);
 	});
 

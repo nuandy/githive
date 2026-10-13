@@ -3,7 +3,8 @@ import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
 // Pills, counters and lamps: the small marks that say how something stands. A tone is one of the lamps' meanings
-// (good, bad, warn, needs a person), the link's slate blue (accent) or neutral; each comes soft or solid.
+// (good, bad, warn, needs a person), the link's slate blue (accent) or neutral; each comes soft or solid, and a size
+// smaller beside a row's title (sm).
 
 export const badgeVariants = cva(
 	[
@@ -25,7 +26,8 @@ export const badgeVariants = cva(
 			},
 			solid: { true: "", false: "" },
 			outline: { true: "border-border-strong bg-transparent font-medium text-muted-foreground", false: "" },
-			size: { default: "", lg: "px-3 py-1.25 text-ui-lg leading-5" },
+			// Each size says its line height again: cn() drops a line height that a font size follows.
+			size: { default: "", sm: "py-0 text-micro leading-4.5", lg: "px-3 py-1.25 text-ui-lg leading-5" },
 		},
 		compoundVariants: [
 			{ solid: true, tone: "good", class: "bg-good text-white" },

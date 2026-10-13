@@ -6,7 +6,7 @@ import { cn } from "../../lib/utils";
 
 const field = [
 	"min-w-0 rounded-md border border-border-strong bg-card px-2.5 py-1.5 text-foreground",
-	"[font-family:inherit] [font-size:inherit] [font-weight:inherit] [line-height:inherit]",
+	"[font-family:inherit] [font-size:inherit] [font-weight:inherit] leading-[inherit]",
 	"transition-[border-color,box-shadow] duration-fast ease-out",
 	"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
 	"disabled:cursor-not-allowed disabled:opacity-55",

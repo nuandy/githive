@@ -3,8 +3,8 @@ import { ALTERED_BY, ALTERING, openOverlaps, siteName, SITES_SHOWN } from "../li
 import { shortSha } from "../lib/model";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import "./Awareness.css";
 
 // Where a change meets other open changes, from their code: what it alters that they use, and what it uses that they
 // alter. Their agents hear the same in heads-ups. Advice only: a merge doesn't read it.
@@ -44,7 +44,7 @@ function Signatures({ overlap }: { overlap: Overlap }) {
 	const { before, after, change } = overlap.altered;
 	if (change !== "interface" || !before || !after) return null;
 	return (
-		<div className="awareness__signatures">
+		<div className="mt-0.75 text-caption text-muted-foreground [&_code]:text-micro">
 			<code>{before}</code>
 			<span aria-label="becomes"> → </span>
 			<code>{after}</code>
@@ -72,7 +72,7 @@ function AlteredBy({ overlap, repo }: { overlap: Overlap; repo: string }) {
 		<li>
 			uses <code>{overlap.altered.name}</code>, {lead} <OtherChange other={overlap.other} repo={repo} /> {verb}
 			{overlap.at.length ? (
-				<span className="muted">
+				<span className="text-muted-foreground">
 					{" "}
 					· used here
 					<Sites at={overlap.at} />
@@ -83,17 +83,26 @@ function AlteredBy({ overlap, repo }: { overlap: Overlap; repo: string }) {
 	);
 }
 
-/** The awareness section of a change's page, while its claim is in force and its footprint is kept. */
+const NOTE = "m-0 text-meta";
+const HEADING = "mt-1 text-meta font-semibold text-muted-foreground";
+const LINES = "m-0 grid list-disc gap-2 pl-4.5 text-ui-lg";
+
+/**
+ * The awareness section of a change's page, while its claim is in force and its footprint is kept. Beside the
+ * conversation, like the merge box, quiet.
+ */
 export function Awareness({
 	awareness,
 	claims,
 	head,
 	repo,
+	className,
 }: {
 	awareness: ChangeAwareness;
 	claims: RepoSnapshot["claims"];
 	head?: string | null;
 	repo: string;
+	className?: string;
 }) {
 	const usedBy = openOverlaps(awareness.usedBy, claims);
 	const alteredBy = openOverlaps(awareness.alteredBy, claims);
@@ -104,20 +113,28 @@ export function Awareness({
 	// Footprints are read from pushes as the push consumer gets to them, so one may lag the change's head.
 	const moved = !!head && head !== awareness.head;
 	return (
-		<section className="awareness" aria-labelledby="awareness-title">
-			<div className="awareness__head">
-				<Icon name="eye" size={15} className="muted" />
-				<h2 id="awareness-title">Where it meets other open changes</h2>
+		<section
+			className={cn(
+				"grid min-w-0 gap-2 rounded-md border border-border bg-card px-4 pt-3 pb-3.5 wrap-anywhere",
+				className,
+			)}
+			aria-labelledby="awareness-title"
+		>
+			<div className="flex items-center gap-2">
+				<Icon name="eye" size={15} className="text-muted-foreground" />
+				<h2 id="awareness-title" className="text-body-sm">
+					Where it meets other open changes
+				</h2>
 			</div>
-			<p className="muted awareness__about">
+			<p className={cn(NOTE, "text-muted-foreground")}>
 				From the code of the changes open on {awareness.branch}, read at <code>{shortSha(awareness.head)}</code>
 				{moved ? " (before its latest push)" : ""}. Their agents hear the same in heads-ups; nothing here decides a
 				merge.
 			</p>
 			{usedBy.length ? (
 				<>
-					<h3>What it alters that others use</h3>
-					<ul className="awareness__lines">
+					<h3 className={HEADING}>What it alters that others use</h3>
+					<ul className={LINES}>
 						{usedBy.map((overlap, index) => (
 							<UsedBy key={index} overlap={overlap} repo={repo} />
 						))}
@@ -126,8 +143,8 @@ export function Awareness({
 			) : null}
 			{alteredBy.length ? (
 				<>
-					<h3>What it uses that others alter</h3>
-					<ul className="awareness__lines">
+					<h3 className={HEADING}>What it uses that others alter</h3>
+					<ul className={LINES}>
 						{alteredBy.map((overlap, index) => (
 							<AlteredBy key={index} overlap={overlap} repo={repo} />
 						))}
@@ -135,12 +152,12 @@ export function Awareness({
 				</>
 			) : null}
 			{!usedBy.length && !alteredBy.length ? (
-				<p className="awareness__none">
+				<p className={NOTE}>
 					Nothing it alters is used by another open change, and nothing it uses is being altered: it alters{" "}
 					{counted(alters, "name")} and uses {counted(uses, "name")} of other files.
 				</p>
 			) : null}
-			{left ? <p className="muted awareness__more">And {left} more not shown.</p> : null}
+			{left ? <p className={cn(NOTE, "text-muted-foreground")}>And {left} more not shown.</p> : null}
 		</section>
 	);
 }

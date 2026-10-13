@@ -1,5 +1,4 @@
 import { type ReactNode, useState } from "react";
-import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
 import type {
 	BranchHistory,
@@ -28,6 +27,7 @@ import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { messageOf } from "../lib/errors";
+import { cn } from "../lib/utils";
 import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { HistoryTab } from "./History";
@@ -37,10 +37,14 @@ import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
+import { Page } from "./Page";
 import { RepoHeader } from "./RepoHeader";
 import { SiteLink } from "./SiteLink";
 import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
+import { Box, Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Empty } from "./ui/empty";
 
 /** The Agents tab's hosted agents: shown when the dashboard can read them, started and stopped by writers. */
 function hostedAgentsApi(api: RepoPageApi, writes: boolean): HostedAgentsApi | undefined {
@@ -144,33 +148,43 @@ function NotStarted({
 		}
 	};
 	return (
-		<div className="callout repo-not-started" role="status">
-			<div>
+		<Callout
+			role="status"
+			className={cn(
+				"mb-4 flex-wrap justify-between",
+				// Its error, a little under what it says.
+				"[&_p]:mt-1.5",
+			)}
+		>
+			<div className="min-w-0 flex-[1_1_24rem]">
 				<strong>GitHive hasn't started on {repo} yet.</strong>{" "}
 				{canStart
 					? "Agents can claim, review and merge here once it does. It starts with the defaults: no " +
 						"reviews and no checks, so a change merges once it's pushed. Its admins change them in " +
 						"Settings."
 					: "Agents can claim, review and merge here once one of its admins starts it."}
-				{error ? <p className="error">{error}</p> : null}
+				{error ? <p className="animate-appear text-bad">{error}</p> : null}
 			</div>
 			{canStart && start ? (
-				<button type="button" className="accent" onClick={startRepo} disabled={busy}>
+				<Button variant="primary" className="flex-none" onClick={startRepo} disabled={busy}>
 					{busy ? "Starting…" : "Start GitHive"}
-				</button>
+				</Button>
 			) : null}
-		</div>
+		</Callout>
 	);
 }
 
 /** Where a tab would show what agents do: empty until GitHive starts on the repo. */
 const NothingYet = ({ repo }: { repo: string }) => (
-	<div className="box empty">
-		<h2>Nothing here yet</h2>
-		<p>
-			Changes, claims, agents and the audit show once GitHive starts on {repo}. Its code and settings are here already.
-		</p>
-	</div>
+	<Box asChild>
+		<Empty>
+			<h2>Nothing here yet</h2>
+			<p>
+				Changes, claims, agents and the audit show once GitHive starts on {repo}. Its code and settings are here
+				already.
+			</p>
+		</Empty>
+	</Box>
 );
 
 /** For the repo's admins: the forms that change how changes merge. */
@@ -294,7 +308,10 @@ function RepoTabContent({
 /** By the repo's name once a stretch of work has landed and nothing's open: that it's done, and how much. */
 function AllLandedBadge({ stretch }: { stretch: LandingStretch }) {
 	return (
-		<span className="repo-header__done tone-good" title={stretchWords(stretch)}>
+		<span
+			className="rounded-full border border-good/40 px-2.5 py-0.5 text-ui font-semibold text-good"
+			title={stretchWords(stretch)}
+		>
 			✓ All landed
 		</span>
 	);
@@ -378,7 +395,7 @@ export function RepoPage({
 				homeHref={href.repo(repo)}
 				live={liveStatus}
 			/>
-			<main className="page" id="main">
+			<Page id="main">
 				{!snapshot ? (
 					<NotStarted
 						repo={repo}
@@ -403,7 +420,7 @@ export function RepoPage({
 						onSettingsChanged={onSettingsChanged}
 					/>
 				</div>
-			</main>
+			</Page>
 		</>
 	);
 }

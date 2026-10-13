@@ -41,7 +41,7 @@ describe("the Inbox", () => {
 		const { groups } = buildInbox(summaries);
 		const html = renderToStaticMarkup(<InboxPage groups={groups} loaded />);
 		expect(html).toContain('<a href="#/repos/acme/my-app">acme/my-app</a>');
-		expect(html).toContain('<a href="#/repos/acme/my-app/changes/fix-login" class="inbox__title">Fix login</a>');
+		expect(html).toMatch(/<a href="#\/repos\/acme\/my-app\/changes\/fix-login" class="[^"]*">Fix login<\/a>/);
 		expect(html).toContain("Reviewers disagree after 3 revisions");
 	});
 

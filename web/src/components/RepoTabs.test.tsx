@@ -101,15 +101,19 @@ describe("a repo", () => {
 		const html = renderToStaticMarkup(
 			<ChangeList snapshot={{ ...snapshot, claims }} repo="acme/docs-site" now={now} />,
 		);
-		const rows = html.split('<li class="change-row">').slice(1);
-		expect(rows.map((row) => row.match(/change-row__id">([^<]+)/)?.[1])).toEqual(["c-3", "c-2", "c-1"]);
+		const rows = html.split("<li ").slice(1);
+		expect(rows.map((row) => row.match(/<span class="font-mono text-caption">([^<]+)<\/span>/)?.[1])).toEqual([
+			"c-3",
+			"c-2",
+			"c-1",
+		]);
 		expect(rows[2]).toMatch(
-			/class="change-row__lease" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
+			/class="(?![^"]*\btext-warn\b)[^"]*" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
 		);
 		// Past its time, anyone may take it: said in the warning tone.
-		expect(rows[1]).toMatch(/class="change-row__lease tone-warn"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
+		expect(rows[1]).toMatch(/class="[^"]*\btext-warn\b[^"]*"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
 		// Waiting on review, it never frees: the list says nothing, the change's page says why.
-		expect(rows[0]).not.toContain("change-row__lease");
+		expect(rows[0]).not.toMatch(/[Ff]ree (after|since)/);
 	});
 
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import type { RepoAudit, RepoSnapshot } from "../api";
+import { useArrivals } from "../hooks/useArrivals";
+import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
 import type { Tone } from "../lib/changeStatus";
 import {
@@ -18,11 +20,13 @@ import { shortSha, briefPaths } from "../lib/model";
 import { counted } from "../lib/plural";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
-import { StatusIcon, StatusPill } from "./StatusPill";
-import "./ChangeList.css";
-import "./RepoSettings.css";
-import "./RepoTabs.css";
+import { StatusIcon, StatusPill, TONE_TEXT } from "./StatusPill";
+import { Badge, Counter } from "./ui/badge";
+import { Box, BoxBody, BoxHeader, Callout } from "./ui/box";
+import { Empty } from "./ui/empty";
+import { TERMS } from "./ui/manage";
 
 export { ChangePage, type ChangePageProps } from "./ChangePage";
 
@@ -41,7 +45,13 @@ function Approvals({ claim }: { claim: Claim }) {
 	if (!claim.head) return null;
 	const { tone, icon } = approvalLook(approval);
 	return (
-		<span className={`inline-badge tone-${tone}`} title={`${approval.approvals} of ${approval.required} approvals`}>
+		<span
+			className={cn(
+				"inline-flex items-center gap-1 font-medium whitespace-nowrap transition-colors duration-base",
+				TONE_TEXT[tone],
+			)}
+			title={`${approval.approvals} of ${approval.required} approvals`}
+		>
 			<Icon name={icon} size={14} />
 			{claimApprovalLabel(claim)}
 		</span>
@@ -50,7 +60,7 @@ function Approvals({ claim }: { claim: Claim }) {
 
 /**
  * Where a change lands and what holds it back, when that isn't the plain case: into another branch, merging a
- * whole branch, or waiting on other changes.
+ * whole branch, or waiting on other changes. Pills a size smaller, beside a change row's title.
  */
 export function ChangeLabels({
 	claim,
@@ -60,64 +70,86 @@ export function ChangeLabels({
 	return (
 		<>
 			{isFromGitHub(claim) ? (
-				<span className="pill pill--outline" title={claim.trusted ?? "GitHub's changes, reviewed like any change"}>
+				<Badge outline size="sm" title={claim.trusted ?? "GitHub's changes, reviewed like any change"}>
 					from GitHub{claim.trusted ? ", trusted" : ""}
-				</span>
+				</Badge>
 			) : claim.source ? (
-				<span className="pill pill--outline">
+				<Badge outline size="sm">
 					merges <code>{claim.source}</code>
-				</span>
+				</Badge>
 			) : null}
 			{claim.into ? (
-				<span className="pill pill--outline">
+				<Badge outline size="sm">
 					into <code>{claim.into}</code>
-				</span>
+				</Badge>
 			) : null}
-			{claim.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
+			{claim.waitsOn?.length ? (
+				<Badge tone="warn" size="sm">
+					waits on {claim.waitsOn.join(", ")}
+				</Badge>
+			) : null}
 		</>
 	);
 }
 
-/** One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals. */
-function ChangeRow({ claim, repo, now }: { claim: Claim; repo: string; now?: number }) {
+// A small icon in a line of text: on the text's baseline, a pixel under it, a little apart from what follows.
+const INLINE_ICON = "inline -mb-px mr-0.75 align-baseline";
+
+/**
+ * One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals.
+ * Under the pointer its row lights, fading in and out (an overlay's opacity: a mixed color doesn't transition well).
+ */
+function ChangeRow({ claim, repo, now, arrived }: { claim: Claim; repo: string; now?: number; arrived: boolean }) {
 	const status = claimStatus(claim);
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
-		<li className="change-row">
+		<li
+			className={cn(
+				"relative isolate flex items-start gap-2.5 border-t border-border px-4 py-3 first:border-t-0 to-720:flex-wrap",
+				"before:absolute before:inset-0 before:-z-10 before:bg-surface-2/55 before:opacity-0",
+				"before:transition-opacity before:duration-fast hover:before:opacity-100",
+				arrived && "animate-appear",
+			)}
+		>
 			<StatusIcon status={status} />
-			<div className="change-row__main">
-				<div className="change-row__title">
-					<a href={href.change(repo, claim.change)}>{claimTitle(claim)}</a>
-					{status.kind !== "in-review" ? <StatusPill status={status} /> : null}
+			<div className="min-w-0 flex-1 to-720:basis-[calc(100%-30px)]">
+				<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+					<a
+						className="text-body font-semibold wrap-anywhere text-foreground transition-colors duration-fast hover:text-link"
+						href={href.change(repo, claim.change)}
+					>
+						{claimTitle(claim)}
+					</a>
+					{status.kind !== "in-review" ? <StatusPill status={status} size="sm" /> : null}
 					<ChangeLabels claim={claim} />
 				</div>
-				<p className="change-row__meta">
-					<span className="change-row__id">{claim.change}</span>
+				<p className="mt-0.75 mb-0 text-meta wrap-anywhere text-muted-foreground">
+					<span className="font-mono text-caption">{claim.change}</span>
 					<span>
 						{" · "}opened {timeAgo(claim.since)} by {claimAgent(claim)}
 					</span>
 					{claim.paths.length ? (
-						<span className="change-row__paths">
+						<span className="font-mono text-caption">
 							{" · "}
-							<Icon name="folder" size={12} />
+							<Icon name="folder" size={12} className={INLINE_ICON} />
 							<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 						</span>
 					) : null}
 					{lease?.short ? (
-						<span className={`change-row__lease${lease.free ? " tone-warn" : ""}`} title={lease.long}>
+						<span className={cn("whitespace-nowrap", lease.free && "text-warn")} title={lease.long}>
 							{" · "}
-							<Icon name="clock" size={12} />
+							<Icon name="clock" size={12} className={INLINE_ICON} />
 							{lease.short}
 						</span>
 					) : null}
 				</p>
 			</div>
-			<div className="change-row__aside">
+			<div className="flex shrink-0 items-center gap-3.5 pt-0.5 text-meta to-720:ml-6.5 to-720:flex-wrap to-720:gap-y-1.5">
 				<Approvals claim={claim} />
-				{claim.head ? <code className="muted">{shortSha(claim.head)}</code> : null}
+				{claim.head ? <code className="text-muted-foreground">{shortSha(claim.head)}</code> : null}
 				<time
-					className="change-row__age muted"
+					className="min-w-7 text-right text-muted-foreground to-720:text-left"
 					dateTime={claim.active}
 					title={`Last active ${new Date(claim.active).toLocaleString()}`}
 				>
@@ -128,7 +160,33 @@ function ChangeRow({ claim, repo, now }: { claim: Claim; repo: string; now?: num
 	);
 }
 
-/** The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). */
+/** A number that bumps as it changes. */
+function Bumping({ count }: { count: number }) {
+	const changed = useChanged(count);
+	return (
+		<span key={count} className={changed ? "animate-bump" : undefined}>
+			{count}
+		</span>
+	);
+}
+
+/** The rows of a list that has some: those that come after it first showed fade in as they do. */
+function ChangeRows({ claims, repo, now, fades }: { claims: Claim[]; repo: string; now?: number; fades: boolean }) {
+	const arrived = useArrivals(claims.map((claim) => claim.change));
+	return (
+		<ul className={cn("m-0 list-none p-0", fades && "animate-appear")}>
+			{claims.map((claim) => (
+				<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} arrived={arrived(claim.change)} />
+			))}
+		</ul>
+	);
+}
+
+/**
+ * The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). Another branch's
+ * list, or the list in place of "No open changes" (or that in place of the list), fades in; so does a change opened
+ * while it shows.
+ */
 export function ChangeList({
 	snapshot,
 	repo,
@@ -145,87 +203,108 @@ export function ChangeList({
 	const claims = [...snapshot.claims]
 		.filter((claim) => !shown || (claim.into ?? project) === shown)
 		.sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+	const branchChanged = useChanged(shown);
+	const emptied = useChanged(claims.length === 0);
+	const fades = branchChanged || emptied;
 	return (
-		<section className="box change-list" aria-labelledby="changes-title">
-			<div className="box__header change-list__filters">
-				<h2 id="changes-title" className="change-list__filter" aria-current="page">
+		<Box aria-labelledby="changes-title">
+			<BoxHeader>
+				{/* The browser's size for an h2: 1.5em of the 15px it's in. */}
+				<h2
+					id="changes-title"
+					className="inline-flex items-center gap-1.5 py-0.5 text-[22.5px] font-semibold text-foreground"
+					aria-current="page"
+				>
 					<Icon name="pull" />
-					<span className="change-list__count">{claims.length}</span> Open
+					<Bumping count={claims.length} /> Open
 				</h2>
 				{snapshot.audit ? (
-					<span className="change-list__filter">
+					<span className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground">
 						<Icon name="merge" />
-						<span className="change-list__count">{snapshot.audit.merges}</span> merged on {snapshot.branch ?? "main"}
+						<Bumping count={snapshot.audit.merges} /> merged on {snapshot.branch ?? "main"}
 					</span>
 				) : null}
-			</div>
+			</BoxHeader>
 			{claims.length === 0 ? (
-				<div className="empty">
-					<Icon name="pull" size={28} className="muted" />
+				<Empty className={cn(fades && "animate-appear")}>
+					<Icon name="pull" size={28} />
 					<h2>No open changes</h2>
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
-				</div>
+				</Empty>
 			) : (
-				<ul className="change-list__rows">
-					{claims.map((claim) => (
-						<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} />
-					))}
-				</ul>
+				<ChangeRows key={shown} claims={claims} repo={repo} now={now} fades={fades} />
 			)}
-		</section>
+		</Box>
 	);
 }
+
+// The audit's rows: an icon a little down the first line, then what it says; ruled off from the one above, the first
+// from the box's header too.
+const AUDIT_ROW = "flex items-start gap-2.5 border-t border-border px-0.5 py-3 wrap-anywhere";
+const AUDIT_ICON = "mt-0.5 inline-flex shrink-0";
 
 function Violations({ title, violations }: { title: string; violations: RepoAudit["violations"] }) {
+	const changed = useChanged(violations.length);
 	return (
-		<section className="box">
-			<div className="box__header">
-				<h3>{title}</h3>
-				<span className="counter">{violations.length}</span>
-			</div>
-			<ul className="audit-violations">
+		<Box>
+			<BoxHeader>
+				<h3 className="text-body-sm">{title}</h3>
+				<Counter key={violations.length} className={changed ? "animate-bump" : undefined}>
+					{violations.length}
+				</Counter>
+			</BoxHeader>
+			<ul className="m-0 list-none p-0">
 				{violations.map((violation, index) => (
-					<li
-						key={`${violation.commit}-${violation.rule}-${index}`}
-						className={`box__row audit-violation${violation.resolvedBy ? " audit-violation--resolved" : ""}`}
-					>
-						<span className={violation.resolvedBy ? "tone-neutral" : "tone-bad"}>
-							<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
-						</span>
-						<div>
-							<p>
-								<strong>{violation.rule}</strong> by {violation.author}
-								<span className="muted"> ({violation.by ? identityName(violation.by) : "unverified"})</span> in{" "}
-								<code>{shortSha(violation.commit)}</code>
-							</p>
-							<p className="muted">{violation.detail}</p>
-							{violation.resolvedBy ? <p className="muted">resolved by {shortSha(violation.resolvedBy)}</p> : null}
-						</div>
-					</li>
+					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} violation={violation} />
 				))}
 			</ul>
-		</section>
+		</Box>
 	);
 }
 
-/** The reviews recorded, newest as the snapshot lists them. */
-function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
-	if (votes.length === 0) return <p className="box__row muted">No reviews yet.</p>;
+/** A rule broken: by whom, in which commit, what was wrong, and the commit that resolved it, if one has. */
+function ViolationRow({ violation }: { violation: RepoAudit["violations"][number] }) {
+	const by = violation.by ? identityName(violation.by) : "unverified";
 	return (
-		<ul className="audit-votes">
+		<li className={cn(AUDIT_ROW, violation.resolvedBy && "opacity-75")}>
+			<span className={cn(AUDIT_ICON, violation.resolvedBy ? "text-neutral" : "text-bad")}>
+				<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
+			</span>
+			<div>
+				<p className="m-0">
+					<strong>{violation.rule}</strong> by {violation.author}
+					<span className="text-muted-foreground"> ({by})</span>
+					{" in"} <code>{shortSha(violation.commit)}</code>
+				</p>
+				<p className="mt-0.5 mb-0 text-muted-foreground">{violation.detail}</p>
+				{violation.resolvedBy ? (
+					<p className="mt-0.5 mb-0 text-muted-foreground">resolved by {shortSha(violation.resolvedBy)}</p>
+				) : null}
+			</div>
+		</li>
+	);
+}
+
+/** The reviews recorded, newest as the snapshot lists them; one recorded since they first showed fades in. */
+function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
+	const key = (vote: RepoSnapshot["votes"][number]) => `${vote.reviewer}-${vote.commit}-${vote.at}`;
+	const arrived = useArrivals(votes.map(key));
+	if (votes.length === 0) return <p className="my-3.75 px-0.5 py-3 text-muted-foreground">No reviews yet.</p>;
+	return (
+		<ul className="m-0 list-none p-0">
 			{votes.map((vote) => (
-				<li key={`${vote.reviewer}-${vote.commit}-${vote.at}`} className="box__row audit-vote">
-					<span className={vote.verdict === "approve" ? "tone-good" : "tone-bad"}>
+				<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
+					<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>
 						<Icon name={vote.verdict === "approve" ? "check" : "x"} />
 					</span>
 					<div>
-						<p>
-							<strong>{vote.reviewer}</strong> <span className="muted">({vote.role})</span>{" "}
+						<p className="m-0">
+							<strong>{vote.reviewer}</strong> <span className="text-muted-foreground">({vote.role})</span>{" "}
 							{vote.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(vote.commit)}</code>
-							{vote.by ? <span className="muted"> · {identityName(vote.by)}</span> : null}
-							<span className="muted"> · {timeAgo(vote.at)}</span>
+							{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
+							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
 						</p>
-						{vote.evidence ? <p className="muted audit-vote__evidence">{vote.evidence}</p> : null}
+						{vote.evidence ? <p className="mt-0.5 mb-0 text-ui text-muted-foreground">{vote.evidence}</p> : null}
 					</div>
 				</li>
 			))}
@@ -236,9 +315,11 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 /** The Audit tab: rules broken on the project's branch, read from Git, and the reviews recorded. */
 export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	const { audit, votes } = snapshot;
+	// Once the records are replayed, what they found fades in where "Replaying" was.
+	const replayed = useChanged(Boolean(audit));
 	if (!audit)
 		return (
-			<p className="muted page__loading" role="status">
+			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
 				Replaying the records from Git…
 			</p>
 		);
@@ -246,26 +327,29 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	const resolved = audit.violations.filter((violation) => violation.resolvedBy);
 	const openHeadline = open.length ? counted(open.length, "open violation") : "No open violations";
 	return (
-		<div className="audit">
-			<div className={`callout ${open.length ? "callout--bad" : "callout--good"}`}>
-				<Icon name={open.length ? "alert" : "check-circle"} className={open.length ? "tone-bad" : "tone-good"} />
+		<div className={cn("grid max-w-225 gap-4", replayed && "animate-appear")}>
+			<Callout tone={open.length ? "bad" : "good"}>
+				<Icon
+					name={open.length ? "alert" : "check-circle"}
+					className={cn("transition-colors duration-base", open.length ? "text-bad" : "text-good")}
+				/>
 				<div>
 					<strong>{openHeadline}</strong>
-					<p className="muted">
+					<p className="text-muted-foreground">
 						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since GitHive
 						started on it.
 						{audit.violations.length === 0 ? " No violations." : ""}
 					</p>
 				</div>
-			</div>
+			</Callout>
 			{open.length > 0 ? <Violations title="Open" violations={open} /> : null}
 			{resolved.length > 0 ? <Violations title="Resolved" violations={resolved} /> : null}
-			<section className="box">
-				<div className="box__header">
-					<h3>Recent reviews</h3>
-				</div>
+			<Box>
+				<BoxHeader>
+					<h3 className="text-body-sm">Recent reviews</h3>
+				</BoxHeader>
 				<RecentReviews votes={votes} />
-			</section>
+			</Box>
 		</div>
 	);
 }
@@ -304,9 +388,9 @@ function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[]
 				<>
 					<dt>Stricter paths</dt>
 					<dd>
-						<ul className="repo-settings__commands">
+						<ul className="m-0 pl-5">
 							{policy.escalate.map((rule, index) => (
-								<li key={index}>
+								<li key={index} className="not-first:mt-1">
 									{rule.paths.map((path) => (
 										<code key={path}>{path}</code>
 									))}{" "}
@@ -358,9 +442,9 @@ export function SettingsTab({
 	const sharding = shardingSummary(snapshot);
 	const votesSharding = votesShardingSummary(snapshot);
 	return (
-		<div className="repo-settings">
-			<p className="callout repo-settings__intro">
-				<Icon name="alert" className="muted" />
+		<div className="grid max-w-205 gap-4">
+			<Callout className="mb-2 text-ui">
+				<Icon name="alert" className="text-muted-foreground" />
 				<span>
 					{editor
 						? "Changes here apply to merges from now on: each merge is audited against the " +
@@ -369,14 +453,14 @@ export function SettingsTab({
 						: "The repo's admins set how changes merge, and every agent checks it itself. A role " +
 							"can be granted to a team, as @org/team."}
 				</span>
-			</p>
+			</Callout>
 			{editor}
-			<section className="box">
-				<div className="box__header">
-					<h2>{editor ? "How the records are kept" : "How changes merge"}</h2>
-				</div>
-				<div className="box__body">
-					<dl className="repo-settings__list">
+			<Box>
+				<BoxHeader>
+					<h2 className="text-body-sm font-semibold">{editor ? "How the records are kept" : "How changes merge"}</h2>
+				</BoxHeader>
+				<BoxBody>
+					<dl className={TERMS}>
 						{editor ? null : <MergePolicyTerms policy={policy} verify={verify} />}
 						<dt>Signed records</dt>
 						<dd>
@@ -408,9 +492,10 @@ export function SettingsTab({
 							</>
 						) : null}
 					</dl>
-				</div>
-			</section>
-			{access}
+				</BoxBody>
+			</Box>
+			{/* Who may do what (RepoAdmin) takes the tab's smaller headings and paragraphs' spacing. */}
+			{access ? <div className="[&_h2]:text-body-sm [&_h2]:font-semibold [&_p]:mt-0 [&_p]:mb-2">{access}</div> : null}
 		</div>
 	);
 }

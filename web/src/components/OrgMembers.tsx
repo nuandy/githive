@@ -1,9 +1,16 @@
 import { type FormEvent, useState } from "react";
 import type { OrgDetail, OrgRole } from "../api";
+import { useArrivals } from "../hooks/useArrivals";
 import { addedMessage, assignableRoles } from "../lib/orgs";
+import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
 import type { ConfirmProps, SectionProps } from "./OrgPage";
+import { Badge } from "./ui/badge";
+import { Box, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { FieldHint, Input, NativeSelect } from "./ui/field";
+import { INLINE, INLINE_INPUT, NOTE, ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED, STACK, TITLE } from "./ui/manage";
 
 type Member = OrgDetail["members"][number];
 type Invite = OrgDetail["invites"][number];
@@ -14,7 +21,7 @@ function Avatar({ person }: { person: { handle: string; name: string | null; ava
 	if (person.avatarUrl)
 		return (
 			<img
-				className="manage__avatar"
+				className="size-5.5 flex-none rounded-full"
 				src={person.avatarUrl}
 				alt=""
 				width={22}
@@ -23,7 +30,10 @@ function Avatar({ person }: { person: { handle: string; name: string | null; ava
 			/>
 		);
 	return (
-		<span className="manage__avatar manage__avatar--initial" aria-hidden="true">
+		<span
+			className="inline-grid size-5.5 flex-none place-items-center rounded-full bg-link-soft text-caption font-semibold text-link"
+			aria-hidden="true"
+		>
 			{(person.name || person.handle).charAt(0).toUpperCase()}
 		</span>
 	);
@@ -43,13 +53,20 @@ export function MembersSection({
 }: SectionProps & ConfirmProps & { me: { handle: string }; manager: boolean }) {
 	const roles = assignableRoles(org.role);
 	const rowProps = { org, actions, run, busy, confirming, setConfirming, errorFor };
+	// Someone added or invited since the page showed fades in.
+	const arrived = useArrivals([
+		...org.members.map((member) => member.handle),
+		...org.invites.map((invite) => `invite:${invite.email}`),
+	]);
 
 	return (
-		<section className="box" aria-labelledby="org-members">
-			<div className="box__header">
-				<h2 id="org-members">People</h2>
-			</div>
-			<ul className="manage__rows">
+		<Box aria-labelledby="org-members">
+			<BoxHeader>
+				<h2 id="org-members" className={TITLE}>
+					People
+				</h2>
+			</BoxHeader>
+			<ul className={ROWS}>
 				{org.members.map((member) => {
 					const isMe = member.handle === me.handle;
 					// Only an owner changes or removes an owner.
@@ -58,6 +75,7 @@ export function MembersSection({
 						<MemberRow
 							key={member.userId}
 							{...rowProps}
+							arrived={arrived(member.handle)}
 							member={member}
 							isMe={isMe}
 							editable={editable}
@@ -65,10 +83,14 @@ export function MembersSection({
 						/>
 					);
 				})}
-				{manager ? org.invites.map((invite) => <InviteRow key={invite.email} {...rowProps} invite={invite} />) : null}
+				{manager
+					? org.invites.map((invite) => (
+							<InviteRow key={invite.email} {...rowProps} arrived={arrived(`invite:${invite.email}`)} invite={invite} />
+						))
+					: null}
 			</ul>
 			{manager ? <AddMemberForm org={org} actions={actions} run={run} busy={busy} roles={roles} /> : null}
-		</section>
+		</Box>
 	);
 }
 
@@ -102,14 +124,15 @@ function AddMemberForm({
 	};
 
 	return (
-		<form className="box__body manage__form" onSubmit={add}>
-			<div className="manage__inline">
+		<form className={cn("px-0.5 py-4", STACK)} onSubmit={add}>
+			<div className={INLINE}>
 				<label className="sr-only" htmlFor="add-member-email">
 					Email address
 				</label>
-				<input
+				<Input
 					id="add-member-email"
 					type="email"
+					className={INLINE_INPUT}
 					value={email}
 					onChange={(event) => setEmail(event.target.value)}
 					placeholder="person@example.com"
@@ -118,28 +141,28 @@ function AddMemberForm({
 				<label className="sr-only" htmlFor="add-member-role">
 					Role
 				</label>
-				<select id="add-member-role" value={role} onChange={(event) => setRole(event.target.value as OrgRole)}>
+				<NativeSelect id="add-member-role" value={role} onChange={(event) => setRole(event.target.value as OrgRole)}>
 					{roles.map((option) => (
 						<option key={option} value={option}>
 							{ROLE_WORDS[option]}
 						</option>
 					))}
-				</select>
-				<button type="submit" className="accent" disabled={!email.trim() || busy === "add-member"}>
+				</NativeSelect>
+				<Button type="submit" variant="primary" disabled={!email.trim() || busy === "add-member"}>
 					{busy === "add-member" ? "Adding…" : "Add"}
-				</button>
+				</Button>
 			</div>
-			<p className="manage__hint">
+			<FieldHint>
 				Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive admin
 				has approved them.
-			</p>
+			</FieldHint>
 			{added ? (
-				<p className="manage__note" role="status">
+				<p className={cn(NOTE, "animate-appear")} role="status">
 					{added}
 				</p>
 			) : null}
 			{addError ? (
-				<p className="error manage__note" role="alert">
+				<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
 					{addError}
 				</p>
 			) : null}
@@ -154,24 +177,26 @@ interface MemberRowProps extends SectionProps, ConfirmProps {
 	editable: boolean;
 	/** The roles you may give. */
 	roles: OrgRole[];
+	/** Added since the page showed: it fades in. */
+	arrived: boolean;
 }
 
-function MemberRow({ member, isMe, editable, roles, errorFor, ...rest }: MemberRowProps) {
+function MemberRow({ member, isMe, editable, roles, errorFor, arrived, ...rest }: MemberRowProps) {
 	const key = `member:${member.handle}`;
 	return (
-		<li className="box__row">
-			<div className="manage__row">
-				<div className="manage__row-main">
+		<li className={cn(RULED, arrived && "animate-appear")}>
+			<div className={ROW}>
+				<div className={ROW_MAIN}>
 					<Avatar person={member} />
 					<strong>{member.handle}</strong>
-					{member.name ? <span className="muted">{member.name}</span> : null}
-					{isMe ? <span className="muted">(you)</span> : null}
+					{member.name ? <span className="text-muted-foreground">{member.name}</span> : null}
+					{isMe ? <span className="text-muted-foreground">(you)</span> : null}
 				</div>
-				<div className="manage__row-actions">
+				<div className={ROW_ACTIONS}>
 					{editable ? (
 						<MemberControls member={member} roles={roles} rowKey={key} {...rest} />
 					) : (
-						<span className="pill pill--neutral">{ROLE_WORDS[member.role]}</span>
+						<Badge tone="neutral">{ROLE_WORDS[member.role]}</Badge>
 					)}
 				</div>
 			</div>
@@ -202,7 +227,7 @@ function MemberControls({
 			<label className="sr-only" htmlFor={`role-${member.handle}`}>
 				{member.handle}'s role
 			</label>
-			<select
+			<NativeSelect
 				id={`role-${member.handle}`}
 				value={member.role}
 				disabled={busy === rowKey}
@@ -213,7 +238,7 @@ function MemberControls({
 						{ROLE_WORDS[choice]}
 					</option>
 				))}
-			</select>
+			</NativeSelect>
 			<ConfirmButton
 				id={`remove:${member.handle}`}
 				confirming={confirming}
@@ -236,15 +261,16 @@ function InviteRow({
 	setConfirming,
 	errorFor,
 	invite,
-}: SectionProps & ConfirmProps & { invite: Invite }) {
+	arrived,
+}: SectionProps & ConfirmProps & { invite: Invite; arrived: boolean }) {
 	const key = `invite:${invite.email}`;
 	return (
-		<li className="box__row">
-			<div className="manage__row">
-				<div className="manage__row-main">
-					<Icon name="clock" className="muted" />
+		<li className={cn(RULED, arrived && "animate-appear")}>
+			<div className={ROW}>
+				<div className={ROW_MAIN}>
+					<Icon name="clock" className="text-muted-foreground" />
 					<span>{invite.email}</span>
-					<span className="muted">invited as {invite.role}; joins when they first sign in</span>
+					<span className="text-muted-foreground">invited as {invite.role}; joins when they first sign in</span>
 				</div>
 				<ConfirmButton
 					id={key}

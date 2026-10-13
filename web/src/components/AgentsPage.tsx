@@ -1,13 +1,25 @@
 import { useState } from "react";
 import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
+import { useArrivals } from "../hooks/useArrivals";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
 import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
+import { cn } from "../lib/utils";
 import { type RunAction, useRowActions } from "../hooks/useRowActions";
 import { AgentRow, type RowShared } from "./AgentRow";
 import { ConfirmButton } from "./Confirm";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
-import "./AgentsPage.css";
+import { Page } from "./Page";
+import { Box, BoxHeader, Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Input } from "./ui/field";
+import { ROWS } from "./ui/manage";
+
+// A box's own line in place of its rows: that they're loading, or that there are none, with a paragraph's margins.
+const LINE = "my-3.75 px-0.5 py-4 text-muted-foreground";
+// A box's title on this page.
+const TITLE = "text-body-sm";
 
 type User = Extract<Me, { kind: "user" }>;
 
@@ -58,9 +70,10 @@ export function AgentsView({
 	};
 	const shared: RowShared = { actions, run, busy, confirming, setConfirming, now };
 
-	const agentRow = (agent: MyAgent) => (
+	const agentRow = (agent: MyAgent, arrived: boolean) => (
 		<AgentRow
 			key={agent.id}
+			arrived={arrived}
 			{...shared}
 			agent={agent}
 			fullName={`${me.handle}/${agent.name}`}
@@ -77,19 +90,19 @@ export function AgentsView({
 	);
 
 	return (
-		<main className="page agents" id="main">
-			<header className="agents__header">
-				<h1>Agents</h1>
-				<p className="muted">
+		<Page id="main" className="grid gap-4">
+			<header>
+				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Agents</h1>
+				<p className="m-0 text-muted-foreground">
 					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
 					writes is attributed to it, under you.
 				</p>
 			</header>
 
 			{error ? (
-				<div className="callout callout--bad" role="alert">
+				<Callout tone="bad" className="animate-appear" role="alert">
 					<p>{error}</p>
-				</div>
+				</Callout>
 			) : null}
 
 			<ConnectSection
@@ -100,18 +113,20 @@ export function AgentsView({
 				clientLabel={clientLabel}
 			/>
 
-			<section className="box agents__list" aria-labelledby="agents-title">
+			<Box aria-labelledby="agents-title">
 				<NewAgentForm handle={me.handle} create={(name) => actions.createAgent(name)} run={run} busy={busy} />
 				<AgentList agents={agents} yourClient={yourClient} agentRow={agentRow} />
-			</section>
+			</Box>
 
-			<section className="box agents__apps" aria-labelledby="apps-title">
-				<div className="box__header">
-					<h2 id="apps-title">Connected apps</h2>
-				</div>
+			<Box aria-labelledby="apps-title">
+				<BoxHeader>
+					<h2 id="apps-title" className={TITLE}>
+						Connected apps
+					</h2>
+				</BoxHeader>
 				<ConnectedApps connections={connections} {...shared} errorFor={errorFor} showError={showError} />
-			</section>
-		</main>
+			</Box>
+		</Page>
 	);
 }
 
@@ -145,30 +160,33 @@ function NewAgentForm(props: {
 	};
 	return (
 		<>
-			<div className="box__header agents__list-header">
-				<h2 id="agents-title">Your agents</h2>
-				<form className="agents__new" onSubmit={submit}>
+			<BoxHeader className="justify-between">
+				<h2 id="agents-title" className={TITLE}>
+					Your agents
+				</h2>
+				<form className="flex min-w-0 flex-wrap items-center gap-1.5" onSubmit={submit}>
 					<label htmlFor="new-agent-name" className="sr-only">
 						New agent's name
 					</label>
-					<span className="agents__new-prefix" aria-hidden="true">
+					<span className="font-mono text-meta text-muted-foreground" aria-hidden="true">
 						{handle}/
 					</span>
-					<input
+					<Input
 						id="new-agent-name"
+						className="w-40 font-mono text-meta leading-[inherit]"
 						value={newName}
 						onChange={(event) => setNewName(event.target.value)}
 						placeholder="builder"
 						autoComplete="off"
 						spellCheck={false}
 					/>
-					<button type="submit" className="accent agents__small" disabled={busy !== null || !newName.trim()}>
+					<Button type="submit" variant="primary" size="sm" disabled={busy !== null || !newName.trim()}>
 						{busy === "create" ? "Making…" : "New agent"}
-					</button>
+					</Button>
 				</form>
-			</div>
+			</BoxHeader>
 			{createError ? (
-				<p className="error agents__create-error" role="alert">
+				<p className="m-0 animate-appear px-4 pt-2.5 text-bad" role="alert">
 					{createError}
 				</p>
 			) : null}
@@ -184,23 +202,28 @@ function AgentList({
 }: {
 	agents: MyAgent[] | undefined;
 	yourClient: string;
-	agentRow: (agent: MyAgent) => React.ReactNode;
+	agentRow: (agent: MyAgent, arrived: boolean) => React.ReactNode;
 }) {
+	// What's read fades in as it takes the place of "Loading…"; an agent made later fades in on its own.
+	const read = useChanged(agents === undefined) && "animate-appear";
+	const arrived = useArrivals((agents ?? []).map((agent) => agent.id));
 	if (agents === undefined)
 		return (
-			<p className="muted box__body" role="status">
+			<p className={LINE} role="status">
 				Loading your agents…
 			</p>
 		);
 	if (agents.length === 0)
 		return (
-			<div className="box__body agents__empty">
-				<p>No agents yet. Name one above, or connect {yourClient} and name it while you sign in.</p>
+			<div className={cn("px-0.5 py-4", read)}>
+				<p className="m-0 text-muted-foreground">
+					No agents yet. Name one above, or connect {yourClient} and name it while you sign in.
+				</p>
 			</div>
 		);
 	const live = agents.filter((agent) => !agent.revokedAt);
 	const revoked = agents.filter((agent) => agent.revokedAt);
-	return <ul className="agents__agents">{[...live, ...revoked].map(agentRow)}</ul>;
+	return <ul className={ROWS}>{[...live, ...revoked].map((agent) => agentRow(agent, arrived(agent.id)))}</ul>;
 }
 
 interface ConnectedAppsProps extends RowShared {
@@ -221,27 +244,35 @@ function ConnectedApps({
 	setConfirming,
 	now,
 }: ConnectedAppsProps) {
+	// What's read fades in as it takes the place of "Loading…"; an app connected later fades in on its own.
+	const read = useChanged(connections === undefined) && "animate-appear";
+	const arrived = useArrivals((connections ?? []).map((connection) => connection.id));
 	if (connections === undefined)
 		return (
-			<p className="muted box__body" role="status">
+			<p className={LINE} role="status">
 				Loading…
 			</p>
 		);
-	if (connections.length === 0) return <p className="muted box__body">No apps connected over OAuth yet.</p>;
+	if (connections.length === 0) return <p className={cn(LINE, read)}>No apps connected over OAuth yet.</p>;
 	return (
-		<ul className="agents__connections">
+		<ul className={ROWS}>
 			{connections.map((connection) => {
 				const key = `conn:${connection.id}`;
 				const error = errorFor(connection.id);
 				return (
-					<li key={connection.id} className="agents__connection">
-						<div>
-							<strong>{connection.client}</strong> <span className="muted">as</span>{" "}
+					<li
+						key={connection.id}
+						className={cn(
+							"flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-3 first:border-t-0",
+							arrived(connection.id) && "animate-appear",
+						)}
+					>
+						<div className="min-w-0 wrap-anywhere">
+							<strong>{connection.client}</strong> <span className="text-muted-foreground">as</span>{" "}
 							<code>{connection.agent ?? "an agent"}</code>
-							<span className="muted agents__meta"> · connected {timeAgo(connection.createdAt, now)}</span>
+							<span className="text-meta text-muted-foreground"> · connected {timeAgo(connection.createdAt, now)}</span>
 						</div>
 						<ConfirmButton
-							block="agents"
 							id={key}
 							confirming={confirming}
 							setConfirming={setConfirming}
@@ -251,7 +282,7 @@ function ConnectedApps({
 							onConfirm={() => run(key, () => actions.disconnect(connection.id), showError(connection.id))}
 						/>
 						{error !== null ? (
-							<p className="error agents__row-error" role="alert">
+							<p className="m-0 animate-appear text-bad" role="alert">
 								{error}
 							</p>
 						) : null}
