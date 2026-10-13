@@ -7,7 +7,7 @@
 //   #/repos/:owner/:name[/changes|/history|/claims|/agents|/audit|/settings][?branch=<branch>]
 //                                             (the Hive tab without one)
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
-//   #/repos/:owner/:name/changes/:id[/commits]
+//   #/repos/:owner/:name/changes/:id[/commits][?review]
 //   #/settings/agents                         your agents, their tokens, and connected apps
 // Inside the dashboard a repo is named by its full name, "<owner>/<name>".
 
@@ -32,7 +32,7 @@ export type Route =
 			/** Code tab: a branch or commit other than the project's branch. */ ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 	  }
-	| { page: "change"; repo: string; change: string; tab: ChangeTab }
+	| { page: "change"; repo: string; change: string; tab: ChangeTab; review?: true }
 	| { page: "not-found" };
 
 const REPO_TABS: RepoTab[] = ["hive", "changes", "history", "claims", "code", "agents", "settings", "audit"];
@@ -87,7 +87,8 @@ export function parseRoute(hash: string): Route {
 			const change = decode(rest[1]);
 			if (!change) return { page: "not-found" };
 			if (rest.length === 3 && !CHANGE_TABS.includes(rest[2] as ChangeTab)) return { page: "not-found" };
-			return { page: "change", repo, change, tab: (rest[2] as ChangeTab | undefined) ?? "conversation" };
+			const tab = (rest[2] as ChangeTab | undefined) ?? "conversation";
+			return { page: "change", repo, change, tab, ...(params.has("review") ? { review: true as const } : {}) };
 		}
 	}
 	return { page: "not-found" };
@@ -117,6 +118,8 @@ export const href = {
 	repos: () => "#/",
 	repo: repoHref,
 	change: changeHref,
+	/** A change's page, opened at its vote form. */
+	review: (repo: string, change: string) => `${changeHref(repo, change)}?review`,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,
 	/** A public repo's site as its default branch has it, or as a change has it. Outside the dashboard, so no "#". */

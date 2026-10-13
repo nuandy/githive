@@ -1,7 +1,7 @@
 import { SiteLink } from "./SiteLink";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { messageOf } from "../lib/errors";
-import { VoteForm, type VoteApi } from "./VoteForm";
+import { jumpToVoteForm, VoteForm, type VoteApi } from "./VoteForm";
 import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
@@ -35,6 +35,8 @@ export interface ChangePageProps {
 	history?: ChangeHistory | null;
 	repo: string;
 	tab: "conversation" | "commits";
+	/** Opened to review it: the page goes to the vote form once the change's history is in. */
+	review?: boolean;
 	/** Whether the repo's site can be previewed as this change has it: only a public repo's is served. */
 	previewable?: boolean;
 	/** For a person's vote; without it, the page only shows. */
@@ -429,6 +431,7 @@ export function ChangePage({
 	history,
 	repo,
 	tab,
+	review = false,
 	api,
 	canVote = true,
 	merge,
@@ -447,6 +450,8 @@ export function ChangePage({
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;
 	const timeline = history ? buildTimeline(history, repo).filter((item) => item.kind !== "opened") : [];
+	// The reader can still give the change an approval it needs, from the vote form.
+	const reviewable = !!(claim?.head && api && canVote && !claim.approval.approved && !claim.trusted);
 	const mergeable = claim && merge && claim.approval.approved && !claim.waitsOn?.length;
 	// What comes once it's read fades in: the change in place of "Loading…", its history in place of the latest push,
 	// and the other tab's content; what's there from the start comes with the page's own fade.
@@ -454,6 +459,14 @@ export function ChangePage({
 	const pageFades = useChanged(missing);
 	const historyFades = useChanged(history === undefined);
 	const tabFades = useChanged(tab);
+	// The history above the form moves it as it comes in, so the page goes there once it's in, a frame after the
+	// page is drawn: a smooth scroll started while the address changes is dropped.
+	const settled = history !== undefined;
+	useEffect(() => {
+		if (!review || !settled) return;
+		const frame = requestAnimationFrame(jumpToVoteForm);
+		return () => cancelAnimationFrame(frame);
+	}, [review, settled, changeId]);
 
 	if (missing)
 		return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} fades={historyFades} />;
@@ -493,7 +506,15 @@ export function ChangePage({
 				) : null}
 				<MergeStatus claim={claim} ending={ending} branch={branch} repo={repo} />
 			</div>
-			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
+			<ChangeSidebar
+				snapshot={snapshot}
+				claim={claim}
+				record={record}
+				agent={agent}
+				votes={votes}
+				now={now}
+				onReview={reviewable ? jumpToVoteForm : undefined}
+			/>
 		</div>
 	);
 	const commits =

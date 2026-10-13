@@ -377,7 +377,8 @@ function RepoRoute(props: {
 
 /** What the repo page shows for a route, or null when the route isn't a repo's. */
 function repoViewOf(route: Route): RepoView | null {
-	if (route.page === "change") return { kind: "change", change: route.change, tab: route.tab };
+	if (route.page === "change")
+		return { kind: "change", change: route.change, tab: route.tab, ...(route.review ? { review: true } : {}) };
 	if (route.page !== "repo") return null;
 	return {
 		kind: "repo",

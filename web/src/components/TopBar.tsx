@@ -123,10 +123,11 @@ function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefin
 function PillCount({ children }: { children: number }) {
 	const changed = useChanged(children);
 	return (
+		// Overpass's digits sit high in their line: a line 2px taller than the badge centers them in it.
 		<span
 			key={children}
 			className={cn(
-				"min-w-4.5 rounded-full bg-needs px-1.5 text-center text-micro leading-4.5 font-bold text-white",
+				"h-4.5 min-w-4.5 rounded-full bg-needs px-1.5 text-center text-micro leading-5 font-bold text-white",
 				changed && "animate-bump",
 			)}
 		>

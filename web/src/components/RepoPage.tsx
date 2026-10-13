@@ -64,7 +64,7 @@ export type RepoView =
 			ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 	  }
-	| { kind: "change"; change: string; tab: ChangeTab };
+	| { kind: "change"; change: string; tab: ChangeTab; review?: boolean };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
 export type RepoPageApi = CodeApi &
@@ -260,6 +260,7 @@ function RepoTabContent({
 				history={changeHistory}
 				repo={repo}
 				tab={view.tab}
+				review={view.review}
 				api={api}
 				canVote={voting}
 				merge={canWrite(access?.level) ? api.merge : undefined}
@@ -300,7 +301,7 @@ function RepoTabContent({
 				canWrite={canWrite(access?.level)}
 				onBranchMade={onSettingsChanged}
 			/>
-			<ChangeList snapshot={snapshot} repo={repo} shown={asked ? view.branch : branch} />
+			<ChangeList snapshot={snapshot} repo={repo} shown={asked ? view.branch : branch} voting={voting} />
 		</>
 	);
 }

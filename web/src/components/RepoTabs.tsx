@@ -41,21 +41,27 @@ function approvalLook(approval: Claim["approval"]): { tone: Tone; icon: IconName
 	return { tone: "warn", icon: "eye" };
 }
 
-function Approvals({ claim }: { claim: Claim }) {
+/** The change's approvals; for someone who can vote on a change still short of them, a link to its vote form. */
+function Approvals({ claim, repo, voting }: { claim: Claim; repo: string; voting: boolean }) {
 	const { approval } = claim;
 	if (!claim.head) return null;
 	const { tone, icon } = approvalLook(approval);
-	return (
-		<span
-			className={cn(
-				"inline-flex items-center gap-1 font-medium whitespace-nowrap transition-colors duration-base",
-				TONE_TEXT[tone],
-			)}
-			title={`${approval.approvals} of ${approval.required} approvals`}
-		>
+	const look = cn(
+		"inline-flex items-center gap-1 font-medium whitespace-nowrap transition-colors duration-base",
+		TONE_TEXT[tone],
+	);
+	const counted = `${approval.approvals} of ${approval.required} approvals`;
+	const label = (
+		<>
 			<Icon name={icon} size={14} />
 			{claimApprovalLabel(claim)}
-		</span>
+		</>
+	);
+	if (!voting || approval.approved || claim.trusted) return <span className={look} title={counted}>{label}</span>;
+	return (
+		<a className={cn(look, "hover:underline")} href={href.review(repo, claim.change)} title={`${counted}: review it`}>
+			{label}
+		</a>
 	);
 }
 
@@ -100,7 +106,7 @@ const INLINE_ICON = "inline -mb-px mr-0.75 align-baseline";
  * One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals.
  * Under the pointer its row lights, fading in and out (an overlay's opacity: a mixed color doesn't transition well).
  */
-function ChangeRow({ claim, repo, now, arrived }: { claim: Claim; repo: string; now?: number; arrived: boolean }) {
+function ChangeRow({ claim, repo, now, arrived, voting }: ChangeRowProps & { claim: Claim; arrived: boolean }) {
 	const status = claimStatus(claim);
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
@@ -147,7 +153,7 @@ function ChangeRow({ claim, repo, now, arrived }: { claim: Claim; repo: string; 
 				</p>
 			</div>
 			<div className="flex shrink-0 items-center gap-3.5 pt-0.5 text-meta to-720:ml-6.5 to-720:flex-wrap to-720:gap-y-1.5">
-				<Approvals claim={claim} />
+				<Approvals claim={claim} repo={repo} voting={voting} />
 				{claim.head ? <code className="text-muted-foreground">{shortSha(claim.head)}</code> : null}
 				<time
 					className="min-w-7 text-right text-muted-foreground to-720:text-left"
@@ -172,13 +178,27 @@ function Bumping({ count }: { count: number }) {
 }
 
 /** The rows of a list that has some: those that come after it first showed fade in as they do. */
-function ChangeRows({ claims, repo, now, fades }: { claims: Claim[]; repo: string; now?: number; fades: boolean }) {
+interface ChangeRowProps {
+	repo: string;
+	now?: number;
+	/** Whoever reads the list can vote on its changes. */
+	voting: boolean;
+}
+
+function ChangeRows({ claims, repo, now, fades, voting }: ChangeRowProps & { claims: Claim[]; fades: boolean }) {
 	const arrived = useArrivals(claims.map((claim) => claim.change));
 	const staggers = useStagger(claims.length > 0);
 	return (
 		<ul className={cn("m-0 list-none p-0", staggers ? "stagger" : fades && "animate-fade")}>
 			{claims.map((claim) => (
-				<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} arrived={arrived(claim.change)} />
+				<ChangeRow
+					key={claim.change}
+					claim={claim}
+					repo={repo}
+					now={now}
+					arrived={arrived(claim.change)}
+					voting={voting}
+				/>
 			))}
 		</ul>
 	);
@@ -194,12 +214,15 @@ export function ChangeList({
 	repo,
 	shown,
 	now,
+	voting = false,
 }: {
 	snapshot: RepoSnapshot;
 	repo: string;
 	shown?: string;
 	/** The time leases are told against (tests fix it). */
 	now?: number;
+	/** The reader can vote, so a change short of approvals links to its vote form. */
+	voting?: boolean;
 }) {
 	const project = snapshot.branch ?? "main";
 	const claims = [...snapshot.claims]
@@ -234,7 +257,7 @@ export function ChangeList({
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
 				</Empty>
 			) : (
-				<ChangeRows key={shown} claims={claims} repo={repo} now={now} fades={fades} />
+				<ChangeRows key={shown} claims={claims} repo={repo} now={now} fades={fades} voting={voting} />
 			)}
 		</Box>
 	);

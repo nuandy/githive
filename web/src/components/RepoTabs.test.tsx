@@ -168,6 +168,28 @@ describe("a repo", () => {
 		expect(loading).toContain("Loading history");
 	});
 
+	it("leads someone who can vote to a change's vote form, from its row and from its page", () => {
+		const list = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="acme/docs-site" voting />);
+		expect(list).toMatch(/<a [^>]*href="#\/repos\/acme\/docs-site\/changes\/c-1\?review"[^>]*>.*1\/2 approvals/);
+		const readOnly = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="acme/docs-site" />);
+		expect(readOnly).not.toContain("?review");
+		const page = (canVote: boolean) =>
+			renderToStaticMarkup(
+				<ChangePage
+					snapshot={snapshot}
+					changeId="c-1"
+					claim={snapshot.claims[0]}
+					history={historyFixture}
+					repo="acme/docs-site"
+					tab="conversation"
+					api={{ vote: async () => ({}) }}
+					canVote={canVote}
+				/>,
+			);
+		expect(page(true)).toMatch(/<button[^>]*>.*Review<\/button>/);
+		expect(page(false)).not.toMatch(/>Review<\/button>/);
+	});
+
 	it("has Changes, Audit and Settings tabs", () => {
 		const html = renderToStaticMarkup(
 			<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "audit" }} snapshot={snapshot} api={stubApi()} />,

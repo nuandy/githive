@@ -27,6 +27,7 @@ describe("hash routes", () => {
 			tab: "conversation",
 		});
 		expect(parseRoute("#/repos/acme/web/changes/add-stats/commits")).toMatchObject({ page: "change", tab: "commits" });
+		expect(parseRoute("#/repos/acme/web/changes/add-stats?review")).toMatchObject({ change: "add-stats", review: true });
 		// A repo not yet in an org, as an Access admin sees it.
 		expect(parseRoute("#/repos/_/walkthrough-01774")).toMatchObject({ page: "repo", repo: "_/walkthrough-01774" });
 	});
@@ -50,6 +51,7 @@ describe("hash routes", () => {
 		expect(href.repo("acme/web", "changes", "next")).toBe("#/repos/acme/web/changes?branch=next");
 		expect(href.repo("_/old-repo")).toBe("#/repos/_/old-repo");
 		expect(href.change("acme/web", "add-stats", "commits")).toBe("#/repos/acme/web/changes/add-stats/commits");
+		expect(href.review("acme/web", "add-stats")).toBe("#/repos/acme/web/changes/add-stats?review");
 		expect(href.newRepo()).toBe("#/new");
 		expect(href.newRepo("acme")).toBe("#/new?owner=acme");
 		expect(href.org("acme")).toBe("#/orgs/acme");

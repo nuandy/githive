@@ -13,6 +13,15 @@ export interface VoteApi {
 	vote(repo: string, change: string, vote: VoteInput): Promise<unknown>;
 }
 
+/** Brings the vote form's field into view, ready to type in; at once when motion is reduced. */
+export function jumpToVoteForm() {
+	const field = document.getElementById("vote-evidence");
+	if (!field) return;
+	const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+	field.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+	field.focus({ preventScroll: true });
+}
+
 /** The roles a person can vote as: a general review, and every role that can block a change here. */
 export function voteRoles(policy: RepoSnapshot["policy"]): string[] {
 	const pathVetoes = (policy.escalate ?? []).flatMap((rule) => rule.vetoes ?? []);

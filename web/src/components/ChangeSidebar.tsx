@@ -8,6 +8,7 @@ import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
+import { Button } from "./ui/button";
 import { TONE_TEXT, TonePill } from "./StatusPill";
 
 /** The change as recorded: its claim while in force, or the claim from its history. */
@@ -46,6 +47,7 @@ export function ChangeSidebar({
 	agent,
 	votes,
 	now,
+	onReview,
 }: {
 	snapshot: RepoSnapshot;
 	claim: Claim | undefined;
@@ -54,6 +56,8 @@ export function ChangeSidebar({
 	votes: Vote[];
 	/** The time a lease is told against (tests fix it). */
 	now?: number;
+	/** Goes to the vote form, for a reader who can give the change an approval it still needs. */
+	onReview?: () => void;
 }) {
 	const builder = claim?.hosted?.builder;
 	const lease = leaseWords(claim?.lease, now);
@@ -90,6 +94,12 @@ export function ChangeSidebar({
 						? "No review: GitHub's changes are trusted"
 						: `${snapshot.policy.required} approvals required`}
 				</p>
+				{onReview ? (
+					<Button size="sm" className="mt-2.5" onClick={onReview}>
+						<Icon name="eye" size={14} />
+						Review
+					</Button>
+				) : null}
 			</Section>
 			<Section title="Agent">
 				<p className="m-0 flex items-center gap-1.5 wrap-anywhere">
