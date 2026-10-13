@@ -283,10 +283,11 @@ export function goalBar(goal: Goal, axis: Axis): Bar {
 function nowPhase(goal: Goal): BarPhase["kind"] | undefined {
 	switch (goal.state) {
 		case "building":
-		case "revising":
+		case "changes-requested":
+		case "checks-failed":
 			return "building";
 		case "in-review":
-		case "asking":
+		case "needs-person":
 		case "approved":
 			return "review";
 		case "landing":

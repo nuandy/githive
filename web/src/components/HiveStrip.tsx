@@ -3,34 +3,39 @@ import type { LandingStretch, RepoAudit, RepoLanding, RepoSnapshot } from "../ap
 import { useBumps } from "../hooks/useBumps";
 import { displayName } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
+import { needsYou } from "../lib/needsYou";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { type ChangeState, STATES } from "../lib/status";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
 import { cn } from "../lib/utils";
+import { StateMark } from "./StateMark";
 import { Lamp } from "./ui/badge";
 
 /**
- * Each stage's words, its swatch (as tall as the count's digits, and level with them) and its count's color. Up next
- * is a dashed outline, in review a dashed tint; the rest are tinted in their stage's color.
+ * Each stage, by the state its swatch shows (as tall as the count's digits, and level with them), and its count's
+ * color. Up next is a dashed outline; the rest are their states' marks, so the strip is the map's key.
  */
-const STAGES: { stage: Stage; words: string; swatch: string; count?: string }[] = [
-	{ stage: "next", words: "up next", swatch: "border-dashed border-border-strong" },
-	{ stage: "building", words: "building", swatch: "border-stage-building bg-stage-building/25" },
-	{ stage: "review", words: "in review", swatch: "border-dashed border-stage-review bg-stage-review/8" },
-	{
-		stage: "landing",
-		words: "landing",
-		swatch: "border-stage-landing bg-stage-landing/25",
-		count: "text-stage-landing",
-	},
-	{ stage: "landed", words: "landed", swatch: "border-stage-landed bg-stage-landed/25", count: "text-stage-landed" },
+const STAGES: { stage: Stage; state?: ChangeState; count?: string }[] = [
+	{ stage: "next" },
+	{ stage: "building", state: "building" },
+	{ stage: "review", state: "in-review" },
+	{ stage: "approved", state: "approved", count: "text-good" },
+	{ stage: "landing", state: "landing", count: "text-stage-landing" },
+	{ stage: "landed", state: "landed", count: "text-stage-landed" },
 ];
+
+/** A swatch, as tall as the digits beside it and level with them. */
+const SWATCH = cn(
+	"size-[1cap] rounded-sm border-[1.5px] text-title-lg",
+	"supports-[not_(text-box:trim-both_cap_alphabetic)]:relative supports-[not_(text-box:trim-both_cap_alphabetic)]:-top-0.5",
+);
 
 /**
  * The top of the Hive tab: what needs a person, if anything, then how many goals are at each stage. The stages'
- * swatches are the map's key, so the map needs no legend. Once everything has landed it says so instead.
+ * swatches key the map's colors; the map keys its red cells itself. Once everything has landed it says so instead.
  */
 export function HiveStrip({
 	repo,
@@ -38,7 +43,7 @@ export function HiveStrip({
 	upNext,
 	landing,
 	audit,
-	policy,
+	snapshot,
 	range,
 	since,
 	now,
@@ -49,8 +54,8 @@ export function HiveStrip({
 	upNext?: number;
 	landing?: RepoLanding;
 	audit?: RepoAudit;
-	/** Who may vote as each role, for changes waiting on a vote only a person can give. */
-	policy?: RepoSnapshot["policy"];
+	/** The claims, votes and policy, for what waits on a person (see needsYou.ts). */
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
 	/** The goals panel's range: landed counts what landed within it. */
 	range: number;
 	/** Where the goals panel's clock starts (before now - range when quiet stretches fold). */
@@ -65,7 +70,7 @@ export function HiveStrip({
 	const stages = STAGES.filter(({ stage }) => stage !== "next" || upNext !== undefined);
 	return (
 		<header>
-			<NeedsYou repo={repo} goals={goals} landing={landing} audit={audit} policy={policy} range={range} now={now} />
+			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} />
 			{!goals.length && !justFinished(stretch, now) ? (
 				<EmptyHive stretch={stretch} now={now} />
 			) : (
@@ -73,20 +78,17 @@ export function HiveStrip({
 					className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2 p-0"
 					aria-label="Goals by stage"
 				>
-					{stages.map(({ stage, words, swatch, count }) => (
+					{stages.map(({ stage, state, count }) => (
 						<li
 							key={stage}
 							data-stage={stage}
 							className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 transition-[border-color,background-color] duration-300 ease-[ease]"
 						>
-							<span
-								className={cn(
-									"size-[1cap] flex-none rounded-sm border-[1.5px] text-title-lg",
-									"supports-[not_(text-box:trim-both_cap_alphabetic)]:relative supports-[not_(text-box:trim-both_cap_alphabetic)]:-top-0.5",
-									swatch,
-								)}
-								aria-hidden="true"
-							/>
+							{state ? (
+								<StateMark state={state} className={SWATCH} glyph="text-[10px]" />
+							) : (
+								<span className={cn(SWATCH, "flex-none border-dashed border-border-strong")} aria-hidden="true" />
+							)}
 							{/* The box is the digits' height, so centring it centres the digits, not the line with its descender room. */}
 							<b
 								key={counts[stage]}
@@ -99,7 +101,7 @@ export function HiveStrip({
 								{counts[stage]}
 							</b>
 							<span className="text-ui text-muted-foreground">
-								{words}
+								{state ? STATES[state].short : "up next"}
 								{stage === "landed" ? (
 									<span className="text-muted-foreground">
 										{" "}
@@ -118,74 +120,52 @@ export function HiveStrip({
 	);
 }
 
-/** What waits on a person: an agent's question, a change its checks put out, merges the audit flags. */
+/**
+ * What waits on a person (see needsYou.ts): an agent's question, a vote only people may give, merges the audit flags.
+ * Failed checks aren't here: the goal's row says its agent is fixing them.
+ */
 function NeedsYou({
 	repo,
 	goals,
-	landing,
 	audit,
-	policy,
-	range,
-	now,
+	snapshot,
 }: {
 	repo: string;
 	goals: Goal[];
-	landing: RepoLanding | undefined;
 	audit: RepoAudit | undefined;
-	policy: RepoSnapshot["policy"] | undefined;
-	range: number;
-	now: number;
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
 }) {
-	const asking = goals.filter((goal) => goal.state === "asking");
-	const titleOf = new Map(goals.map((goal) => [goal.change, goal]));
-	const failed = new Map<string, string>();
-	for (const outcome of landing?.recent ?? []) {
-		const goal = titleOf.get(outcome.change);
-		const later = goal?.state === "landed" || goal?.state === "released";
-		if (outcome.how === "failed" && !later && now - Date.parse(outcome.at) <= range)
-			failed.set(outcome.change, goal?.title ?? outcome.change);
-	}
-	// A pushed change waiting for a role only people hold; one GitHive has already flagged is asking, above.
-	const voting = goals.flatMap((goal) => {
-		if (!goal.head || goal.finished || goal.state === "asking") return [];
-		const role = goal.approval?.awaiting?.find((each) => peopleOnly(policy, each));
-		return role ? [{ goal, role }] : [];
-	});
-	const flagged = audit?.open ?? 0;
-	const needed = asking.length || voting.length || failed.size || flagged;
-	const line = needed ? (
-		<p
-			className={cn(
-				"m-0 mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-md border border-bad/45 bg-bad-soft px-3 py-2 text-body-sm",
-				"[&_a+a]:before:mr-3.5 [&_a+a]:before:text-muted-foreground [&_a+a]:before:content-['·']",
-			)}
-		>
-			<span className="inline-flex items-center gap-2 font-bold text-bad">
-				<Lamp color="red" />
-				Needs a person:
-			</span>
-			{asking.map((goal) => {
-				const question = goal.attention?.reason ?? goal.title;
-				return (
-					<a key={goal.key} href={href.change(repo, goal.change)} title={question}>
-						{goal.attention?.agent === "githive" ? "GitHive" : (displayName(goal.attention?.agent) ?? goal.agent)}
-						{goal.attention?.agent === "githive" ? ": " : " asks "}“{brief(question)}”
-					</a>
-				);
-			})}
-			{voting.map(({ goal, role }) => (
-				<a key={goal.key} href={href.change(repo, goal.change)}>
-					{goal.title} needs a {role} vote from a person
-				</a>
-			))}
-			{[...failed].map(([change, title]) => (
-				<a key={change} href={href.change(repo, change)}>
-					{title}: its checks failed
-				</a>
-			))}
-			{flagged ? <a href={href.repo(repo, "audit")}>{counted(flagged, "merge")} for the audit to look at</a> : null}
-		</p>
-	) : null;
+	const { changes, violations } = needsYou(snapshot, audit);
+	const titleOf = new Map(goals.map((goal) => [goal.change, goal.title]));
+	const line =
+		changes.length || violations ? (
+			<p
+				className={cn(
+					"m-0 mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-md border border-bad/45 bg-bad-soft px-3 py-2 text-body-sm",
+					"[&_a+a]:before:mr-3.5 [&_a+a]:before:text-muted-foreground [&_a+a]:before:content-['·']",
+				)}
+			>
+				<span className="inline-flex items-center gap-2 font-bold text-bad">
+					<Lamp state="needs-person" />
+					{STATES["needs-person"].label}:
+				</span>
+				{changes.map((waiting) =>
+					waiting.kind === "question" ? (
+						<a key={waiting.change} href={href.change(repo, waiting.change)} title={waiting.reason}>
+							{waiting.agent === "githive" ? "GitHive" : (displayName(waiting.agent) ?? waiting.agent)}
+							{waiting.agent === "githive" ? ": " : " asks "}“{brief(waiting.reason)}”
+						</a>
+					) : (
+						<a key={waiting.change} href={href.change(repo, waiting.change)}>
+							{titleOf.get(waiting.change) ?? waiting.change} needs a {waiting.role} vote from a person
+						</a>
+					),
+				)}
+				{violations ? (
+					<a href={href.repo(repo, "audit")}>{counted(violations, "merge")} for the audit to look at</a>
+				) : null}
+			</p>
+		) : null;
 	// The line slides open when something needs a person and shut when nothing does, showing what it last said
 	// while it closes.
 	const last = useRef(line);
@@ -207,13 +187,6 @@ function NeedsYou({
 const QUOTED = 90;
 
 const brief = (text: string) => (text.length > QUOTED ? `${text.slice(0, text.lastIndexOf(" ", QUOTED - 1))}…` : text);
-
-/** Whether only people may vote as a role: no agent, pool or GitHive reviewer holds it (see grantWarnings). */
-function peopleOnly(policy: RepoSnapshot["policy"] | undefined, role: string): boolean {
-	const holders = policy?.grants?.[role] ?? ["person:*", "githive"];
-	const person = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder) || holder.startsWith("@");
-	return holders.length > 0 && holders.every(person);
-}
 
 /** The recap once a stretch of work has landed and nothing's in flight. */
 function AllLanded({

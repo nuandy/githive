@@ -7,8 +7,10 @@ import type { GoalMotion, Motion } from "../lib/hiveMotion";
 import { timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { type ChangeState, STATES } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { HiveFilter } from "./HiveTab";
+import { StateMark } from "./StateMark";
 
 /** A cell's corner-to-center size, in px. */
 const RADIUS = 34;
@@ -20,17 +22,8 @@ const COLUMNS = 7;
 /** Chips a cell shows before "+n". */
 const CHIPS = 3;
 
-const STATE_WORDS: Record<CellState, string> = {
-	asking: "asking",
-	revising: "changes asked",
-	landing: "landing",
-	approved: "approved",
-	review: "in review",
-	building: "building",
-	landed: "landed",
-	next: "up next",
-	free: "",
-};
+/** A cell's state in words, the same on the cell as in its name: its goal's state's (see status.ts). */
+const stateWords = (state: CellState) => (state === "next" ? "up next" : state === "free" ? "" : STATES[state].short);
 
 /** How many characters of a name fit in a cell. */
 const NAME_FITS = 10;
@@ -48,18 +41,16 @@ function fitParent(parent: string): string {
 	return shown.length <= NAME_FITS + 1 ? shown : `…${shown.slice(-NAME_FITS)}`;
 }
 
-/** A cell's state in the fewest words, under its name. */
-const SUB_WORDS: Record<CellState, string> = {
-	asking: "asking",
-	revising: "revising",
-	landing: "landing",
-	approved: "approved",
-	review: "review",
-	building: "building",
-	landed: "landed",
-	next: "up next",
-	free: "",
-};
+/** Past this many letters a state's words take two lines under the name, split where they're most even. */
+const WORDS_FIT = 12;
+
+function wordLines(words: string): string[] {
+	if (words.length <= WORDS_FIT) return [words];
+	let best = -1;
+	for (let at = words.indexOf(" "); at >= 0; at = words.indexOf(" ", at + 1))
+		if (best < 0 || Math.abs(words.length / 2 - at) < Math.abs(words.length / 2 - best)) best = at;
+	return best < 0 ? [words] : [words.slice(0, best), words.slice(best + 1)];
+}
 
 /**
  * A cell in each state: its outline and tint, its name's color and its state's. Free cells are dim; the rest take
@@ -74,7 +65,7 @@ const LOOK: Record<CellState, { shape: string; name: string; sub: string }> = {
 		name: "fill-foreground",
 		sub: "fill-stage-building",
 	},
-	review: {
+	"in-review": {
 		shape: "fill-stage-review [fill-opacity:0.09] stroke-stage-review [stroke-dasharray:5_3]",
 		name: "fill-foreground",
 		sub: "fill-stage-review",
@@ -85,13 +76,18 @@ const LOOK: Record<CellState, { shape: string; name: string; sub: string }> = {
 		name: "fill-foreground",
 		sub: "fill-stage-landing",
 	},
-	revising: {
+	"changes-requested": {
 		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
 		name: "fill-foreground",
 		sub: "fill-stage-asking",
 	},
-	asking: {
+	"checks-failed": {
 		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
+		name: "fill-foreground",
+		sub: "fill-stage-asking",
+	},
+	"needs-person": {
+		shape: "fill-stage-asking [fill-opacity:0.3] stroke-stage-asking",
 		name: "fill-foreground",
 		sub: "fill-stage-asking",
 	},
@@ -182,6 +178,7 @@ export function HiveMap({
 				</h2>
 				<span className="text-ui text-muted-foreground">{branch}, opened up where agents work</span>
 			</div>
+			{cells?.clusters.length ? <RedKey /> : null}
 			{!cells ? <p className="my-[1em] text-muted-foreground">{status}</p> : null}
 			{cells && !cells.clusters.length ? (
 				<p className="my-[1em] text-muted-foreground">{branch} has no files yet.</p>
@@ -251,6 +248,26 @@ export function HiveMap({
 // A line under the map.
 const NOTE = "mx-0 mt-1.5 mb-0 text-ui";
 
+/** The cells the strip above has no stage for, all red: told apart by their glyphs and their words. */
+const KEYED: ChangeState[] = ["needs-person", "changes-requested", "checks-failed"];
+
+/** A quiet key to the red cells, under the map's heading. */
+function RedKey() {
+	return (
+		<ul
+			className="m-0 mb-1 flex list-none flex-wrap gap-x-3.5 gap-y-1 p-0 text-caption text-muted-foreground"
+			aria-label="What the red cells mean"
+		>
+			{KEYED.map((state) => (
+				<li key={state} className="inline-flex items-center gap-1.5">
+					<StateMark state={state} className="size-3 rounded-xs" glyph="text-[8px]" />
+					{STATES[state].short}
+				</li>
+			))}
+		</ul>
+	);
+}
+
 /** How long something new keeps its arriving animation, so a redraw midway doesn't cut it short. */
 const FRESH_MS = 800;
 
@@ -279,7 +296,7 @@ export function cellLabel(cell: Cell): string {
 	if (cell.state === "free") return `${what}: ${cell.kind === "file" ? "nobody on it" : counted(cell.files, "file")}`;
 	if (cell.state === "landed") return `${what}: ${cell.landed?.agent ?? "an agent"} landed a change here lately`;
 	if (cell.state === "next") return `${what}: backlog work waiting for an agent`;
-	return `${what}: ${STATE_WORDS[cell.state]}${agents}`;
+	return `${what}: ${stateWords(cell.state)}${agents}`;
 }
 
 function HexCell({
@@ -324,7 +341,10 @@ function HexCell({
 	const sub =
 		cell.planned && cell.state === "free"
 			? "new"
-			: SUB_WORDS[cell.state] || (cell.kind === "file" ? "" : counted(cell.files, "file"));
+			: stateWords(cell.state) || (cell.kind === "file" ? "" : counted(cell.files, "file"));
+	// Words too long for one line take two, and the name and its folder move up to make room.
+	const lines = wordLines(sub);
+	const up = lines.length > 1 ? 3.5 : 0;
 	const chips = cell.agents.slice(0, CHIPS);
 	const extra = cell.agents.length - chips.length;
 	const chipY = -RADIUS + 3;
@@ -397,12 +417,12 @@ function HexCell({
 						className="pointer-events-none fill-muted-foreground font-mono text-[7.5px] opacity-80"
 						textAnchor="middle"
 						x={0}
-						y={-10}
+						y={-10 - up}
 					>
 						{fitParent(cell.parent)}
 					</text>
 				) : null}
-				<text className={cn(NAME, look.name || "fill-muted-foreground")} textAnchor="middle" x={0} y={sub ? 2 : 4}>
+				<text className={cn(NAME, look.name || "fill-muted-foreground")} textAnchor="middle" x={0} y={sub ? 2 - up : 4}>
 					{fitName(cell.name)}
 				</text>
 				{sub ? (
@@ -414,9 +434,14 @@ function HexCell({
 						)}
 						textAnchor="middle"
 						x={0}
-						y={13}
+						y={13 - up}
 					>
-						{sub}
+						{/* The space ends the first line, so the words read as written. */}
+						{lines.map((line, index) => (
+							<tspan key={index} x={0} dy={index ? 8.5 : 0}>
+								{index < lines.length - 1 ? `${line} ` : line}
+							</tspan>
+						))}
 					</text>
 				) : null}
 				{chips.map((agent, index) => (

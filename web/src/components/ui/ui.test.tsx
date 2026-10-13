@@ -65,6 +65,14 @@ describe("the building blocks", () => {
 		expect(renderToStaticMarkup(<Lamp />)).not.toContain("[--lamp:");
 	});
 
+	it("marks a change state's lamp with its glyph as well as its color", () => {
+		const needs = renderToStaticMarkup(<Lamp state="needs-person" />);
+		expect(needs).toContain("bg-bad");
+		expect(needs).toContain(">!</span>");
+		expect(renderToStaticMarkup(<Lamp state="approved" />)).toContain(">✓</span>");
+		expect(renderToStaticMarkup(<Lamp state="in-review" />)).toContain("border-dashed");
+	});
+
 	it("rules boxes and callouts", () => {
 		const html = renderToStaticMarkup(
 			<Box>

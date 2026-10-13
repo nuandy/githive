@@ -1,6 +1,7 @@
 import type { BacklogItem, HiveEvent, RepoLanding, RepoSnapshot } from "../api";
-import { claimAgent, rejectionsOnHead } from "./claimStatus";
+import { claimAgent } from "./claimStatus";
 import { timeOf } from "./model";
+import { type ChangeState, changeState, type StateContext, STATES } from "./status";
 
 // The Hive tab's goals: each change an agent announced, and everything that has happened to it since, put together
 // from the claims, votes, the hive's event log and what's landing. A goal is the unit the tab tells a story about;
@@ -10,9 +11,8 @@ import { timeOf } from "./model";
 type Claim = RepoSnapshot["claims"][number];
 type Vote = RepoSnapshot["votes"][number];
 
-/** Where a goal stands. */
-export type GoalState =
-	"building" | "in-review" | "revising" | "approved" | "landing" | "asking" | "landed" | "released";
+/** Where a goal stands: its change's state (see status.ts), never abandoned: the tab tells each story to its end. */
+export type GoalState = Exclude<ChangeState, "abandoned">;
 
 export type GoalStepKind =
 	| "claimed"
@@ -79,6 +79,8 @@ export interface GoalSources {
 	landing?: RepoLanding;
 	/** Changes on other branches, left out (the event log is the whole repo's). */
 	elsewhere?: Set<string>;
+	/** Who may vote as each role, for a change waiting on a vote only people give. */
+	policy?: RepoSnapshot["policy"];
 	/**
 	 * The paths of claims seen earlier, by change. Nothing the server sends says what a landed change touched once its
 	 * claim is gone, so the tab remembers what it saw while the claim was in force.
@@ -113,7 +115,7 @@ const timeAt = (iso: string) => timeOf(iso) ?? 0;
 const byTime = <T extends { at: string }>(a: T, b: T) => timeAt(a.at) - timeAt(b.at);
 
 /** Every goal the sources show, in flight and finished, newest announced first. */
-export function hiveGoals({ claims, votes, events = [], landing, elsewhere, remembered }: GoalSources): Goal[] {
+export function hiveGoals({ claims, votes, events = [], landing, elsewhere, policy, remembered }: GoalSources): Goal[] {
 	const log = [...events].sort(byTime);
 	const oldest = log[0] ? timeAt(log[0].at) : undefined;
 	const claimOf = new Map(claims.map((claim) => [claim.change, claim]));
@@ -244,7 +246,7 @@ export function hiveGoals({ claims, votes, events = [], landing, elsewhere, reme
 				title: shortTitle(intent) || change,
 				intent,
 				paths: held?.paths ?? (last ? remembered?.get(change) : undefined) ?? [],
-				state: held ? stateOf(held, votes, landing) : ending!.kind,
+				state: held ? stateOf(held, { votes, landing, policy }) : ending!.kind,
 				announced,
 				...(ending ? { finished: ending.at } : {}),
 				...(held ? { head: held.head, approval: held.approval } : {}),
@@ -360,52 +362,50 @@ function endingOf(steps: GoalStep[]): { kind: "landed" | "released"; at: string 
 	return undefined;
 }
 
-/** Where a goal in force stands, from its claim, the votes on its head and the batch being checked. */
-function stateOf(claim: Claim, votes: Vote[], landing: RepoLanding | undefined): GoalState {
-	if (claim.attention) return "asking";
-	if (!claim.head) return "building";
-	const checking = landing?.checking?.changes.some(
-		(checked) => checked.change === claim.change && checked.head === claim.head,
-	);
-	if (checking) return "landing";
-	// Before approval: a batch that failed leaves the change approved ("checks" blocks nothing) and its head rejected.
-	if (rejectionsOnHead(claim, votes).length || claim.approval.vetoedBy.length) return "revising";
-	if (claim.approval.approved) return "approved";
-	return "in-review";
+/**
+ * Where a goal in force stands, from its claim, the votes on its head, the batch being checked and who may vote as
+ * each role (see status.ts). Without the time, it's never abandoned.
+ */
+function stateOf(claim: Claim, context: StateContext): GoalState {
+	const state = changeState(claim, context);
+	return state === "abandoned" ? "building" : state;
 }
 
 /** How many approvals a goal has asked for and been refused, for "after 1 rejection". */
 export const rejections = (goal: Goal) => goal.steps.filter((step) => step.kind === "changes-asked").length;
 
-/** Where a goal stands, in a few words, with the tone it's drawn in. */
+/** Where a goal stands, in a few words that start with its state's (see status.ts), with the tone it's drawn in. */
 export function goalStatus(goal: Goal): { words: string; tone: "accent" | "amber" | "good" | "bad" | "muted" } {
 	const rejected = rejections(goal);
 	const after = rejected ? ` · after ${rejected === 1 ? "1 rejection" : `${rejected} rejections`}` : "";
 	const approval = goal.approval;
+	const { short } = STATES[goal.state];
 	switch (goal.state) {
 		case "building":
-			return { words: "building", tone: "accent" };
-		case "revising": {
-			const last = [...goal.steps].reverse().find((step) => step.kind === "changes-asked" || step.kind === "failed");
-			const checks = last?.kind === "failed" || last?.role === "checks";
-			return { words: checks ? "checks failed, fixing" : "changes asked, revising", tone: "bad" };
-		}
+			return { words: short, tone: "accent" };
+		case "changes-requested":
+			return { words: `${short}, revising`, tone: "bad" };
+		case "checks-failed":
+			return { words: `${short}, fixing`, tone: "bad" };
 		case "in-review": {
 			const awaiting = approval?.awaiting ?? [];
 			if (approval && approval.approvals >= approval.required && awaiting.length)
-				return { words: `waiting for a ${awaiting.join(" and ")} vote`, tone: "bad" };
-			return { words: `in review · ${approval?.approvals ?? 0} of ${approval?.required ?? 1}${after}`, tone: "accent" };
+				return { words: `${short} · waiting for a ${awaiting.join(" and ")} vote`, tone: "accent" };
+			return { words: `${short} · ${approval?.approvals ?? 0} of ${approval?.required ?? 1}${after}`, tone: "accent" };
 		}
-		case "asking":
-			return { words: `asking a person: ${goal.attention?.reason ?? "a question"}`, tone: "bad" };
+		case "needs-person": {
+			if (goal.attention) return { words: `${short}: ${goal.attention.reason}`, tone: "bad" };
+			const awaiting = approval?.awaiting ?? [];
+			return { words: `${short} for a ${awaiting.join(" and ") || "blocking"} vote`, tone: "bad" };
+		}
 		case "approved":
-			return { words: `approved, landing with the next batch${after}`, tone: "good" };
+			return { words: `${short}, lands with the next batch${after}`, tone: "good" };
 		case "landing":
-			return { words: `landing${after}`, tone: "amber" };
+			return { words: `${short}${after}`, tone: "amber" };
 		case "landed":
-			return { words: `landed${after}`, tone: "good" };
+			return { words: `${short}${after}`, tone: "good" };
 		case "released":
-			return { words: "dropped", tone: "muted" };
+			return { words: short, tone: "muted" };
 	}
 }
 
@@ -419,14 +419,19 @@ export function freeWork(backlog: BacklogItem[], goals: Goal[]): BacklogItem[] {
 }
 
 /** The stages the strip counts. */
-export type Stage = "next" | "building" | "review" | "landing" | "landed";
+export type Stage = "next" | "building" | "review" | "approved" | "landing" | "landed";
 
+/**
+ * Each goal's stage on the strip. A goal sent back to its agent is building again; one that needs a person is in
+ * review, the line above the strip says why. Amber's landing is only what's being checked to land.
+ */
 export const STAGE_OF: Record<GoalState, Stage | undefined> = {
 	building: "building",
-	revising: "building",
+	"changes-requested": "building",
+	"checks-failed": "building",
 	"in-review": "review",
-	asking: "review",
-	approved: "landing",
+	"needs-person": "review",
+	approved: "approved",
 	landing: "landing",
 	landed: "landed",
 	released: undefined,
@@ -434,7 +439,7 @@ export const STAGE_OF: Record<GoalState, Stage | undefined> = {
 
 /** How many goals are at each stage; landed ones only since `since`. */
 export function stageCounts(goals: Goal[], upNext: number, since: number): Record<Stage, number> {
-	const counts: Record<Stage, number> = { next: upNext, building: 0, review: 0, landing: 0, landed: 0 };
+	const counts: Record<Stage, number> = { next: upNext, building: 0, review: 0, approved: 0, landing: 0, landed: 0 };
 	for (const goal of goals) {
 		const stage = STAGE_OF[goal.state];
 		if (!stage) continue;

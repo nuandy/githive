@@ -68,7 +68,7 @@ const WORDS = "w-(--words) min-w-0 flex-none [transition:width_0.45s_ease]";
 /** A row's frame: it folds shut when left out, and its edge and fill fade as it's pointed at or opened. */
 const ROW =
 	"grid rounded-md [transition:grid-template-rows_0.35s_ease,opacity_0.3s_ease,border-width_0.35s_ease,background-color_0.2s_ease,border-color_0.2s_ease]";
-/** The edge of a row that needs someone: a reviewer turned it back, or its agent asks a person. */
+/** The edge of a row that needs a person: its agent asks one, or it waits on a vote only people give. */
 const RED_EDGE = "border-[color-mix(in_srgb,var(--bad)_45%,transparent)]";
 /** Everything on the clock glides when the range changes or time moves it, rather than jumping. */
 const GLIDES = "[transition:left_0.45s_ease,width_0.45s_ease,opacity_0.3s_ease]";
@@ -381,17 +381,17 @@ function useView(initial: View = "story"): [View, (view: View) => void] {
 	return [view, pick];
 }
 
-/** "✓ 2 landed · 1 dropped", and the first few titles. */
+/** "✓ 2 landed · 1 released", and the first few titles. */
 function FinishedWords({ goals }: { goals: Goal[] }) {
 	const landed = goals.filter((goal) => goal.state === "landed").length;
-	const dropped = goals.length - landed;
+	const released = goals.length - landed;
 	const titles = goals.slice(0, 3).map((goal) => goal.title);
 	const more = goals.length - titles.length;
 	return (
 		<span className="truncate">
 			{landed ? <b className="text-good">✓ {landed} landed</b> : null}
-			{landed && dropped ? " · " : null}
-			{dropped ? <b>{dropped} dropped</b> : null}
+			{landed && released ? " · " : null}
+			{released ? <b>{released} released</b> : null}
 			<span className="text-muted-foreground">
 				{" "}
 				{titles.join(", ")}
@@ -480,21 +480,18 @@ function GoalRow({
 	useEffect(() => {
 		if (open) setDrawn(true);
 	}, [open]);
-	// Its edge: red while it needs someone (a reviewer turned it back, or its agent asks a person), darker open,
-	// lighter pointed at.
+	// Its edge: red while it needs a person, darker open, lighter pointed at.
 	const edge = hidden
 		? "border-0 border-transparent"
 		: cn(
 				"border",
-				goal.state === "in-review" && status.tone === "bad"
-					? RED_EDGE
-					: goal.state === "asking"
-						? cn(RED_EDGE, "hover:border-border")
-						: open
-							? "border-border-strong hover:border-border"
-							: lit
-								? "border-border"
-								: "border-transparent hover:border-border",
+				goal.state === "needs-person"
+					? cn(RED_EDGE, "hover:border-border")
+					: open
+						? "border-border-strong hover:border-border"
+						: lit
+							? "border-border"
+							: "border-transparent hover:border-border",
 			);
 	const style = motion ? ({ "--motion-delay": `${motion.delay}ms` } as CSSProperties) : undefined;
 	return (
@@ -824,7 +821,7 @@ function GoalSteps({
 	open: boolean;
 	now: number;
 }) {
-	const waiting = goal.state === "asking" || (goal.approval?.awaiting?.length ?? 0) > 0;
+	const waiting = goal.state === "needs-person" || (goal.approval?.awaiting?.length ?? 0) > 0;
 	const intent = goal.intent.trim();
 	const arrives = open && "animate-goal-step-in";
 	return (

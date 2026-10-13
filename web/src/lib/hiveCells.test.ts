@@ -50,11 +50,11 @@ describe("the hive map's cells", () => {
 	it("lights a claimed folder whole, and a cell shared by goals takes the loudest state", () => {
 		const goals = [
 			goal("router", ["lib/router/"], { state: "in-review" }),
-			goal("layer", ["lib/router/layer.js"], { state: "revising", agent: "agent-5" }),
+			goal("layer", ["lib/router/layer.js"], { state: "changes-requested", agent: "agent-5" }),
 		];
 		const cells = cellsOf(hiveCells(FILES, goals, [], NOW));
 		const layer = cells.find((cell) => cell.key === "lib/router/layer.js");
-		expect(layer?.state).toBe("revising");
+		expect(layer?.state).toBe("changes-requested");
 		expect(layer?.goals).toEqual(["layer", "router"]);
 	});
 

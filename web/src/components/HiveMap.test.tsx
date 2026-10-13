@@ -65,6 +65,15 @@ describe("the hive map", () => {
 		expect(html).toMatch(/<circle [^>]*r="7.5"><\/circle><text[^>]*>19<\/text>/);
 	});
 
+	it("says a cell's state in the same words it's named by, and keys the red ones", () => {
+		const goals = [goal("links", ["test/res.links.js"], { state: "changes-requested" })];
+		const html = render({ cells: hiveCells(FILES, goals, [], NOW) });
+		expect(html).toMatch(/aria-label="test\/res.links.js: changes requested, agent-19 at work"/);
+		// Too long for a cell's width, its words take two lines, and still read as written.
+		expect(html).toMatch(/<tspan[^>]*>changes <\/tspan><tspan[^>]*>requested<\/tspan>/);
+		expect(visibleText(html)).toContain("! needs a person × changes requested × checks failed");
+	});
+
 	it("dims what an agent filter leaves out", () => {
 		const html = render({ filter: { kind: "agent", agent: "agent-16" } });
 		expect(html).toMatch(/data-state="building" class="[^"]*\bopacity-30\b[^>]*aria-label="test\/res.links.js/);

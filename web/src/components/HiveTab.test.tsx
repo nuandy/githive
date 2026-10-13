@@ -75,6 +75,44 @@ describe("the Hive tab", () => {
 		expect(text).toContain("1 merge for the audit to look at");
 	});
 
+	it("asks a person for a vote only people may give, and leaves failed checks to the goal's own row", () => {
+		const approval = { approved: false, approvals: 1, required: 1, vetoedBy: [], awaiting: ["security"] };
+		const policy = { required: 1, vetoes: ["security"], grants: { security: ["person:*"] } };
+		const claims = [
+			claim("deps", { head: "d1", approval, intent: "Bump the router" }),
+			claim("fix", { head: "f1", intent: "Fix the cookie parser" }),
+		];
+		const checks = {
+			commit: "f1",
+			reviewer: "githive-checks",
+			role: "checks",
+			verdict: "reject" as const,
+			evidence: "npm test exited 1",
+			at: ago(2),
+		};
+		const landing = {
+			branch: "main",
+			checking: null,
+			recent: [{ change: "fix", head: "f1", agent: "agent-12", how: "failed" as const, at: ago(2) }],
+		};
+		const text = visibleText(
+			render({ snapshot: { ...repoSnapshot, policy, claims, votes: [checks], audit: undefined }, landing }),
+		);
+		expect(text).toContain("Needs a person:");
+		expect(text).toContain("Bump the router needs a security vote from a person");
+		expect(text).not.toContain("its checks failed");
+		expect(text).toContain("checks failed, fixing");
+	});
+
+	it("counts approved changes apart from landing ones: amber is only what's checked to land", () => {
+		const approved = { approved: true, approvals: 1, required: 1, vetoedBy: [] };
+		const text = visibleText(
+			render({ snapshot: { ...repoSnapshot, claims: [claim("ok", { head: "a1", approval: approved })], votes: [] } }),
+		);
+		expect(text).toMatch(/1 approved/);
+		expect(text).toMatch(/0 landing/);
+	});
+
 	it("says all its work landed, how much, and what the audit found, once nothing's in flight", () => {
 		const done = { ...repoSnapshot, claims: [], votes: [], audit: { merges: 200, open: 0, violations: [] } };
 		const landing = {
