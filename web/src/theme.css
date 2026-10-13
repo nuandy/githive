@@ -489,6 +489,10 @@
 		outline-offset: 2px;
 		border-radius: var(--radius);
 	}
+	/* A page's heading takes focus as the page changes, so a screen reader starts there. It isn't a control, so no ring. */
+	h1[tabindex="-1"]:focus {
+		outline: none;
+	}
 	code,
 	pre {
 		font-family: var(--font-mono);

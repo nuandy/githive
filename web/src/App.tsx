@@ -28,48 +28,16 @@ import { RepoPage, type RepoView } from "./components/RepoPage";
 import { TopBar, type Crumb } from "./components/TopBar";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
+import { replaceHash, routePlace, useHashRoute } from "./hooks/useHashRoute";
 import { useLingering } from "./hooks/useLingering";
 import { useLiveFeed } from "./hooks/useLiveFeed";
 import { usePoll } from "./hooks/usePoll";
 import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
-import { href, parseRoute, type RepoTab, type Route } from "./lib/routes";
+import { href, type RepoTab, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import { cn } from "./lib/utils";
-// The page column's classes, for the pages not yet on utilities.
-
-/** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
-export function routePlace(route: Route): string {
-	if (route.page === "repo") return `repo:${route.repo}`;
-	if (route.page === "change") return `change:${route.repo}:${route.change}`;
-	if (route.page === "org") return `org:${route.org}`;
-	return route.page;
-}
-
-// Moving between files in the Code tab scrolls to the top too, without remounting the page.
-function scrollPlace(route: Route): string {
-	const inCode = route.page === "repo" && route.tab === "code";
-	const codePlace = inCode ? `:code:${route.path ?? ""}:${route.ref ?? ""}` : "";
-	return `${routePlace(route)}${codePlace}`;
-}
-
-export function useHashRoute(): Route {
-	const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
-	const place = useRef(scrollPlace(route));
-	useEffect(() => {
-		const onChange = () => {
-			const next = parseRoute(window.location.hash);
-			const nextPlace = scrollPlace(next);
-			if (nextPlace !== place.current) window.scrollTo(0, 0);
-			place.current = nextPlace;
-			setRoute(next);
-		};
-		window.addEventListener("hashchange", onChange);
-		return () => window.removeEventListener("hashchange", onChange);
-	}, []);
-	return route;
-}
 
 function Loading({ what }: { what: string }) {
 	return (
@@ -254,6 +222,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<RepoList
 				rows={summaries.data ? buildRepoRows(summaries.data) : []}
 				loaded={summaries.loaded}
+				query={route.q ?? ""}
+				onQueryChange={(q) => replaceHash(href.repos(q))}
 				canCreate={me.kind === "user"}
 				{...(me.kind === "user" ? { demo } : {})}
 			/>
@@ -378,7 +348,8 @@ function RepoRoute(props: {
 
 /** What the repo page shows for a route, or null when the route isn't a repo's. */
 function repoViewOf(route: Route): RepoView | null {
-	if (route.page === "change") return { kind: "change", change: route.change, tab: route.tab };
+	if (route.page === "change")
+		return { kind: "change", change: route.change, tab: route.tab, ...(route.decide ? { decide: true } : {}) };
 	if (route.page !== "repo") return null;
 	return {
 		kind: "repo",
