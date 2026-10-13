@@ -181,15 +181,24 @@ export const partDirty = (part: MergePart, draft: MergeDraft, base: MergeDraft) 
 	partKey(part, draft) !== partKey(part, base);
 
 /**
- * The draft once `saved` (the server's settings after a save of `part`) is the base: the section saved, and every
- * section that had no edits, take the server's settings; one with edits keeps them.
+ * The draft once `saved` (the server's settings after a save of `part`, or as they are now) is the base: the section
+ * saved, and every section that had no edits, take the server's settings; one with edits keeps them.
  */
-export function rebase(draft: MergeDraft, base: MergeDraft, saved: MergeDraft, part: MergePart): MergeDraft {
+export function rebase(draft: MergeDraft, base: MergeDraft, saved: MergeDraft, part?: MergePart): MergeDraft {
 	const next = { ...draft };
 	for (const each of PARTS)
 		if (each === part || !partDirty(each, draft, base))
 			for (const field of FIELDS[each]) Object.assign(next, { [field]: saved[field] });
 	return next;
+}
+
+/**
+ * A held draft with the server's settings as they are now (`fresh`): each section without edits shows them, and is
+ * made from them; one with edits keeps its edits and what they were made from. (Whether a section has edits reads the
+ * same either way round, so the base rebases as the draft does.)
+ */
+export function withFresh<T extends { draft: MergeDraft; base: MergeDraft }>(held: T, fresh: MergeDraft): T {
+	return { ...held, draft: rebase(held.draft, held.base, fresh), base: rebase(held.base, held.draft, fresh) };
 }
 
 /** The draft as a policy, as far as it reads (a role that isn't one is left out), to say what it means. */

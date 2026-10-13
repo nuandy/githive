@@ -15,6 +15,7 @@ import {
 	type Problem,
 	problemsOf,
 	rebase,
+	withFresh,
 } from "../lib/mergeSettings";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
@@ -108,11 +109,13 @@ function savedWords(part: MergePart, saved: SavedMergeSettings): ReactNode {
 
 /**
  * One section's share of the merge settings: the draft (held, so it outlives the section), changing it, and saving or
- * discarding this section's fields alone. Problems show once a save was tried, and as they're put right.
+ * discarding this section's fields alone. Problems show once a save was tried, and as they're put right. (Exported
+ * for its tests.)
  */
-function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, drafts }: SettingsContext) {
+export function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, drafts }: SettingsContext) {
 	const fresh = draftFrom(snapshot.policy, snapshot.verify, snapshot.skipChecks);
-	const held = useHeldDraft(drafts, draftKey(repo, "merge"), fresh, mergeDirty);
+	// A section without edits follows the server's settings while another has some.
+	const held = useHeldDraft(drafts, draftKey(repo, "merge"), fresh, mergeDirty, withFresh);
 	const [busy, setBusy] = useState(false);
 	const [tried, setTried] = useState(false);
 	const [status, setStatus] = useState<ReactNode>(null);
@@ -133,7 +136,8 @@ function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, draft
 		try {
 			const done = await save(result.input);
 			const saved = draftFrom(done.policy, done.verify, done.skipChecks);
-			held.reset(saved, rebase(draft, base, saved, part));
+			// From the draft as it is now: edits made while it saved stay.
+			held.saved(saved, (current) => rebase(current.draft, current.base, saved, part));
 			setTried(false);
 			setStatus(savedWords(part, done));
 			onSaved?.();

@@ -61,7 +61,7 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 		setStatus(null);
 		try {
 			const done = await save({ branch_rules: result.rules });
-			held.reset(ruleDraftsFrom(done.branchRules));
+			held.saved(ruleDraftsFrom(done.branchRules));
 			setTried(false);
 			const count = done.branchRules?.length ?? 0;
 			setStatus(

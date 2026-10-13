@@ -1,12 +1,13 @@
+import type { FormEvent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { RepoAccess, RepoSnapshot } from "../api";
-import { draftFrom } from "../lib/mergeSettings";
+import type { RepoAccess, RepoSnapshot, SavedMergeSettings, SettingsInput } from "../api";
+import { draftFrom, type MergeDraft } from "../lib/mergeSettings";
 import type { SettingsSection } from "../lib/routes";
-import { createDraftStore, draftKey } from "../lib/settingsDrafts";
+import { createDraftStore, dirtySections, draftKey } from "../lib/settingsDrafts";
 import { holderOptions } from "../lib/tokens";
 import { visibleText } from "../test/fixtures";
-import { ChecksSection, PathRulesSection, ReviewSection, type SettingsContext } from "./MergeSettings";
+import { ChecksSection, PathRulesSection, ReviewSection, type SettingsContext, useMergeSection } from "./MergeSettings";
 import type { RepoManageApi } from "./RepoAdmin";
 import { RepoSettings } from "./RepoSettings";
 import { problemsFor } from "./SettingsParts";
@@ -116,6 +117,43 @@ describe("the review policy", () => {
 		expect(text).toContain("Rule 1");
 		expect(text).toContain("src/payments/ need 1 approval; payments can block");
 		expect(text).toContain("Who may vote as a role a rule adds is set under Review");
+	});
+
+	it("shows what a save saved until the repo is read again, and keeps edits made while it saved", async () => {
+		const drafts = createDraftStore();
+		const key = draftKey("acme/web", "merge");
+		const sent: SettingsInput[] = [];
+		let answer!: (saved: SavedMergeSettings) => void;
+		const saving = context({
+			drafts,
+			save: (input) => {
+				sent.push(input);
+				return new Promise((resolve) => (answer = resolve));
+			},
+		});
+		const base = draftFrom(snapshot().policy, ["npm test"]);
+		drafts.set(key, { draft: { ...base, required: "3" }, base, dirty: true });
+		let form!: ReturnType<typeof useMergeSection>;
+		function Review() {
+			form = useMergeSection("review", saving);
+			return null;
+		}
+		renderToStaticMarkup(<Review />);
+		const done = form.submit({ preventDefault: () => undefined } as FormEvent);
+		// While it saves, Checks is edited in its own section.
+		const held = drafts.get<MergeDraft>(key)!;
+		drafts.set(key, { ...held, draft: { ...held.draft, verify: ["npm test", "npm run lint"] } });
+		answer({ policy: { ...snapshot().policy, required: 3 }, verify: ["npm test"] });
+		await done;
+		expect(sent).toEqual([{ required: 3, vetoes: ["security"], grants: {} }]);
+		expect(drafts.get<MergeDraft>(key)!.draft.verify).toEqual(["npm test", "npm run lint"]);
+		// The repo's settings aren't read again yet: Review shows the 3 it saved, not the 2 from before.
+		const required = (html: string) => html.match(/id="settings-required"[^>]*value="(\d+)"/)![1];
+		expect(required(renderToStaticMarkup(<ReviewSection {...saving} />))).toBe("3");
+		expect(dirtySections(drafts, "acme/web")).toEqual(new Set(["checks"]));
+		// Read again, Review follows them, whatever they say.
+		const now = snapshot({ policy: { ...snapshot().policy, required: 4 } });
+		expect(required(renderToStaticMarkup(<ReviewSection {...saving} snapshot={now} />))).toBe("4");
 	});
 
 	it("puts a field's problem under it, tied to it and marking it", () => {

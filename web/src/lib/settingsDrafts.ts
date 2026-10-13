@@ -10,6 +10,11 @@ export interface Held<T> {
 	draft: T;
 	base: T;
 	dirty: boolean;
+	/**
+	 * Once saved: the server's settings as the form had them when it saved. Until they're read again (and differ from
+	 * these), the form shows what was saved, not them.
+	 */
+	against?: T;
 }
 
 /** The forms held per repo: the merge settings (review, path rules, checks share one), branch rules and GitHub. */
@@ -42,10 +47,26 @@ export function createDraftStore(onDirty?: (dirty: boolean) => void) {
 
 export type DraftStore = ReturnType<typeof createDraftStore>;
 
-/** What a form shows: the draft held while it has edits, or else the server's settings as they are now (`fresh`). */
-export function shownDraft<T>(held: Held<T> | undefined, fresh: T): Held<T> {
-	if (held && (held.dirty || JSON.stringify(held.base) === JSON.stringify(fresh))) return held;
-	return { draft: fresh, base: fresh, dirty: false };
+export const sameSettings = <T>(a: T, b: T) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * What a form shows. Saved, and the server's settings not read again since: what was saved. Otherwise the draft held
+ * while it has edits (for a form in parts, `follow` lets the parts without edits take the server's settings), or else
+ * the server's settings as they are now (`fresh`).
+ */
+export function shownDraft<T>(
+	held: Held<T> | undefined,
+	fresh: T,
+	follow?: (held: Held<T>, fresh: T) => Held<T>,
+): Held<T> {
+	if (!held) return { draft: fresh, base: fresh, dirty: false };
+	if (held.against !== undefined) {
+		if (sameSettings(held.against, fresh)) return held;
+		const { against: _, ...read } = held;
+		held = read;
+	}
+	if (held.dirty) return follow ? follow(held, fresh) : held;
+	return sameSettings(held.base, fresh) ? held : { draft: fresh, base: fresh, dirty: false };
 }
 
 /** The sections of a repo's Settings with edits not yet saved. */

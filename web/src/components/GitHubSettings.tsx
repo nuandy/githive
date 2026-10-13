@@ -73,6 +73,31 @@ export function githubInput(draft: GitHubDraft, github: RepoGitHub | undefined, 
 interface GitHubForm extends GitHubDraft {
 	editing: boolean;
 	touched: boolean;
+	/** Once saved, the link as saved (null for none), shown until the repo's settings are read again. */
+	link?: RepoGitHub | null;
+}
+
+/** The form for a link: read-only while there is one, the editor while there isn't; holding it, once `saved`. */
+export const githubForm = (github: RepoGitHub | undefined, saved = false): GitHubForm => ({
+	...githubDraft(github),
+	editing: !github,
+	touched: false,
+	...(saved ? { link: github ?? null } : {}),
+});
+
+/**
+ * The link once `settings` (from `draft`) are saved over `github`: none, or the repo the draft names, its mode and
+ * trust, bringing GitHub's changes back. The same repo keeps its pull request.
+ */
+export function savedLink(
+	github: RepoGitHub | undefined,
+	settings: SettingsInput,
+	draft: GitHubDraft,
+): RepoGitHub | undefined {
+	if (settings.github === "") return undefined;
+	const repo = settings.github ?? draft.repo.trim();
+	const same = github?.repo === repo ? github : undefined;
+	return { ...same, repo, sync: draft.sync, trust: draft.trust, inbound: true, pull: same?.pull ?? null };
 }
 
 /** How GitHive's work reaches GitHub, as a choice with what it means. */
@@ -96,13 +121,19 @@ const syncChoices = (branch: string): { value: GitHubSync; title: string; means:
  * without review.
  */
 export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }: SettingsContext) {
-	const { github } = snapshot;
-	const fresh: GitHubForm = { ...githubDraft(github), editing: !github, touched: false };
-	const inputOf = (form: GitHubForm) => githubInput(form, github, form.touched);
-	const held = useHeldDraft(drafts, draftKey(repo, "github"), fresh, (form) => Object.keys(inputOf(form)).length > 0);
+	// The link: as the repo's settings say, or as saved here until they're read again.
+	const linkOf = (form: GitHubForm) => (form.link === undefined ? snapshot.github : (form.link ?? undefined));
+	const inputOf = (form: GitHubForm) => githubInput(form, linkOf(form), form.touched);
+	const held = useHeldDraft(
+		drafts,
+		draftKey(repo, "github"),
+		githubForm(snapshot.github),
+		(form) => Object.keys(inputOf(form)).length > 0,
+	);
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<ReactNode>(null);
 	const form = held.draft;
+	const github = linkOf(form);
 	const input = inputOf(form);
 
 	const edit = (patch: Partial<GitHubDraft>) => {
@@ -114,7 +145,7 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 		setStatus(null);
 		try {
 			await save(settings);
-			held.discard();
+			held.saved(githubForm(savedLink(github, settings, form), true));
 			setStatus(savedStatus(saved));
 			onSaved?.();
 			return true;
