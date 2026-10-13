@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENT_FALLBACK_MS, AGENT_TURN_GAP_MS, type HostedAgentState } from "../src/hosted-agents";
+import { AGENT_FALLBACK_MS, AGENT_TURN_GAP_MS, type HostedAgentState, retryAfterMs } from "../src/hosted-agents";
 import { hiveAgentNames } from "../src/toolkit/hive-agents";
 import { FakeStorage } from "./fakes/env";
 
@@ -239,6 +239,18 @@ describe("a repo's hosted agents", () => {
 		expect(log).not.toContain("builder on b");
 		await rounds(5);
 		expect(merged.has("a")).toBe(true);
+	});
+
+	it("try again soon after a failed turn, then less often while turns keep failing", async () => {
+		const { repoHive, agents } = hive(pieces("a"), { failAfterWrite: ["a"] });
+		await start(repoHive);
+		const [forager] = agents();
+		const storage = (forager as unknown as { ctx: { storage: FakeStorage } }).ctx.storage;
+		const before = Date.now();
+		await forager!.alarm();
+		expect(((await forager!.account()) as HostedAgentState).failing).toBe(1);
+		expect((await storage.getAlarm())! - before).toBeLessThan(AGENT_TURN_GAP_MS + 1_000);
+		expect([1, 2, 3, 5, 6, 15].map(retryAfterMs)).toEqual([5_000, 10_000, 20_000, 80_000, 120_000, 120_000]);
 	});
 
 	it("finish a change in the turn that sees it landed, though its claim isn't released yet", async () => {

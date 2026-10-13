@@ -275,9 +275,11 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	// A ring during the turn may be about something its reads came too early to see, so it brings the next turn
-	// forward; otherwise the agent waits to be rung.
+	// forward. A failed turn tries again soon, then less often while it keeps failing, since nothing may ring for
+	// what it didn't finish. Otherwise the agent waits to be rung.
 	private async nextTurnAt(began: number, state: HostedAgentState) {
 		if (await this.rungSince(began, state)) return this.soonAfter(began);
+		if (state.failing) return Date.now() + retryAfterMs(state.failing);
 		return Date.now() + AGENT_FALLBACK_MS;
 	}
 
@@ -444,6 +446,11 @@ async function giveBack(call: Call, change: string, reason: string) {
 	await call("release", { change, reason }).catch((err) =>
 		console.error(`giving ${change} back failed`, statusOf(err).message),
 	);
+}
+
+/** How long after its `failing`th failed turn in a row an agent tries again: doubling, up to its fallback. */
+export function retryAfterMs(failing: number) {
+	return Math.min(AGENT_TURN_GAP_MS * 2 ** (failing - 1), AGENT_FALLBACK_MS);
 }
 
 /** The agent's change has left the claims, landed or given up. */
