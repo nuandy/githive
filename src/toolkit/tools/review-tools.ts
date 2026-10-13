@@ -8,6 +8,16 @@ import { branchSettings, hostedRoles, shardVotesIfBusy, votesFor } from "./repo"
 
 // Tools for reviewing: vote, request_review, and ask_human. A reviewer gets a change's code from credentials.
 
+// When GitHive's reviewers won't review a change, nothing else asks anyone to: a change waiting on reviewers isn't
+// in anyone's Inbox. So a refused review says how to reach a person, or to wait for another agent's review.
+function askAPersonInstead(args: Record<string, unknown>) {
+	const change = typeof args.change === "string" && args.change.trim() ? args.change.trim() : "<change>";
+	return (
+		`ask a person to review it: \`ask_human\` with change ${change} and why, which puts it in their Inbox, ` +
+		"where they can approve it; or wait for another agent's review (`status` shows the approvals it still needs)"
+	);
+}
+
 export const reviewTools: ToolHandlers = {
 	async vote({ args, ctx, repo, registered, actAs, stamper, warmChecks }) {
 		const verdict = requiredString(args, "verdict");
@@ -49,12 +59,12 @@ export const reviewTools: ToolHandlers = {
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
-			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
+			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you", askAPersonInstead(args));
 		const change = requiredString(args, "change");
 		const registry = registered;
 		const claim = await claimOf(change);
 		if (!claim) fail(409, `${change} holds no claim: claim the change's paths first`);
-		if (!ctx.requestReview) fail(501, "hosted reviewers aren't available here");
+		if (!ctx.requestReview) fail(501, "hosted reviewers aren't available here", askAPersonInstead(args));
 		const policy = branchSettings(registry, claim.into).policy;
 		// By default a general review, and every role that can veto a change to these paths.
 		const roles =

@@ -231,4 +231,19 @@ describe("GitHive's hosted agents", () => {
 			error: "a-1 holds no claim: claim the change's paths first",
 		});
 	});
+
+	it("say, when they won't review a change, how to reach a person instead", async () => {
+		const nextOf = (ctx: ToolContext, args: Record<string, unknown>) =>
+			callTool("request_review", { repo: "project", ...args }, ctx).then(
+				() => undefined,
+				(err) => statusOf(err).next,
+			);
+		expect(await nextOf(listed(false), { change: "a-1" })).toMatch(
+			/^ask a person to review it: `ask_human` with change a-1 and why, which puts it in their Inbox/,
+		);
+		// Where no hosted reviewer can run at all, the same.
+		const none = { ...listed(true), requestReview: undefined };
+		await call(listed(true), "claim", { ...claimA, agent: "ada/builder" });
+		expect(await nextOf(none, { change: "a-1" })).toMatch(/^ask a person to review it/);
+	});
 });

@@ -401,7 +401,8 @@ const TOOL_LIST = [
 		name: "request_review",
 		description:
 			"Ask GitHive's hosted reviewer agents to review your change's current commit (by default a " +
-			"general review, and every role that can veto it); each votes with vote.",
+			"general review, and every role that can veto it); each votes with vote. They're by " +
+			"invitation: when they won't review it, `ask_human` puts the change in a person's Inbox.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str },
