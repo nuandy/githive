@@ -18,6 +18,7 @@ export function paletteItems({
 	repo,
 	changes = [],
 	people,
+	operator = false,
 }: {
 	/** The reader's repos, most recently active first. */
 	repos: string[];
@@ -26,6 +27,8 @@ export function paletteItems({
 	changes?: { change: string; title: string }[];
 	/** A person signed in, who has agents, organizations and new repositories of their own. */
 	people: boolean;
+	/** One of GitHive's operators, through Cloudflare Access, who has the Admin page. */
+	operator?: boolean;
 }): PaletteItem[] {
 	const pages: PaletteItem[] = [
 		{ id: "page:inbox", kind: "page", label: "Inbox", href: href.inbox() },
@@ -37,6 +40,7 @@ export function paletteItems({
 			{ id: "page:orgs", kind: "page", label: "Your organizations", href: href.orgs() },
 			{ id: "page:new", kind: "page", label: "New repository", href: href.newRepo() },
 		);
+	if (operator) pages.push({ id: "page:admin", kind: "page", label: "Admin", href: href.admin() });
 	return [
 		...(repo
 			? changes.map((each): PaletteItem => ({

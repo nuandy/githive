@@ -318,6 +318,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				repos={yourRepos}
 				snapshot={snapshot.data}
 				people={me.kind === "user"}
+				operator={me.kind === "access"}
 				help={shortcutsShown}
 				onHelp={setShortcutsShown}
 			/>

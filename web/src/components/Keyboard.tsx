@@ -85,6 +85,8 @@ export function CommandPalette({
 			<DialogContent
 				closable={false}
 				aria-describedby={undefined}
+				// ⌘K opens no palette over another dialog, but closes this one (useShortcuts).
+				data-palette=""
 				className="top-[12vh] max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
 				// Going somewhere, focus goes to the new page's heading, not back to what opened the palette.
 				onCloseAutoFocus={(event) => {
@@ -226,6 +228,7 @@ export function DashboardKeys({
 	repos,
 	snapshot,
 	people,
+	operator = false,
 	help,
 	onHelp,
 }: {
@@ -236,6 +239,8 @@ export function DashboardKeys({
 	snapshot: RepoSnapshot | undefined;
 	/** A person signed in (not an Access operator). */
 	people: boolean;
+	/** One of GitHive's operators, through Cloudflare Access. */
+	operator?: boolean;
 	help: boolean;
 	onHelp: (open: boolean) => void;
 }) {
@@ -267,7 +272,7 @@ export function DashboardKeys({
 	});
 	const changes =
 		repo && snapshot ? snapshot.claims.map((claim) => ({ change: claim.change, title: claimTitle(claim) })) : [];
-	const items = palette ? paletteItems({ repos, ...(repo ? { repo } : {}), changes, people }) : [];
+	const items = palette ? paletteItems({ repos, ...(repo ? { repo } : {}), changes, people, operator }) : [];
 	return (
 		<>
 			<CommandPalette open={palette} onOpenChange={setPalette} items={items} />
