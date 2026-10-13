@@ -92,3 +92,33 @@ describe("merging a change", () => {
 		expect(text).toMatch(MERGE);
 	});
 });
+
+describe("an agent's question", () => {
+	const asking: Claim = {
+		...snapshot.claims[0]!,
+		attention: { reason: "reviewers disagree on the cache size", agent: "agent-c", at: ago(15) },
+	};
+	const voteApi = { vote: async () => ({}) };
+
+	it("asks the reader to vote only when a vote form is on the page", () => {
+		const text = page({ claim: asking, canVote: true, api: voteApi });
+		expect(text).toContain("agent-c asks you");
+		expect(text).toContain("Decide with your vote below");
+		expect(text).toContain("Waiting on your decision");
+	});
+
+	it("tells a reader who can't vote that it waits on a person, not on them", () => {
+		for (const text of [page({ claim: asking, canVote: false, api: voteApi }), page({ claim: asking })]) {
+			expect(text).toContain("agent-c asks a person");
+			expect(text).toContain("A person who can review in acme/docs-site answers it by voting.");
+			expect(text).toContain("Waiting on a person");
+			expect(text).not.toMatch(/asks you|your vote below|your decision/);
+		}
+	});
+
+	it("says there's nothing to vote on before anything is pushed", () => {
+		const text = page({ claim: { ...asking, head: null }, canVote: true, api: voteApi });
+		expect(text).toContain("Nothing is pushed yet");
+		expect(text).not.toMatch(/asks you|your vote below|your decision/);
+	});
+});
