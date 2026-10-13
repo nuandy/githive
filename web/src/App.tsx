@@ -25,6 +25,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
 import { RepoPage, type RepoView } from "./components/RepoPage";
+import { SECTION_TITLES } from "./components/RepoSettings";
 import { TopBar, type Crumb } from "./components/TopBar";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
@@ -371,6 +372,9 @@ function useRepoData(repoName: string | null, changeId: string | null) {
 	return { liveStatus, snapshot, audit, access, change };
 }
 
+/** What a repo's Settings can change, and the reader's agents, offered there as who may vote as a role. */
+const repoManage = { ...manage, agents: account.agents };
+
 /** A repo's page, once its snapshot is read; or that it's loading, or why it can't be shown. */
 function RepoRoute(props: {
 	repo: string;
@@ -408,7 +412,7 @@ function RepoRoute(props: {
 				{...(lastStretch ? { lastStretch } : {})}
 				api={api}
 				{...(access.data ? { access: access.data } : {})}
-				{...(visitor ? {} : { manage })}
+				{...(visitor ? {} : { manage: repoManage })}
 				onAccessChanged={() => {
 					access.refresh();
 					refreshSummaries();
@@ -441,6 +445,7 @@ function repoViewOf(route: Route): RepoView | null {
 		...(route.path !== undefined ? { path: route.path } : {}),
 		...(route.ref ? { ref: route.ref } : {}),
 		...(route.branch ? { branch: route.branch } : {}),
+		...(route.section ? { section: route.section } : {}),
 	};
 }
 
@@ -511,11 +516,13 @@ const TAB_TITLES: Record<Exclude<RepoTab, "hive">, string> = {
 };
 
 /**
- * What a repo tab puts before the repo's name in the title: in Code, the file and its folder; on the Hive, the repo's
- * own page, nothing.
+ * What a repo tab puts before the repo's name in the title: in Code, the file and its folder; in Settings, a section
+ * other than General; on the Hive, the repo's own page, nothing.
  */
 function tabTitle(route: Extract<Route, { page: "repo" }>): string[] {
 	if (route.tab === "hive") return [];
+	if (route.tab === "settings" && route.section && route.section !== "general")
+		return [SECTION_TITLES[route.section], TAB_TITLES.settings];
 	const parts = route.tab === "code" ? (route.path ?? "").split("/").filter(Boolean) : [];
 	const name = parts.pop();
 	if (!name) return [TAB_TITLES[route.tab]];

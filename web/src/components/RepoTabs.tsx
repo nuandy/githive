@@ -27,11 +27,13 @@ import { Icon, type IconName } from "./Icon";
 import { LoadError } from "./LoadError";
 import { StatusIcon, StatusPill, TONE_TEXT } from "./StatusPill";
 import { Badge, Counter } from "./ui/badge";
-import { Box, BoxBody, BoxHeader, Callout } from "./ui/box";
+import { MergePolicyTerms, RecordsTerms } from "./PolicyTerms";
+import { Box, BoxBody, BoxHeader, BoxTitle, Callout } from "./ui/box";
 import { Empty } from "./ui/empty";
 import { TERMS } from "./ui/manage";
 
 export { ChangePage, type ChangePageProps } from "./ChangePage";
+export { githubTerms } from "./PolicyTerms";
 
 // No central server enforces a repo's rules, so these pages show who holds what, how reviews stand, and
 // what the audit found in Git, including violations a revert has since resolved.
@@ -433,148 +435,38 @@ export function AuditTab({
 	);
 }
 
-type Policy = RepoSnapshot["policy"];
-type PathRule = NonNullable<Policy["escalate"]>[number];
-
-/** A stricter rule for paths, in words: what touching them needs. */
-function ruleWords(rule: PathRule, required: number) {
-	const approvals = rule.required ?? required;
-	const approvalWords = `${approvals} ${approvals === 1 ? "approval" : "approvals"}`;
-	const blockers = rule.vetoes?.length ? `; ${rule.vetoes.join(", ")} can block` : "";
-	return `${approvalWords}${blockers}`;
-}
-
-/** How changes merge, as terms in the Settings tab's list: for readers who can't change it. */
-function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[] }) {
-	const blockers = blockingRoles(policy);
-	return (
-		<>
-			<dt>Approvals</dt>
-			<dd>
-				Merging needs {policy.required} {policy.required === 1 ? "approval" : "approvals"}
-				{policy.vetoes.length ? `; ${policy.vetoes.join(", ")} can block` : ""}
-			</dd>
-			{blockers.length ? (
-				<>
-					<dt>Who can block</dt>
-					<dd>
-						{blockers.map(({ role, holders }) => `${role}: ${holders}`).join("; ")}. A vote as one of these roles from
-						anyone else counts as an ordinary review.
-					</dd>
-				</>
-			) : null}
-			{policy.escalate?.length ? (
-				<>
-					<dt>Stricter paths</dt>
-					<dd>
-						<ul className="m-0 list-disc pl-5">
-							{policy.escalate.map((rule, index) => (
-								<li key={index} className="not-first:mt-1">
-									{rule.paths.map((path) => (
-										<code key={path}>{path}</code>
-									))}{" "}
-									need {ruleWords(rule, policy.required)}
-								</li>
-							))}
-						</ul>
-					</dd>
-				</>
-			) : null}
-			<dt>Merge checks</dt>
-			<dd>
-				{verify.length
-					? verify.map((command) => <code key={command}>{command}</code>)
-					: "None: changes that merge cleanly but break together aren't caught"}
-			</dd>
-		</>
-	);
-}
-
-/** The GitHub link in words: where GitHive's work goes, and whether GitHub's changes come back reviewed. */
-export function githubTerms(github: NonNullable<RepoSnapshot["github"]>, branch: string) {
-	const how =
-		github.sync === "pr"
-			? `GitHive's work reaches ${github.repo} through one pull request from githive/main, merged on GitHub`
-			: `GitHive pushes ${branch} to ${github.repo} after every landing`;
-	if (!github.inbound) return `${how}, as it did before modes: GitHub's changes aren't brought back.`;
-	const back = github.trust
-		? "GitHub's changes come back as githive-github's change, landing through the checks without review"
-		: "GitHub's changes come back as githive-github's change, reviewed like any change";
-	return `${how}. ${back}.`;
-}
-
 /**
- * The Settings tab: how changes merge (for the repo's admins, `editor` to
- * change it; for everyone else, what it is), how the records are kept, and
- * who may do what (`access`).
+ * The Settings tab for those who can't change it: how changes merge and how the records are kept, then who may do
+ * what (`access`). The repo's admins get RepoSettings instead.
  */
 export function SettingsTab({
 	snapshot,
 	access,
-	editor,
 }: {
 	snapshot: RepoSnapshot;
-	/** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode;
-	/** For the repo's admins: the form that changes how changes merge. */ editor?: ReactNode;
+	/** Who may do what: the reader's permission and the repo's visibility. */ access?: ReactNode;
 }) {
-	const { policy, verify } = snapshot;
-	const sharding = shardingSummary(snapshot);
-	const votesSharding = votesShardingSummary(snapshot);
 	return (
-		<div className="grid max-w-205 gap-4">
-			<Callout className="mb-2 text-ui">
+		<div className="grid max-w-205 gap-6">
+			<Callout className="text-ui">
 				<Icon name="alert" className="text-muted-foreground" />
 				<span>
-					{editor
-						? "Changes here apply to merges from now on: each merge is audited against the " +
-							"settings in force when it merged. Agents can change them too, with the MCP " +
-							"settings tool."
-						: "The repo's admins set how changes merge, and every agent checks it itself. A role " +
-							"can be granted to a team, as @org/team."}
+					The repo's admins set how changes merge, and every agent checks it itself. A role can be granted to a team, as
+					@org/team.
 				</span>
 			</Callout>
-			{editor}
-			<Box>
+			<Box aria-labelledby="settings-merge-title">
 				<BoxHeader>
-					<h2 className="text-body-sm font-semibold">{editor ? "How the records are kept" : "How changes merge"}</h2>
+					<BoxTitle id="settings-merge-title">How changes merge</BoxTitle>
 				</BoxHeader>
 				<BoxBody>
 					<dl className={TERMS}>
-						{editor ? null : <MergePolicyTerms policy={policy} verify={verify} />}
-						<dt>Signed records</dt>
-						<dd>
-							{snapshot.verified
-								? "Records and merges are stamped with verified identity"
-								: "Records are not stamped: names are as agents give them"}
-						</dd>
-						{sharding ? (
-							<>
-								<dt>Claims</dt>
-								<dd>{sharding.detail}</dd>
-							</>
-						) : null}
-						{votesSharding ? (
-							<>
-								<dt>Votes</dt>
-								<dd>{votesSharding.detail}</dd>
-							</>
-						) : null}
-						<dt>Branches</dt>
-						<dd>
-							Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit
-							merges, once the conventions hold.
-						</dd>
-						{snapshot.github ? (
-							<>
-								<dt>GitHub</dt>
-								<dd>{githubTerms(snapshot.github, snapshot.branch ?? "main")}</dd>
-							</>
-						) : null}
+						<MergePolicyTerms policy={snapshot.policy} verify={snapshot.verify} />
+						<RecordsTerms snapshot={snapshot} />
 					</dl>
 				</BoxBody>
 			</Box>
-			{/* Who may do what (RepoAdmin) takes the tab's smaller headings and paragraphs' spacing. */}
-			{access ? <div className="[&_h2]:text-body-sm [&_h2]:font-semibold [&_p]:mt-0 [&_p]:mb-2">{access}</div> : null}
+			{access}
 		</div>
 	);
 }

@@ -54,7 +54,7 @@ describe("a new repository's form, as it's filled in", () => {
 	it("links the name to its hint, and marks it invalid only while something's wrong", () => {
 		const fine = view({ initial: { name: "widgets" } });
 		expect(nameInput(fine)).toContain('aria-describedby="new-repo-name-hint"');
-		expect(nameInput(fine)).not.toContain("aria-invalid");
+		expect(nameInput(fine)).not.toMatch(/\saria-invalid=/);
 		expect(visibleText(fine)).toContain("It will be ada/widgets.");
 		const spaced = view({ initial: { name: "my project" } });
 		expect(nameInput(spaced)).toContain('aria-invalid="true"');

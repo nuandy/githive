@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isLoose, repoPath, splitRepo } from "./repoName";
-import { href, parseRoute } from "./routes";
+import { href, parseRoute, SETTINGS_SECTIONS } from "./routes";
 
 describe("hash routes", () => {
 	it("parses the pages", () => {
@@ -62,6 +62,33 @@ describe("hash routes", () => {
 		}
 		expect(parseRoute(href.change("acme/a b", "c d"))).toMatchObject({ repo: "acme/a b", change: "c d" });
 		expect(parseRoute(href.org("acme"))).toEqual({ page: "org", org: "acme" });
+	});
+
+	it("opens Settings at a section, General when none is named", () => {
+		expect(parseRoute("#/repos/acme/web/settings")).toEqual({
+			page: "repo",
+			repo: "acme/web",
+			tab: "settings",
+			section: "general",
+		});
+		for (const section of SETTINGS_SECTIONS)
+			expect(parseRoute(`#/repos/acme/web/settings/${section}`)).toEqual({
+				page: "repo",
+				repo: "acme/web",
+				tab: "settings",
+				section,
+			});
+		expect(parseRoute("#/repos/acme/web/settings/nope")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/settings/review/x")).toEqual({ page: "not-found" });
+		// Only Settings has sections.
+		expect(parseRoute("#/repos/acme/web/audit/review")).toEqual({ page: "not-found" });
+		expect(href.settings("acme/web")).toBe("#/repos/acme/web/settings");
+		expect(href.settings("acme/web", "general")).toBe("#/repos/acme/web/settings");
+		expect(href.settings("acme/web", "branch-rules")).toBe("#/repos/acme/web/settings/branch-rules");
+		expect(parseRoute(href.settings("acme/a b", "danger-zone"))).toMatchObject({
+			repo: "acme/a b",
+			section: "danger-zone",
+		});
 	});
 
 	it("puts files in the Code tab's path, encoded per segment", () => {

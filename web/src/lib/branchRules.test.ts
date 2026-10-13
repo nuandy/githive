@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchRulesFrom, emptyRule, ruleDraftsFrom } from "./branchRules";
+import { branchRuleProblems, branchRulesFrom, emptyRule, ruleDraftsFrom } from "./branchRules";
 
 // Branch rules in the Settings tab: a blank field keeps the repo's setting.
 
@@ -38,5 +38,15 @@ describe("branch rule drafts", () => {
 			"r/*: say which roles can block before who may vote as them.",
 			"r/* changes nothing: set approvals, roles or checks, or remove it.",
 		]);
+	});
+
+	it("put each problem under its field, or under the rule when it's the whole rule's", () => {
+		expect(
+			branchRuleProblems([
+				{ ...emptyRule(), pattern: "feature x", required: "one", vetoes: "Release", grants: "person:*" },
+				{ ...emptyRule(), pattern: "docs/*", checks: "these" },
+				{ ...emptyRule(), pattern: "hotfix/*" },
+			]).map((problem) => problem.field),
+		).toEqual(["rule-pattern-0", "rule-required-0", "rule-vetoes-0", "rule-verify-1", "rule-2"]);
 	});
 });

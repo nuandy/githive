@@ -58,28 +58,52 @@ function verifyOf(draft: RuleDraft): string[] | undefined {
 /** A pattern's characters: a branch name's, and * for any run of them. */
 const PATTERN = /^[A-Za-z0-9._/*-]+$/;
 
+/** What's wrong with a draft, under which field (by its id), or under the rule (`rule-<index>`) for the whole rule. */
+export interface RuleProblem {
+	field: string;
+	text: string;
+}
+
+/** What's wrong with the drafts, rule by rule, field by field. */
+export function branchRuleProblems(drafts: RuleDraft[]): RuleProblem[] {
+	const problems: RuleProblem[] = [];
+	drafts.forEach((draft, index) => {
+		const say = (field: string, text: string) => problems.push({ field, text });
+		const name = draft.pattern.trim() || `Rule ${index + 1}`;
+		if (!PATTERN.test(draft.pattern.trim()))
+			say(
+				`rule-pattern-${index}`,
+				`${name}: the pattern is a branch name, with * for any run of characters (feature/*).`,
+			);
+		const required = draft.required.trim();
+		if (required && !/^\d+$/.test(required))
+			say(`rule-required-${index}`, `${name}: approvals is a whole number, or blank for the repo's.`);
+		const vetoes = splitList(draft.vetoes);
+		for (const role of vetoes)
+			if (!ROLE.test(role))
+				say(`rule-vetoes-${index}`, `${name}: "${role}" isn't a role name: lowercase words joined by hyphens.`);
+		if (splitList(draft.grants).length && !vetoes.length)
+			say(`rule-grants-${index}`, `${name}: say which roles can block before who may vote as them.`);
+		const verify = verifyOf(draft);
+		if (draft.checks === "these" && !verify?.length)
+			say(`rule-verify-${index}`, `${name}: list its checks, or choose none.`);
+		if (!required && !vetoes.length && verify === undefined)
+			say(`rule-${index}`, `${name} changes nothing: set approvals, roles or checks, or remove it.`);
+	});
+	return problems;
+}
+
 /** What the settings tool takes, from the drafts; or what's wrong with them. */
 export function branchRulesFrom(
 	drafts: RuleDraft[],
 ): { rules: NonNullable<SettingsInput["branch_rules"]>; errors: [] } | { rules?: undefined; errors: string[] } {
-	const errors: string[] = [];
-	const rules = drafts.map((draft, index) => {
-		const name = draft.pattern.trim() || `Rule ${index + 1}`;
-		if (!PATTERN.test(draft.pattern.trim()))
-			errors.push(`${name}: the pattern is a branch name, with * for any run of characters (feature/*).`);
+	const problems = branchRuleProblems(drafts);
+	if (problems.length) return { errors: [...new Set(problems.map((problem) => problem.text))] };
+	const rules = drafts.map((draft) => {
 		const required = draft.required.trim();
-		if (required && !/^\d+$/.test(required))
-			errors.push(`${name}: approvals is a whole number, or blank for the repo's.`);
 		const vetoes = splitList(draft.vetoes);
-		for (const role of vetoes)
-			if (!ROLE.test(role)) errors.push(`${name}: "${role}" isn't a role name: lowercase words joined by hyphens.`);
 		const holders = splitList(draft.grants);
-		if (holders.length && !vetoes.length)
-			errors.push(`${name}: say which roles can block before who may vote as them.`);
 		const verify = verifyOf(draft);
-		if (draft.checks === "these" && !verify?.length) errors.push(`${name}: list its checks, or choose none.`);
-		const changes = !!required || vetoes.length > 0 || verify !== undefined;
-		if (!changes) errors.push(`${name} changes nothing: set approvals, roles or checks, or remove it.`);
 		const rule: BranchRuleInput = { pattern: draft.pattern.trim() };
 		if (required) rule.required = Number(required);
 		if (vetoes.length) rule.vetoes = vetoes;
@@ -87,5 +111,5 @@ export function branchRulesFrom(
 		if (verify !== undefined) rule.verify = verify;
 		return rule;
 	});
-	return errors.length ? { errors: [...new Set(errors)] } : { rules, errors: [] };
+	return { rules, errors: [] };
 }

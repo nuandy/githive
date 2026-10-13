@@ -265,7 +265,8 @@ function TokenStatus({
 			confirming={confirming}
 			setConfirming={setConfirming}
 			label="Revoke"
-			question="Revoke this token?"
+			question={`Revoke ${tokenLabel(token.prefix)}? Whatever signs in with it stops working.`}
+			keep="Keep token"
 			busy={busy === key}
 			onConfirm={() => run(key, () => actions.revokeToken(token.id), setError)}
 		/>

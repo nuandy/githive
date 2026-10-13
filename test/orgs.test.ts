@@ -58,6 +58,10 @@ describe("orgs", () => {
 			role: "admin",
 			awaitingApproval: true,
 		});
+		// The org's invitations say his waits on GitHive's approval.
+		expect(await orgs.invites(acme.id)).toEqual([
+			{ email: "dan@example.com", role: "admin", createdAt: expect.any(String), awaitingApproval: true },
+		]);
 		// An org's invitation alone doesn't let dan in: it's a request the admin sees.
 		const profile = { provider: "github" as const, providerId: "dan", email: "dan@example.com", login: "dan" };
 		expect(await ids.signIn(profile)).toEqual({ refused: "not-invited" });

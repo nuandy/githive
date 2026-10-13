@@ -6,6 +6,7 @@
 //   #/orgs/:org                               an organization (or your own namespace)
 //   #/repos/:owner/:name[/changes|/history|/claims|/agents|/audit|/settings][?branch=<branch>]
 //                                             (the Hive tab without one)
+//   #/repos/:owner/:name/settings/:section    a part of Settings (General without one)
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:owner/:name/changes/:id[/commits]
 //   #/settings/agents                         your agents, their tokens, and connected apps
@@ -15,6 +16,17 @@ import { repoPath } from "./repoName";
 
 export type RepoTab = "hive" | "changes" | "history" | "claims" | "code" | "agents" | "settings" | "audit";
 export type ChangeTab = "conversation" | "commits";
+/** The parts of a repo's Settings, each on a page of its own. */
+export const SETTINGS_SECTIONS = [
+	"general",
+	"review",
+	"path-rules",
+	"branch-rules",
+	"checks",
+	"github",
+	"danger-zone",
+] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export type Route =
 	| { page: "repos" }
@@ -31,6 +43,7 @@ export type Route =
 			/** Code tab: the file or folder shown, "" for the top. */ path?: string;
 			/** Code tab: a branch or commit other than the project's branch. */ ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+			/** Settings tab: the part shown. */ section?: SettingsSection;
 	  }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
@@ -78,6 +91,11 @@ export function parseRoute(hash: string): Route {
 			const ref = params.get("ref") || undefined;
 			return { page: "repo", repo, tab: "code", path: segments.join("/"), ...(ref ? { ref } : {}) };
 		}
+		if (rest[0] === "settings" && rest.length <= 2) {
+			const section = (rest[1] ?? "general") as SettingsSection;
+			if (!SETTINGS_SECTIONS.includes(section)) return { page: "not-found" };
+			return { page: "repo", repo, tab: "settings", section };
+		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
 			const branch = params.get("branch") || undefined;
 			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
@@ -101,6 +119,11 @@ function repoHref(repo: string, tab: RepoTab = "hive", branch?: string): string 
 	return `#/repos/${repoPath(repo)}${tabPart}${query}`;
 }
 
+/** A part of a repo's Settings; General is Settings itself. */
+function settingsHref(repo: string, section: SettingsSection = "general"): string {
+	return `#/repos/${repoPath(repo)}/settings${section === "general" ? "" : `/${section}`}`;
+}
+
 function changeHref(repo: string, change: string, tab: ChangeTab = "conversation"): string {
 	const tabPart = tab === "conversation" ? "" : `/${tab}`;
 	return `#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`;
@@ -116,6 +139,7 @@ function codeHref(repo: string, path = "", ref?: string): string {
 export const href = {
 	repos: () => "#/",
 	repo: repoHref,
+	settings: settingsHref,
 	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,

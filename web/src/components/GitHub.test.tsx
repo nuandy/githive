@@ -5,7 +5,8 @@ import { claimApprovalLabel, claimStatus } from "../lib/claimStatus";
 import { repoSnapshot } from "../test/fixtures";
 import { ChangePage } from "./ChangePage";
 import { GitHubLink } from "./GitHubLink";
-import { githubDraft, githubInput } from "./GitHubSettings";
+import { createDraftStore, draftKey } from "../lib/settingsDrafts";
+import { githubDraft, githubInput, GitHubSection } from "./GitHubSettings";
 import { ChangeLabels, githubTerms } from "./RepoTabs";
 
 // A repo connected to GitHub shows it by its name: the GitHub repo, and in pr
@@ -161,5 +162,37 @@ describe("the GitHub settings", () => {
 		expect(githubTerms(github({ sync: "mirror", trust: false }), "main")).toMatch(
 			/pushes main to acme\/shop .* reviewed like any change\.$/,
 		);
+	});
+
+	const section = (link: RepoGitHub | undefined, drafts = createDraftStore()) =>
+		renderToStaticMarkup(
+			<GitHubSection
+				repo="acme/web"
+				branch="main"
+				snapshot={{ policy: { required: 1, vetoes: [] }, verify: [], github: link }}
+				save={async () => ({}) as never}
+				drafts={drafts}
+				options={{ roles: [], holders: [] }}
+			/>,
+		);
+
+	it("shows a connection as it is, with Change… and Disconnect, asked first", () => {
+		const html = section(github({ pull: { number: 128, url: "https://github.com/acme/shop/pull/128" } }));
+		expect(text(html)).toContain("Connected to acme/shop · Pull request #128");
+		expect(text(html)).toContain("Change…");
+		expect(html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>Disconnect<\/button>/);
+		// No fields until Change… opens them.
+		expect(html).not.toContain('id="github-repo"');
+	});
+
+	it("chooses how GitHive's work reaches GitHub from cards that say what each means", () => {
+		const drafts = createDraftStore();
+		const form = { ...githubDraft(github()), editing: true, touched: false };
+		drafts.set(draftKey("acme/web", "github"), { draft: form, base: { ...form, editing: false }, dirty: false });
+		const html = section(github(), drafts);
+		expect(html).toMatch(/name="github-sync" checked="" value="pr"/);
+		expect(text(html)).toContain("Nothing reaches GitHub's main until someone merges it there.");
+		expect(text(html)).toContain("Pushed to main After every landing GitHive pushes main to GitHub");
+		expect(text(section(undefined))).toContain("Connect");
 	});
 });
