@@ -12,14 +12,7 @@
  * Another palette is another block of the same variables; corners follow --radius.
  */
 
-/* Before Tailwind's own layers, so `legacy` sits between the base and the utilities: the stylesheets not yet moved to
-   utilities (wrapped in @layer legacy by vite.config.ts) override the base, and utilities override them. */
-@layer theme, base, legacy, components, utilities;
-
-@import "tailwindcss/theme.css" layer(theme);
-/* Tailwind's reset (its preflight) isn't imported while the legacy layer remains: those stylesheets were written
-   against the browser's own defaults (paragraph margins, inline icons, sized headings). */
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -378,6 +371,73 @@
 	}
 }
 
+/* What every element starts from, over Tailwind's reset: the body's paper, ink and type, headings, links, focus, and
+   code. Utilities override any of it. */
+@layer base {
+	html {
+		-webkit-text-size-adjust: 100%;
+	}
+	body {
+		margin: 0;
+		background-color: var(--background);
+		color: var(--foreground);
+		font: 15px/1.55 var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+	h1,
+	h2,
+	h3,
+	h4 {
+		margin: 0;
+		line-height: 1.2;
+		font-weight: 700;
+	}
+	h1 {
+		font-weight: 800;
+		letter-spacing: -0.01em;
+	}
+	a {
+		color: var(--link);
+		text-decoration: none;
+	}
+	a:hover {
+		text-decoration: underline;
+		text-underline-offset: 0.18em;
+	}
+	:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+		border-radius: var(--radius);
+	}
+	code,
+	pre {
+		font-family: var(--font-mono);
+		font-size: 13px;
+	}
+	code {
+		padding: 1px 5px;
+		border-radius: calc(var(--radius) * 1.25);
+		background-color: var(--surface-2);
+		overflow-wrap: anywhere;
+	}
+	pre {
+		margin: 0;
+		padding: 12px;
+		overflow: auto;
+		background-color: var(--surface-2);
+		border-radius: var(--radius);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	pre code {
+		padding: 0;
+		background: none;
+	}
+	summary {
+		cursor: pointer;
+	}
+}
+
 /* Reduced motion: whatever still moves, moves at once. */
 @layer base {
 	@media (prefers-reduced-motion: reduce) {
@@ -399,21 +459,6 @@
 		animation-duration: var(--motion-slow);
 		animation-timing-function: ease;
 	}
-}
-
-/* Until stage 5: the names the stylesheets not yet on utilities use. */
-:root,
-.dark {
-	--bg: var(--background);
-	--surface: var(--card);
-	--text: var(--foreground);
-	--text-muted: var(--muted-foreground);
-	--shadow-lg: var(--shadow-raised);
-	--shadow: none;
-	--gap: 16px;
-	--focus: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
-	--font: var(--font-sans);
-	--mono: var(--font-mono);
 }
 
 /* The Hive tab: what each stage is drawn in, on its strip, its map and its bars alike (bg-stage-building, and in SVG

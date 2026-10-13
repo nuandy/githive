@@ -38,7 +38,6 @@ import { href, parseRoute, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import { cn } from "./lib/utils";
 // The page column's classes, for the pages not yet on utilities.
-import "./App.css";
 
 /** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
 export function routePlace(route: Route): string {

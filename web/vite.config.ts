@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 
 // The dashboard is built into web/dist and served by the Worker as static
 // assets. In development, API calls go to the deployed Worker, where the real
@@ -12,22 +12,9 @@ const api = process.env.GITHIVE_API ?? "https://githive.app";
 
 const src = fileURLToPath(new URL("./src", import.meta.url));
 
-// The stylesheets not yet moved to Tailwind's utilities go in a layer of their own, declared in theme.css between
-// Tailwind's reset and its utilities: they override the reset, and utilities override them. theme.css itself is
-// Tailwind's, and stays out.
-const legacyLayer: Plugin = {
-	name: "githive-legacy-layer",
-	enforce: "pre",
-	transform(code, id) {
-		const file = id.split("?")[0]!;
-		if (!file.endsWith(".css") || !file.startsWith(src) || file.endsWith("/theme.css")) return;
-		return { code: `@layer legacy {\n${code}\n}\n`, map: null };
-	},
-};
-
 export default defineConfig({
 	root: __dirname,
-	plugins: [tailwindcss(), legacyLayer, react()],
+	plugins: [tailwindcss(), react()],
 	resolve: { alias: { "@": src } },
 	build: { outDir: "dist", emptyOutDir: true },
 	server: {

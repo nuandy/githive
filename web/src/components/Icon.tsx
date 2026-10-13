@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "../lib/utils";
 
 // A small set of line icons (24px grid, drawn with currentColor), so status
 // colors come from the surrounding text color.
@@ -170,10 +171,9 @@ export function Icon({
 	className?: string;
 	label?: string;
 }) {
-	const classes = ["icon", name === "loader" ? "icon--spin" : "", className ?? ""];
 	return (
 		<svg
-			className={classes.filter(Boolean).join(" ")}
+			className={cn(name === "loader" && "animate-[spin_1.1s_linear_infinite]", className)}
 			width={size}
 			height={size}
 			viewBox="0 0 24 24"

@@ -95,25 +95,14 @@ Scenes (`web/visual/scenes.ts`) cover every page and tab, states reached by a cl
 points of fixed runs, with its motions frame by frame, in light and dark, 1280px and 390px wide, from synthetic
 fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline before a change and compare after.
 
-## Moving a screen off the legacy stylesheets
+## Writing a screen
 
-While this lasts: the stylesheets not yet moved sit in a `legacy` cascade layer (`web/vite.config.ts` wraps them),
-between the base and the utilities. Utilities beat legacy rules whatever their specificity; legacy rules beat
-browser defaults. Tailwind's reset (preflight) is off until the legacy layer is gone, and then it's on.
-
-Moving a component:
-
-1. Read its markup, its stylesheet, and the global rules that reach it (`styles.css`: `button`, `input`, `label`,
-   `.pill`, `.box`, `.callout`, `.empty`, `.stat`, `.bar`, `.muted`, …). Its look is the sum of them.
-2. Rewrite its classes as utilities and components that reproduce that look exactly. Use the theme's names; an
-   arbitrary value (`leading-[1.45]`) only where the theme has no step for it. A page's `<main className="page">` is
-   `Page`.
-3. Write out what the browser's defaults give it now and preflight will take away: margins of `p`, `ul`, `ol`, `dl`,
-   `figure`, `blockquote`, `h1`–`h6`; a list's padding and bullets; a heading's size; an `svg` or `img` sitting inline
-   on the text's baseline; a `button`'s or field's font. (Links, `code`, `pre`, headings' weight and line height and
-   the body's font stay as the base gives them.)
-4. Give every button and field its look from `Button`, `Input` and friends, or in full: the global `button` and
-   `input` rules go with the legacy layer.
-5. Add the motion the rules above ask for.
-6. Delete a stylesheet once none of its classes is used anywhere (search the whole of `web/src`).
-7. Capture and compare: every shot must match.
+- Tailwind's reset (preflight) is on, with GitHive's base over it (`theme.css`, `@layer base`): the body's paper, ink
+  and 15px Overpass, headings' weight, links, the focus ring, `code` and `pre`. Everything else starts bare: a
+  paragraph or list has no margins, a list no bullets, a heading the body's size, an `svg` sits as a block. Say what
+  you want.
+- A control is a component (`Button`, `Input`, …) or written in full; there are no global button or field styles.
+- Colors, sizes and timings come from the theme. An arbitrary value (`leading-[1.45]`) only where the theme has no
+  step, and never a raw color.
+- `cn()` joins classes and lets a later one win; pass a component's `className` last.
+- Capture the visual check before a change and compare after, and add a scene for any state you add.
