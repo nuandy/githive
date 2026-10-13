@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { diffFiles } from "../src/change-diff";
-import { changeDiff } from "../src/toolkit/mcp";
+import { changeDiff, type ToolContext } from "../src/toolkit/mcp";
 import { agentClone } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
@@ -171,6 +171,48 @@ describe("a change's files, from Git", { timeout: 120_000 }, () => {
 		await expect(changeDiff(ctx(), "p", "nope")).rejects.toThrow(/\[404\] no change nope/);
 	});
 
+	/** The tools' context, with the project's branch unreadable: its read remote names a repo that isn't there. */
+	const unreadable = (): ToolContext => ({
+		...ctx(),
+		remote: async (_repo, scope) => ({
+			url: scope === "read" ? server.url.replace("project.git", "gone.git") : server.url,
+			token: "unused",
+		}),
+	});
+
+	it("says why it shows no files when its branch can't be read, or it shares no history with it", async () => {
+		await call("settings", { required: 1 });
+		await seedMain();
+		await register("a");
+		await call("claim", { change: "c-1", agent: "a", paths: ["src/a/"], intent: "work on a" }, "a");
+		const head = await pushWork("a");
+		expect(await changeDiff(unreadable(), "p", "c-1")).toEqual({
+			change: "c-1",
+			of: "head",
+			base: null,
+			head,
+			files: [],
+			total: 0,
+			unavailable: "main couldn't be read just now.",
+		});
+		// A branch that starts afresh, sharing no commit with main.
+		await call("claim", { change: "c-2", agent: "a", paths: ["src/b/"], intent: "start over" }, "a");
+		const orphan = await agentClone(server.url, work, "orphan");
+		await orphan.run("checkout", "-q", "--orphan", "changes/c-2");
+		await orphan.run("rm", "-rfq", ".");
+		orphan.write("src/b/y.js", "y\n");
+		await orphan.run("add", "-A");
+		await orphan.run("commit", "-q", "-m", "afresh");
+		await orphan.run("push", "-q", "origin", "changes/c-2");
+		expect(await changeDiff(ctx(), "p", "c-2")).toMatchObject({
+			base: null,
+			head: (await orphan.run("rev-parse", "HEAD")).trim(),
+			files: [],
+			total: 0,
+			unavailable: "It shares no history with main.",
+		});
+	});
+
 	it("shows a landed change as the commit it landed as, against the branch before it", async () => {
 		await call("settings", { required: 1 });
 		await seedMain();
@@ -187,5 +229,15 @@ describe("a change's files, from Git", { timeout: 120_000 }, () => {
 		const { outside: _outside, ...packageJson } = changedHere[0]!;
 		expect(diff.files).toEqual([packageJson, ...changedHere.slice(1)].map((file) => expect.objectContaining(file)));
 		expect(diff.files.some((file) => file.outside)).toBe(false);
+		// What it landed as can't be read just now: it says so.
+		expect(await changeDiff(unreadable(), "p", "c-1")).toEqual({
+			change: "c-1",
+			of: "landed",
+			base: null,
+			head: landed,
+			files: [],
+			total: 0,
+			unavailable: "The commit it landed as couldn't be read just now.",
+		});
 	});
 });

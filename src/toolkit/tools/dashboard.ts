@@ -186,7 +186,9 @@ async function ownCommits(
  * A change's files for its page's Files tab (see change-diff.ts). Open, or released without landing: its pushed head
  * against its merge base with the branch it lands on, each file outside its claim flagged. Landed: the commit it
  * landed as against that commit's first parent, the branch before it, which is what it brought. Nothing pushed (or its
- * branch gone): no files.
+ * branch gone): no files. When they can't be read (its branch or what it landed as unreadable just now, or no history
+ * shared with its branch), no files and `unavailable` says why: an answer, kept like one, not a failure every reader
+ * repeats.
  */
 export async function changeDiff(ctx: ToolContext, repo: string, change: string) {
 	const timing = ctx.timing ?? new Timing();
@@ -197,34 +199,74 @@ export async function changeDiff(ctx: ToolContext, repo: string, change: string)
 		storeFor(ctx, repo, registry).readChange(change),
 	);
 	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
-	const landed = released.find((release) => release.mergedAs);
-	if (!record && landed?.mergedAs) {
-		const mergedAs = landed.mergedAs;
-		// The merge and its parents, with their trees, in one fetch.
-		const project = await ctx.remote(repo, "read");
-		const held = await timing.time("fetch", () => fetchCommits(project, [mergedAs], "/landed", { depth: 2 }));
-		const { commit } = await git.readCommit({ ...held, oid: mergedAs });
-		const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
-		return { change, of: "landed" as const, ...(await timing.time("diff", () => diffCommits(held, before, mergedAs))) };
+	const mergedAs = record ? undefined : released.find((release) => release.mergedAs)?.mergedAs;
+	const of = mergedAs ? ("landed" as const) : ("head" as const);
+	try {
+		if (mergedAs) return { change, of, ...(await landedDiff(ctx, repo, change, mergedAs, timing)) };
+		const agent = record?.agent ?? released.at(-1)!.agent;
+		const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+		const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
+		const workspace = await timing
+			.time("clone", async () =>
+				Workspace.clone(await changeSourceFor(ctx, repo)(agent, "read", change, record?.since), `changes/${change}`, {
+					depth: 8,
+				}),
+			)
+			.catch(() => null);
+		if (!workspace) return { change, of, base: null, head: null, files: [], total: 0 };
+		const head = await workspace.head();
+		const projectHead = await unless(`${branch} couldn't be read just now.`, head, () =>
+			timing.time("project", async () => workspace.fetch("project", await ctx.remote(repo, "read"), branch)),
+		);
+		const base = await unless(
+			(err) =>
+				/no common ancestor/.test(String(err))
+					? `It shares no history with ${branch}.`
+					: `Where it left ${branch} couldn't be found just now.`,
+			head,
+			() => timing.time("base", () => workspace.mergeBase(projectHead, head)),
+		);
+		const diff = await unless("Its files couldn't be read just now.", head, () =>
+			timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed })),
+		);
+		return { change, of, ...diff };
+	} catch (err) {
+		if (!(err instanceof Unavailable)) throw err;
+		return { change, of, base: null, head: err.head, files: [], total: 0, unavailable: err.message };
 	}
-	const agent = record?.agent ?? released.at(-1)!.agent;
-	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
-	const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
-	const workspace = await timing
-		.time("clone", async () =>
-			Workspace.clone(await changeSourceFor(ctx, repo)(agent, "read", change, record?.since), `changes/${change}`, {
-				depth: 8,
-			}),
-		)
-		.catch(() => null);
-	if (!workspace) return { change, of: "head" as const, base: null, head: null, files: [], total: 0 };
-	const head = await workspace.head();
-	const projectHead = await timing.time("project", async () =>
-		workspace.fetch("project", await ctx.remote(repo, "read"), branch),
+}
+
+// What a landed change brought: the commit it landed as against its first parent.
+async function landedDiff(ctx: ToolContext, repo: string, change: string, mergedAs: string, timing: Timing) {
+	const lost = "The commit it landed as couldn't be read just now.";
+	// The merge and its parents, with their trees, in one fetch.
+	const held = await unless(lost, mergedAs, () =>
+		timing.time("fetch", async () => fetchCommits(await ctx.remote(repo, "read"), [mergedAs], "/landed", { depth: 2 })),
 	);
-	const base = await timing.time("base", () => workspace.mergeBase(projectHead, head));
-	const diff = await timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed }));
-	return { change, of: "head" as const, ...diff };
+	const { commit } = await unless(lost, mergedAs, () => git.readCommit({ ...held, oid: mergedAs }));
+	const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
+	return unless("Its files couldn't be read just now.", mergedAs, () =>
+		timing.time("diff", () => diffCommits(held, before, mergedAs)),
+	);
+}
+
+/** Why a change's files can't be read just now, with its head where that was read. */
+class Unavailable extends Error {
+	constructor(
+		why: string,
+		readonly head: string | null,
+	) {
+		super(why);
+	}
+}
+
+// `work`'s answer, or Unavailable saying why it failed (logged).
+function unless<T>(why: string | ((err: unknown) => string), head: string | null, work: () => Promise<T>) {
+	return work().catch((err: unknown) => {
+		const said = typeof why === "string" ? why : why(err);
+		console.error(`a change's files: ${said}`, String(err));
+		throw new Unavailable(said, head);
+	});
 }
 
 /**

@@ -210,11 +210,14 @@ export function ChangeFiles({
 			<Box asChild>
 				<Empty className={className}>
 					<Icon name="file" size={28} />
-					<h2>{diff.head ? "No files changed" : "Nothing is pushed yet"}</h2>
+					<h2>
+						{diff.unavailable ? "Its files can't be shown" : diff.head ? "No files changed" : "Nothing is pushed yet"}
+					</h2>
 					<p>
-						{diff.head
-							? `Its head is the same as ${into} where it left it.`
-							: "Its files show here once its agent pushes."}
+						{diff.unavailable ??
+							(diff.head
+								? `Its head is the same as ${into} where it left it.`
+								: "Its files show here once its agent pushes.")}
 					</p>
 				</Empty>
 			</Box>
