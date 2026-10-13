@@ -148,6 +148,10 @@ describe("a change's state", () => {
 		// Its checks failed, which rejects its head: handed back to its agent, then abandoned.
 		const failed = vote({ reviewer: "githive-checks", role: "checks" });
 		expect(changeState(claim(), { votes: [failed], now: hours(3) })).toBe("abandoned");
+		// Vetoed, it's its agent's turn too, as the server reads it, though the veto's vote isn't among those read.
+		const vetoed = { approved: false, approvals: 0, required: 1, vetoedBy: ["sec-bot"] };
+		expect(changeState(claim({ approval: vetoed }), { now: hours(1) })).toBe("changes-requested");
+		expect(changeState(claim({ approval: vetoed }), { now: hours(3) })).toBe("abandoned");
 	});
 });
 

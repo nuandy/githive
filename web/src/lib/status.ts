@@ -211,6 +211,7 @@ function isAbandoned(claim: Claim, votes: Vote[], landing: boolean, now: number)
 		head: claim.head,
 		votes: onHead.map((vote) => ({ verdict: vote.verdict, at: vote.at })),
 		approved: claim.approval.approved,
+		vetoed: claim.approval.vetoedBy.length > 0,
 		landing,
 		asked: false,
 	};
