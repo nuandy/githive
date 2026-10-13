@@ -2,11 +2,18 @@ import { SiteLink } from "./SiteLink";
 import { type ReactNode, useState } from "react";
 import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
-import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
+import type { ChangeHistory, GiveUpAnswer, MergeCheck, RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
 import type { ChangeStatus, Tone } from "../lib/changeStatus";
-import { claimApprovalLabel, claimStatus, votesForClaim, type Claim } from "../lib/claimStatus";
+import {
+	claimApprovalLabel,
+	claimStatus,
+	rejectionsOnHead,
+	votesForClaim,
+	type Claim,
+	type Vote,
+} from "../lib/claimStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -123,13 +130,29 @@ function HeaderAction({ outcome, children }: { outcome: { ok: boolean; text: str
 
 type ChangeEnding = NonNullable<ReturnType<typeof changeEnding>>;
 
-function statusOf(claim: Claim | undefined, history: ChangeHistory | null | undefined): ChangeStatus | null {
-	if (claim) return claimStatus(claim);
+function statusOf(
+	claim: Claim | undefined,
+	history: ChangeHistory | null | undefined,
+	votes: Vote[],
+): ChangeStatus | null {
+	if (claim) return claimStatus(claim, votes);
 	if (history) return historyStatus(history);
 	return null;
 }
 
-/** Merge for a person, once a change is approved and waits on nothing. It's the same merge an agent asks for. */
+/**
+ * Whether nothing stands against the change's head: no rejection on it, and no conflict its last merge check found on
+ * it. A check of an older push says nothing of this one; one that doesn't say which push counts.
+ */
+function cleanHead(claim: Claim, votes: Vote[], check: MergeCheck | undefined): boolean {
+	const conflicted = !!check && !check.clean && !!check.conflicts?.length && (!check.head || check.head === claim.head);
+	return !conflicted && !rejectionsOnHead(claim, votes).length;
+}
+
+/**
+ * Merge for a person, once a change is approved, waits on nothing and its head is clean. It's the same merge an agent
+ * asks for.
+ */
 function MergeButton({
 	repo,
 	change,
@@ -205,16 +228,35 @@ function ChangeHeadline({
 /** Beside the conversation's column, indented past its avatars; flush with it on a narrow window. */
 const INDENT = "ml-11 to-720:ml-0";
 
-/** A question the change's agent put to people, answered by voting. */
-function AttentionCallout({ attention }: { attention: NonNullable<Claim["attention"]> }) {
+/**
+ * A question the change's agent put to people, answered by voting. It asks the reader only when they can answer it
+ * here: they may vote, and there's a pushed commit to vote on.
+ */
+function AttentionCallout({
+	attention,
+	answerable,
+	pushed,
+	repo,
+}: {
+	attention: NonNullable<Claim["attention"]>;
+	answerable: boolean;
+	pushed: boolean;
+	repo: string;
+}) {
 	return (
 		<Callout tone="needs" role="status" className={INDENT}>
 			<Icon name="alert" className="text-needs" />
 			<div>
-				<strong>{attention.agent} asks you</strong>
+				<strong>
+					{attention.agent} asks {answerable ? "you" : "a person"}
+				</strong>
 				<p>{attention.reason}</p>
 				<p className="text-muted-foreground">
-					Decide with your vote below: it counts like a reviewer's and answers the question.
+					{answerable
+						? "Decide with your vote below: it counts like a reviewer's and answers the question."
+						: pushed
+							? `A person who can review in ${repo} answers it by voting.`
+							: "Nothing is pushed yet, so there's no commit to vote on."}
 				</p>
 			</div>
 		</Callout>
@@ -240,9 +282,10 @@ function LatestPush({ head }: { head: string | null | undefined }) {
 	);
 }
 
-function approvalIcon(approval: Claim["approval"]): IconName {
+/** The merge box's icon: a cross once anything rejects the head, even an approved one's (failed checks). */
+function approvalIcon(approval: Claim["approval"], rejected: boolean): IconName {
+	if (approval.vetoedBy.length || rejected) return "x";
 	if (approval.approved) return "check";
-	if (approval.vetoedBy.length) return "x";
 	return "eye";
 }
 
@@ -293,15 +336,16 @@ function MergeBox({
 	);
 }
 
-/** Where a change in force stands: its approvals, and what it waits on. */
-function ClaimMergeBox({ claim }: { claim: Claim }) {
+/** Where a change in force stands: its approvals, and what it waits on (the reader, if they can answer it here). */
+function ClaimMergeBox({ claim, votes, answerable }: { claim: Claim; votes: Vote[]; answerable: boolean }) {
 	const { approval } = claim;
+	const status = claimStatus(claim, votes);
 	const approvalLabel = claimApprovalLabel(claim);
 	const waitingNote = !approval.approved && approvalLabel.startsWith("Waiting") ? ` · ${approvalLabel}` : "";
 	return (
 		<MergeBox
-			tone={claimStatus(claim).tone}
-			icon={approvalIcon(approval)}
+			tone={status.tone}
+			icon={approvalIcon(approval, rejectionsOnHead(claim, votes).length > 0)}
 			title={
 				claim.trusted ? (
 					approvalLabel
@@ -314,8 +358,8 @@ function ClaimMergeBox({ claim }: { claim: Claim }) {
 			}
 		>
 			{claim.attention
-				? `Waiting on your decision: ${claim.attention.agent}'s question is above.`
-				: claimStatus(claim).description}
+				? `Waiting on ${answerable ? "your decision" : "a person"}: ${claim.attention.agent}'s question is above.`
+				: status.description}
 		</MergeBox>
 	);
 }
@@ -347,16 +391,20 @@ function EndingMergeBox({ ending, branch, repo }: { ending: ChangeEnding; branch
 
 function MergeStatus({
 	claim,
+	votes,
+	answerable,
 	ending,
 	branch,
 	repo,
 }: {
 	claim: Claim | undefined;
+	votes: Vote[];
+	answerable: boolean;
 	ending: ChangeEnding | null;
 	branch: string;
 	repo: string;
 }) {
-	if (claim) return <ClaimMergeBox claim={claim} />;
+	if (claim) return <ClaimMergeBox claim={claim} votes={votes} answerable={answerable} />;
 	if (ending) return <EndingMergeBox ending={ending} branch={branch} repo={repo} />;
 	return null;
 }
@@ -439,15 +487,18 @@ export function ChangePage({
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
 	const ending = history ? changeEnding(history) : null;
-	const status = statusOf(claim, history);
 	const agent = record?.agent || ending?.release.agent || identityName(record?.by) || "agent";
 	const title = (record?.intent ?? "").split("\n")[0]?.trim() || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
+	const status = statusOf(claim, history, votes);
 	// A change merging a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;
 	const timeline = history ? buildTimeline(history, repo).filter((item) => item.kind !== "opened") : [];
-	const mergeable = claim && merge && claim.approval.approved && !claim.waitsOn?.length;
+	const mergeable =
+		claim && merge && claim.approval.approved && !claim.waitsOn?.length && cleanHead(claim, votes, history?.merge);
+	// Whether the reader can answer an agent's question here: the vote form shows, on a pushed commit.
+	const answerable = !!(claim?.head && api && canVote);
 	// What comes once it's read fades in: the change in place of "Loading…", its history in place of the latest push,
 	// and the other tab's content; what's there from the start comes with the page's own fade.
 	const missing = !record && !ending;
@@ -481,7 +532,9 @@ export function ChangePage({
 	const conversation = (
 		<div className="grid grid-cols-[minmax(0,1fr)_260px] items-start gap-8 to-900:grid-cols-[minmax(0,1fr)] to-900:gap-6">
 			<div className="grid min-w-0 gap-3.5">
-				{claim?.attention ? <AttentionCallout attention={claim.attention} /> : null}
+				{claim?.attention ? (
+					<AttentionCallout attention={claim.attention} answerable={answerable} pushed={!!claim.head} repo={repo} />
+				) : null}
 				<OpeningComment agent={agent} record={record} />
 				{history === undefined ? (
 					<p className="m-0 ml-11 text-ui text-muted-foreground to-720:ml-0">Loading history…</p>
@@ -491,7 +544,7 @@ export function ChangePage({
 				{claim && api && canVote ? (
 					<VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} className={INDENT} />
 				) : null}
-				<MergeStatus claim={claim} ending={ending} branch={branch} repo={repo} />
+				<MergeStatus claim={claim} votes={votes} answerable={answerable} ending={ending} branch={branch} repo={repo} />
 			</div>
 			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
 		</div>

@@ -5,6 +5,7 @@ import { useStagger } from "../hooks/useStagger";
 import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
+import { roleName } from "../lib/roles";
 import type { TimelineItem, TimelineKind } from "../lib/timeline";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
@@ -78,12 +79,12 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 			>
 				{review.by ? (
 					<>
-						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer){" "}
+						<strong>{identityName(review.by)}</strong> ({roleName(review.reviewer)}){" "}
 						{approved ? "approved these changes" : "requested changes"}
 					</>
 				) : (
 					<>
-						<strong>{review.reviewer}</strong> reviewer {approved ? "approved these changes" : "requested changes"}
+						<strong>{roleName(review.reviewer)}</strong> {approved ? "approved these changes" : "requested changes"}
 					</>
 				)}
 				{review.head ? (

@@ -15,6 +15,7 @@ import {
 	shardingSummary,
 	votesShardingSummary,
 	type Claim,
+	type Vote,
 } from "../lib/claimStatus";
 import { leaseWords } from "../lib/lease";
 import { shortSha, briefPaths } from "../lib/model";
@@ -100,8 +101,20 @@ const INLINE_ICON = "inline -mb-px mr-0.75 align-baseline";
  * One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals.
  * Under the pointer its row lights, fading in and out (an overlay's opacity: a mixed color doesn't transition well).
  */
-function ChangeRow({ claim, repo, now, arrived }: { claim: Claim; repo: string; now?: number; arrived: boolean }) {
-	const status = claimStatus(claim);
+function ChangeRow({
+	claim,
+	votes,
+	repo,
+	now,
+	arrived,
+}: {
+	claim: Claim;
+	votes: Vote[];
+	repo: string;
+	now?: number;
+	arrived: boolean;
+}) {
+	const status = claimStatus(claim, votes);
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
@@ -172,13 +185,32 @@ function Bumping({ count }: { count: number }) {
 }
 
 /** The rows of a list that has some: those that come after it first showed fade in as they do. */
-function ChangeRows({ claims, repo, now, fades }: { claims: Claim[]; repo: string; now?: number; fades: boolean }) {
+function ChangeRows({
+	claims,
+	votes,
+	repo,
+	now,
+	fades,
+}: {
+	claims: Claim[];
+	votes: Vote[];
+	repo: string;
+	now?: number;
+	fades: boolean;
+}) {
 	const arrived = useArrivals(claims.map((claim) => claim.change));
 	const staggers = useStagger(claims.length > 0);
 	return (
 		<ul className={cn("m-0 list-none p-0", staggers ? "stagger" : fades && "animate-fade")}>
 			{claims.map((claim) => (
-				<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} arrived={arrived(claim.change)} />
+				<ChangeRow
+					key={claim.change}
+					claim={claim}
+					votes={votes}
+					repo={repo}
+					now={now}
+					arrived={arrived(claim.change)}
+				/>
 			))}
 		</ul>
 	);
@@ -234,7 +266,7 @@ export function ChangeList({
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
 				</Empty>
 			) : (
-				<ChangeRows key={shown} claims={claims} repo={repo} now={now} fades={fades} />
+				<ChangeRows key={shown} claims={claims} votes={snapshot.votes} repo={repo} now={now} fades={fades} />
 			)}
 		</Box>
 	);
