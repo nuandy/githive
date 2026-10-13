@@ -277,7 +277,16 @@ function RepoTabContent({
 	}
 	switch (current) {
 		case "audit":
-			return <AuditTab snapshot={snapshot} error={auditError} onRetry={onAuditRetry} />;
+			return (
+				<AuditWithHistory
+					repo={repo}
+					branch={branch}
+					snapshot={snapshot}
+					api={api}
+					error={auditError}
+					onRetry={onAuditRetry}
+				/>
+			);
 		case "hive":
 			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "history":
@@ -355,6 +364,17 @@ function ChangesTab({
 			/>
 		</>
 	);
+}
+
+/** The Audit tab, with what's landed on the project's branch, so a review of a landed change names it. */
+function AuditWithHistory({
+	repo,
+	branch,
+	api,
+	...props
+}: Omit<Parameters<typeof AuditTab>[0], "landed"> & { branch: string; api: RepoPageApi }) {
+	const history = usePoll(api.history ? `history:${repo}:${branch}` : null, () => api.history!(repo, branch), 60_000);
+	return <AuditTab repo={repo} landed={history.data?.changes} {...props} />;
 }
 
 /** By the repo's name once a stretch of work has landed and nothing's open: that it's done, and how much. */

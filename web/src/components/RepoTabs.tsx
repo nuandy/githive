@@ -1,10 +1,11 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { RepoAudit, RepoLanding, RepoSnapshot } from "../api";
+import type { LandedChange, RepoAudit, RepoLanding, RepoSnapshot } from "../api";
 import { useAnnouncer } from "../hooks/useAnnouncer";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { identityName } from "../lib/agent";
+import { changeAt, violationWords } from "../lib/auditWords";
 import {
 	activeWords,
 	arrivalWords,
@@ -28,7 +29,7 @@ import {
 	type Vote,
 } from "../lib/claimStatus";
 import { leaseWords } from "../lib/lease";
-import { shortSha, briefPaths } from "../lib/model";
+import { briefPaths, shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -468,7 +469,16 @@ function useArrivalsSaid(open: Claim[], branch: string, say: (words: string) => 
 const AUDIT_ROW = "flex items-start gap-2.5 border-t border-border px-0.5 py-3 wrap-anywhere";
 const AUDIT_ICON = "mt-0.5 inline-flex shrink-0";
 
-function Violations({ title, violations }: { title: string; violations: RepoAudit["violations"] }) {
+/** A commit's short hash, linked to the code at it. */
+function CommitLink({ repo, commit }: { repo: string; commit: string }) {
+	return (
+		<a href={href.code(repo, "", commit)}>
+			<code>{shortSha(commit)}</code>
+		</a>
+	);
+}
+
+function Violations({ repo, title, violations }: { repo: string; title: string; violations: RepoAudit["violations"] }) {
 	const changed = useChanged(violations.length);
 	const staggers = useStagger(violations.length > 0);
 	return (
@@ -481,26 +491,28 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 			</BoxHeader>
 			<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 				{violations.map((violation, index) => (
-					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} violation={violation} />
+					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} repo={repo} violation={violation} />
 				))}
 			</ul>
 		</Box>
 	);
 }
 
-/** A rule broken: by whom, in which commit, what was wrong, and the commit that resolved it, if one has. */
-function ViolationRow({ violation }: { violation: RepoAudit["violations"][number] }) {
+/**
+ * A rule broken, in words (auditWords.ts): by whom, in which commit, what was wrong, and, while it's open, what
+ * someone can do about it; once resolved, the commit that resolved it. Each commit links to the code at it.
+ */
+function ViolationRow({ repo, violation }: { repo: string; violation: RepoAudit["violations"][number] }) {
 	const by = violation.by ? identityName(violation.by) : "unverified";
+	const { words, remedy } = violationWords(violation.rule);
 	return (
 		<li className={AUDIT_ROW}>
 			<span className={cn(AUDIT_ICON, violation.resolvedBy ? "text-neutral" : "text-bad")}>
 				<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
 			</span>
-			<div>
+			<div className="min-w-0">
 				<p className="m-0">
-					<strong>{violation.rule}</strong> by {violation.author}
-					<span className="text-muted-foreground"> ({by})</span>
-					{" in"} <code>{shortSha(violation.commit)}</code>
+					<strong>{words}</strong>
 					{violation.resolvedBy ? (
 						<>
 							{" "}
@@ -508,53 +520,93 @@ function ViolationRow({ violation }: { violation: RepoAudit["violations"][number
 						</>
 					) : null}
 				</p>
-				<p className="mt-0.5 mb-0 text-muted-foreground">{violation.detail}</p>
+				<p className="mt-0.5 mb-0 text-ui text-muted-foreground">
+					{violation.author} <span>({by})</span> in <CommitLink repo={repo} commit={violation.commit} />
+					{" · "}
+					<code className="text-caption">{violation.rule}</code>
+				</p>
+				<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{violation.detail}</p>
 				{violation.resolvedBy ? (
-					<p className="mt-0.5 mb-0 text-muted-foreground">resolved by {shortSha(violation.resolvedBy)}</p>
-				) : null}
+					<p className="mt-0.5 mb-0 text-ui text-muted-foreground">
+						Resolved by <CommitLink repo={repo} commit={violation.resolvedBy} />
+					</p>
+				) : (
+					<p className="mt-1.5 mb-0 max-w-measure text-ui">
+						<strong className="font-semibold">What to do:</strong> {remedy}
+					</p>
+				)}
 			</div>
 		</li>
 	);
 }
 
-/** The reviews recorded, newest as the snapshot lists them; one recorded since they first showed fades in. */
-function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
+/**
+ * The reviews recorded, newest as the snapshot lists them, each naming the change it reviewed where its commit is a
+ * change's head (open, or landed as History has it); one recorded since they first showed fades in.
+ */
+function RecentReviews({
+	repo,
+	votes,
+	claims,
+	landed,
+}: {
+	repo: string;
+	votes: RepoSnapshot["votes"];
+	claims: RepoSnapshot["claims"];
+	landed: Pick<LandedChange, "change" | "title" | "head">[];
+}) {
 	const key = (vote: RepoSnapshot["votes"][number]) => `${vote.reviewer}-${vote.commit}-${vote.at}`;
 	const arrived = useArrivals(votes.map(key));
 	const staggers = useStagger(votes.length > 0);
 	if (votes.length === 0) return <p className="my-3.75 px-0.5 py-3 text-muted-foreground">No reviews yet.</p>;
 	return (
 		<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
-			{votes.map((vote) => (
-				<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
-					<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>
-						<Icon name={vote.verdict === "approve" ? "check" : "x"} />
-					</span>
-					<div>
-						<p className="m-0">
-							<strong>{vote.reviewer}</strong> <span className="text-muted-foreground">({vote.role})</span>{" "}
-							{vote.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(vote.commit)}</code>
-							{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
-							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
-							{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
-						</p>
-						{vote.evidence ? (
-							<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
-						) : null}
-					</div>
-				</li>
-			))}
+			{votes.map((vote) => {
+				const change = changeAt(vote.commit, claims, landed);
+				return (
+					<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
+						<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>
+							<Icon name={vote.verdict === "approve" ? "check" : "x"} />
+						</span>
+						<div className="min-w-0">
+							<p className="m-0">
+								<strong>{vote.reviewer}</strong> <span className="text-muted-foreground">({vote.role})</span>{" "}
+								{vote.verdict === "approve" ? "approved" : "rejected"}{" "}
+								{change ? (
+									<>
+										<a href={href.change(repo, change.change)}>{shortTitle(change.title)}</a> at{" "}
+									</>
+								) : null}
+								<CommitLink repo={repo} commit={vote.commit} />
+								{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
+								<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
+								{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
+							</p>
+							{vote.evidence ? (
+								<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
+							) : null}
+						</div>
+					</li>
+				);
+			})}
 		</ul>
 	);
 }
 
-/** The Audit tab: rules broken on the project's branch, read from Git, and the reviews recorded. */
+/**
+ * The Audit tab: rules broken on the project's branch, read from Git, each in words with what to do, and the reviews
+ * recorded, each naming its change. `landed` (History's) names the changes reviews of landed heads were for.
+ */
 export function AuditTab({
+	repo,
 	snapshot,
+	landed = [],
 	error,
 	onRetry,
 }: {
+	repo: string;
 	snapshot: RepoSnapshot;
+	landed?: Pick<LandedChange, "change" | "title" | "head">[];
 	/** Why the audit couldn't be read, while there's none to show. */
 	error?: string;
 	onRetry?: () => void;
@@ -590,13 +642,13 @@ export function AuditTab({
 					</p>
 				</div>
 			</Callout>
-			{open.length > 0 ? <Violations title="Open" violations={open} /> : null}
-			{resolved.length > 0 ? <Violations title="Resolved" violations={resolved} /> : null}
+			{open.length > 0 ? <Violations repo={repo} title="Open" violations={open} /> : null}
+			{resolved.length > 0 ? <Violations repo={repo} title="Resolved" violations={resolved} /> : null}
 			<Box>
 				<BoxHeader>
 					<h3 className="text-body-sm">Recent reviews</h3>
 				</BoxHeader>
-				<RecentReviews votes={votes} />
+				<RecentReviews repo={repo} votes={votes} claims={snapshot.claims} landed={landed} />
 			</Box>
 		</div>
 	);

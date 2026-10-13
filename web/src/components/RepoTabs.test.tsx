@@ -21,24 +21,57 @@ describe("a repo", () => {
 	});
 
 	it("shows the audit, with open and resolved violations apart, and recent reviews", () => {
-		const html = renderToStaticMarkup(<AuditTab snapshot={snapshot} />);
+		const html = renderToStaticMarkup(<AuditTab repo="acme/docs-site" snapshot={snapshot} />);
+		const text = visibleText(html);
 		expect(html).toContain("1 open violation");
-		expect(html).toContain("undeclared");
-		expect(html).toMatch(/resolved by ee872a3/);
-		// A resolved violation says so in a badge, at full contrast, rather than fading.
+		// A rule in words, its id beside for whoever looks it up, and what to do about it while it's open.
+		expect(html).toContain("<strong>Landed without GitHive&#x27;s records</strong>");
+		expect(html).toContain('<code class="text-caption">undeclared</code>');
+		expect(text).toMatch(/What to do: It names no change, claims or votes.*revert it/);
+		// Each commit links to the code at it: the violation's and the one that resolved it.
+		expect(html).toContain('in <a href="#/repos/acme/docs-site/code?ref=41664f1dcccc"><code>41664f1</code></a>');
+		expect(html).toMatch(
+			/Resolved by <a href="#\/repos\/acme\/docs-site\/code\?ref=ee872a30bbbb"><code>ee872a3<\/code><\/a>/,
+		);
+		expect(text).toContain("Changed a file another change holds");
+		// A resolved violation says so in a badge, at full contrast, rather than fading, and needs nothing done.
 		expect(html).toMatch(/data-slot="badge"[^>]*>Resolved</);
 		expect(html).not.toMatch(/opacity-\d/);
+		expect(text.match(/What to do/g)).toHaveLength(1);
 		expect(html).toContain("rev-1");
 		expect(html).toContain("suite passes");
 		expect(
-			renderToStaticMarkup(<AuditTab snapshot={{ ...snapshot, audit: { merges: 1, open: 0, violations: [] } }} />),
+			renderToStaticMarkup(
+				<AuditTab repo="acme/docs-site" snapshot={{ ...snapshot, audit: { merges: 1, open: 0, violations: [] } }} />,
+			),
 		).toMatch(/No violations/);
+	});
+
+	it("names the change a review was for, open or landed, and links its commit", () => {
+		const html = renderToStaticMarkup(<AuditTab repo="acme/docs-site" snapshot={snapshot} />);
+		expect(html).toContain(
+			'approved <a href="#/repos/acme/docs-site/changes/c-1">Rewrite the C section</a> at <a href="#/repos/acme/docs-site/code?ref=b1c2d3e4f5a6"><code>b1c2d3e</code></a>',
+		);
+		const landed = renderToStaticMarkup(
+			<AuditTab
+				repo="acme/docs-site"
+				snapshot={{ ...snapshot, claims: [] }}
+				landed={[{ change: "c-0", title: "Write section B", head: "b1c2d3e4f5a6" }]}
+			/>,
+		);
+		expect(landed).toContain('approved <a href="#/repos/acme/docs-site/changes/c-0">Write section B</a> at');
+		// A commit no change names: its hash alone, linked.
+		const unknown = renderToStaticMarkup(<AuditTab repo="acme/docs-site" snapshot={{ ...snapshot, claims: [] }} />);
+		expect(unknown).toContain(
+			'approved <a href="#/repos/acme/docs-site/code?ref=b1c2d3e4f5a6"><code>b1c2d3e</code></a>',
+		);
 	});
 
 	it("stops replaying once the audit fails, and says why", () => {
 		const text = visibleText(
 			renderToStaticMarkup(
 				<AuditTab
+					repo="acme/docs-site"
 					snapshot={{ ...snapshot, audit: undefined }}
 					error="the records couldn't be read"
 					onRetry={() => undefined}
