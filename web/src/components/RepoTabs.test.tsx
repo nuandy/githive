@@ -70,7 +70,7 @@ describe("a repo", () => {
 		expect(granted).toContain("security: security-1, people.");
 	});
 
-	it("says in the header and settings how claims are kept, sharded or in one record", () => {
+	it("says in settings how claims are kept, sharded or in one record, and not in the header", () => {
 		const page = (sharding: typeof snapshot.sharding) =>
 			renderToStaticMarkup(
 				<RepoPage
@@ -81,12 +81,10 @@ describe("a repo", () => {
 				/>,
 			);
 		const flat = page("on demand");
-		// One record is a quiet outline; sharded stands out in the link's blue.
-		expect(flat).toMatch(/class="[^"]*\btext-muted-foreground\b[^"]*"[^>]*>One claims record/);
-		expect(flat).not.toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>One claims record/);
+		// The header keeps to the repo's name, who can see it and whether it's live: how records are kept is Settings'.
+		expect(flat).not.toMatch(/One claims record|Sharded claims/);
 		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
 		const sharded = page({ since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" });
-		expect(sharded).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
 		const votes = renderToStaticMarkup(
 			<RepoPage
@@ -100,7 +98,7 @@ describe("a repo", () => {
 				api={stubApi()}
 			/>,
 		);
-		expect(votes).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded votes/);
+		expect(votes).not.toMatch(/>Sharded votes/);
 		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
 		// Older servers don't say: no badge, no line.
 		const older = page(undefined);

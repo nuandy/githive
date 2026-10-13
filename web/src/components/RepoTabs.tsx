@@ -406,7 +406,7 @@ export function AuditTab({
 	const resolved = audit.violations.filter((violation) => violation.resolvedBy);
 	const openHeadline = open.length ? counted(open.length, "open violation") : "No open violations";
 	return (
-		<div className={cn("grid max-w-225 gap-4", replayed && "animate-fade")}>
+		<div className={cn("grid gap-4", replayed && "animate-fade")}>
 			<Callout tone={open.length ? "bad" : "good"}>
 				<Icon
 					name={open.length ? "alert" : "check-circle"}
@@ -521,7 +521,7 @@ export function SettingsTab({
 	const sharding = shardingSummary(snapshot);
 	const votesSharding = votesShardingSummary(snapshot);
 	return (
-		<div className="grid max-w-205 gap-4">
+		<div className="grid gap-4">
 			<Callout className="mb-2 text-ui">
 				<Icon name="alert" className="text-muted-foreground" />
 				<span>

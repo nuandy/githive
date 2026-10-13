@@ -121,7 +121,7 @@ export function AgentsTab({
 	hosted?: HostedAgentsApi;
 }) {
 	return (
-		<div className="grid max-w-225 min-w-0 gap-4">
+		<div className="grid min-w-0 gap-4">
 			<p className="m-0 text-muted-foreground">
 				Repos keep no list of agents: these come from the claims in force and the latest votes.
 			</p>

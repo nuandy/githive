@@ -23,7 +23,6 @@ import { GitHubSettings } from "./GitHubSettings";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { holdersFromSnapshot } from "../lib/claimsMap";
-import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
@@ -38,10 +37,9 @@ import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
-import { Page } from "./Page";
-import { RepoHeader } from "./RepoHeader";
+import { COLUMN, Main } from "./Page";
+import { type HeaderLink, RepoHeader } from "./RepoHeader";
 import { SiteLink } from "./SiteLink";
-import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
 import { Box, Callout } from "./ui/box";
 import { Button } from "./ui/button";
@@ -102,6 +100,8 @@ export interface RepoPageProps {
 	view: RepoView;
 	/** Its claims and votes; null when GitHive hasn't started on it yet (its code and settings still show). */
 	snapshot: RepoSnapshot | null;
+	/** Its snapshot isn't read yet: the header and tabs show, from the address, over "Loading…". */
+	loading?: boolean;
 	/** On a change page: the change's history (undefined while loading, null if unreadable). */
 	changeHistory?: ChangeHistory | null;
 	/** Why the audit couldn't be read, and reading it again: the Audit tab says so in its place. */
@@ -361,11 +361,70 @@ function AllLandedBadge({ stretch }: { stretch: LandingStretch }) {
 	);
 }
 
+/** Why a tab has nothing to show before GitHive starts on the repo. */
+export const NOT_STARTED_TAB = "Shows once GitHive starts on this repo";
+
+/**
+ * A repo's tabs, in order (the keys 1 to 8 choose them). Before GitHive starts on it, those that show what agents do
+ * are dimmed; while its snapshot loads, they show without counts.
+ */
+export function repoTabs(repo: string, snapshot: RepoSnapshot | null | undefined): TabItem[] {
+	const notStarted = snapshot === null;
+	const unavailable = notStarted ? { unavailable: NOT_STARTED_TAB } : {};
+	return [
+		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
+		{
+			id: "changes",
+			label: "Changes",
+			icon: "pull",
+			href: href.repo(repo, "changes"),
+			count: snapshot?.claims.length,
+			...unavailable,
+		},
+		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
+		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims"), ...unavailable },
+		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
+		{ id: "agents", label: "Agents", icon: "user", href: href.repo(repo, "agents"), ...unavailable },
+		{
+			id: "audit",
+			label: "Audit",
+			icon: "shield",
+			href: href.repo(repo, "audit"),
+			count: snapshot?.audit?.open || undefined,
+			...unavailable,
+		},
+		{ id: "settings", label: "Settings", icon: "settings", href: href.repo(repo, "settings") },
+	];
+}
+
+/** The header's links, for its ⋯ menu on a phone: the repo's site, its GitHub repo and its standing pull request. */
+function headerLinks(repo: string, snapshot: RepoSnapshot | null, access: RepoAccess | undefined): HeaderLink[] {
+	const links: HeaderLink[] = [];
+	if (access?.visibility === "public")
+		links.push({ label: "View site", href: href.site(repo), icon: "eye", external: true });
+	const github = snapshot?.github;
+	if (github) {
+		links.push({
+			label: `${github.repo} on GitHub`,
+			href: `https://github.com/${github.repo}`,
+			icon: "repo",
+			external: true,
+		});
+		if (github.sync === "pr" && github.pull)
+			links.push({ label: `Pull request #${github.pull.number}`, href: github.pull.url, icon: "pull", external: true });
+	}
+	return links;
+}
+
+// Under the repo's tabs, which stick under the top bar, what sticks in a tab starts below them.
+const UNDER_TABS = "[--topbar-height:calc(var(--bar-height)+var(--repo-tabs-height))]";
+
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
 export function RepoPage({
 	repo,
 	view,
 	snapshot,
+	loading = false,
 	changeHistory,
 	auditError,
 	onAuditRetry,
@@ -382,25 +441,12 @@ export function RepoPage({
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
-	const tabs: TabItem[] = [
-		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
-		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo, "changes"), count: snapshot?.claims.length },
-		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
-		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
-		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
-		{ id: "agents", label: "Agents", icon: "user", href: href.repo(repo, "agents") },
-		{
-			id: "audit",
-			label: "Audit",
-			icon: "shield",
-			href: href.repo(repo, "audit"),
-			count: snapshot?.audit?.open || undefined,
-		},
-		{ id: "settings", label: "Settings", icon: "settings", href: href.repo(repo, "settings") },
-	];
+	const tabs = repoTabs(repo, loading ? undefined : snapshot);
 	const current = view.kind === "change" ? "changes" : view.tab;
-	// A tab's content fades in as you switch to it; the first one comes in with the page.
-	const switched = useChanged(current);
+	// A tab's content fades in as you switch to it, or as it takes the place of "Loading…"; the first one comes in with
+	// the page.
+	const shown = `${current}${loading ? ":loading" : ""}`;
+	const switched = useChanged(shown);
 	const admin = manage ? (
 		<RepoAdmin
 			repo={repo}
@@ -410,40 +456,48 @@ export function RepoPage({
 			onDeleted={() => onDeleted?.()}
 		/>
 	) : undefined;
+	const site = access?.visibility === "public";
 	return (
-		<>
+		<Main className="flex flex-1 flex-col">
 			<RepoHeader
 				name={repo}
 				heading={view.kind !== "change"}
+				visibility={access?.visibility}
 				badges={
-					snapshot ? (
-						<>
-							<ShardingBadge summary={recordsBadge(snapshot)} />
-							{!snapshot.claims.length && justFinished(lastStretch) ? <AllLandedBadge stretch={lastStretch} /> : null}
-						</>
+					snapshot && !snapshot.claims.length && justFinished(lastStretch) ? (
+						<AllLandedBadge stretch={lastStretch} />
 					) : undefined
 				}
 				aside={
-					<>
-						{access?.visibility === "public" ? <SiteLink repo={repo} /> : null}
-						{snapshot?.github ? (
-							<GitHubLink
-								repo={repo}
-								github={snapshot.github}
-								openPull={canWrite(access?.level) ? api.githubPull : undefined}
-								again={canWrite(access?.level) ? api.githubAgain : undefined}
-								onChanged={onSettingsChanged}
-							/>
-						) : null}
-					</>
+					site || snapshot?.github ? (
+						<>
+							{/* On a phone, the site and GitHub's links are in the ⋯ menu. */}
+							{site ? (
+								<span className="to-560:hidden">
+									<SiteLink repo={repo} />
+								</span>
+							) : null}
+							{snapshot?.github ? (
+								<GitHubLink
+									repo={repo}
+									github={snapshot.github}
+									openPull={canWrite(access?.level) ? api.githubPull : undefined}
+									again={canWrite(access?.level) ? api.githubAgain : undefined}
+									onChanged={onSettingsChanged}
+								/>
+							) : null}
+						</>
+					) : undefined
 				}
+				links={headerLinks(repo, snapshot, access)}
 				tabs={tabs}
 				current={current}
 				homeHref={href.repo(repo)}
-				live={liveStatus}
+				// Before GitHive starts on it, there's nothing live to show.
+				live={snapshot ? liveStatus : "off"}
 			/>
-			<Page>
-				{!snapshot ? (
+			<div className={cn(COLUMN, UNDER_TABS)}>
+				{!snapshot && !loading ? (
 					<NotStarted
 						repo={repo}
 						canStart={access?.level === "admin"}
@@ -451,25 +505,31 @@ export function RepoPage({
 						onStarted={onStarted}
 					/>
 				) : null}
-				<div key={current} className={switched ? "animate-fade" : undefined}>
-					<RepoTabContent
-						repo={repo}
-						view={view}
-						current={current}
-						snapshot={snapshot}
-						changeHistory={changeHistory}
-						auditError={auditError}
-						onAuditRetry={onAuditRetry}
-						branch={branch}
-						api={api}
-						access={access}
-						manage={manage}
-						admin={admin}
-						voting={voting}
-						onSettingsChanged={onSettingsChanged}
-					/>
+				<div key={shown} className={switched ? "animate-fade" : undefined}>
+					{loading ? (
+						<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
+							Loading {repo}…
+						</p>
+					) : (
+						<RepoTabContent
+							repo={repo}
+							view={view}
+							current={current}
+							snapshot={snapshot}
+							changeHistory={changeHistory}
+							auditError={auditError}
+							onAuditRetry={onAuditRetry}
+							branch={branch}
+							api={api}
+							access={access}
+							manage={manage}
+							admin={admin}
+							voting={voting}
+							onSettingsChanged={onSettingsChanged}
+						/>
+					)}
 				</div>
-			</Page>
-		</>
+			</div>
+		</Main>
 	);
 }

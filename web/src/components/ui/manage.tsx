@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../../lib/utils";
-import { Page } from "../Page";
+import { Page, PageHeader } from "../Page";
 
 // The pages that manage people and access (an organization, the Admin page, a repo's Access and Settings, your
 // agents) share their rows and forms: a row's who or what on the left and its actions on the right, wrapping under it
@@ -50,17 +50,9 @@ export function ManagePage({ className, ...props }: ComponentProps<typeof Page>)
 	return <Page className={cn("grid gap-5", className)} {...props} />;
 }
 
-/** A managing page's header: its title and a line under it, and its actions at the far end. */
+/** A managing page's header: the page's header (its title and a line under it, and its actions at the far end). */
 export function ManageHeader({ title, lede, actions }: { title: string; lede: ReactNode; actions?: ReactNode }) {
-	return (
-		<header className="flex flex-wrap items-start justify-between gap-3">
-			<div>
-				<h1 className="text-display-sm tracking-[-0.01em]">{title}</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">{lede}</p>
-			</div>
-			{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
-		</header>
-	);
+	return <PageHeader className="mb-0" title={title} description={lede} actions={actions} />;
 }
 
 /** A section's title on a managing page. */

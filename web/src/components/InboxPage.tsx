@@ -4,7 +4,7 @@ import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Badge, Counter } from "./ui/badge";
 import { Box, BoxHeader, Callout } from "./ui/box";
 import { Empty } from "./ui/empty";
@@ -13,12 +13,7 @@ import { Empty } from "./ui/empty";
 export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loaded: boolean; error?: string }) {
 	return (
 		<Page>
-			<div className="mb-4">
-				<h1 className="text-display tracking-[-0.01em]">Inbox</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					What the agents can't move forward without you, in every repo.
-				</p>
-			</div>
+			<PageHeader title="Inbox" description="What the agents can't move forward without you, in every repo." />
 			<InboxBody groups={groups} loaded={loaded} error={error} />
 		</Page>
 	);

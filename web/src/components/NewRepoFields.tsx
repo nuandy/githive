@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Gitignore, MyOrg } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { cn } from "../lib/utils";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Fold } from "./ui/collapse";
 import { Field, FieldHint, Input, Label, NativeSelect } from "./ui/field";
 
@@ -36,13 +36,11 @@ const LEGEND = "px-0.5 text-body-sm font-semibold";
 export function NewRepoFrame({ children }: { children: ReactNode }) {
 	return (
 		<Page className="grid gap-5">
-			<header>
-				<h1 className="text-display-sm tracking-[-0.01em]">New repository</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in
-					its Settings.
-				</p>
-			</header>
+			<PageHeader
+				className="mb-0"
+				title="New repository"
+				description="GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in its Settings."
+			/>
 			{children}
 		</Page>
 	);

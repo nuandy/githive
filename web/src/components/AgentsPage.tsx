@@ -11,7 +11,7 @@ import { useStagger } from "../hooks/useStagger";
 import { AgentRow, type RowShared } from "./AgentRow";
 import { ConfirmButton } from "./Confirm";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Box, BoxHeader, Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input } from "./ui/field";
@@ -101,13 +101,16 @@ export function AgentsView({
 
 	return (
 		<Page className="grid gap-4">
-			<header>
-				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Agents</h1>
-				<p className="m-0 text-muted-foreground">
-					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
-					writes is attributed to it, under you.
-				</p>
-			</header>
+			<PageHeader
+				className="mb-0"
+				title="Agents"
+				description={
+					<>
+						Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
+						writes is attributed to it, under you.
+					</>
+				}
+			/>
 
 			{error ? (
 				<Callout tone="bad" className="animate-appear" role="alert">

@@ -20,7 +20,7 @@ import { InboxPage } from "./components/InboxPage";
 import { NewRepoPage } from "./components/NewRepoPage";
 import { OrgPage } from "./components/OrgPage";
 import { OrgsPage } from "./components/OrgsPage";
-import { EmptyPage, Page, Shell, SkipLink } from "./components/Page";
+import { EmptyPage, Shell, SkipLink } from "./components/Page";
 import { PageBoundary } from "./components/PageBoundary";
 import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
@@ -38,16 +38,6 @@ import { buildRepoRows } from "./lib/repos";
 import { href, type RepoTab, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import { cn } from "./lib/utils";
-
-function Loading({ what }: { what: string }) {
-	return (
-		<Page>
-			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
-				Loading {what}…
-			</p>
-		</Page>
-	);
-}
 
 /** What couldn't be refreshed, in a bar under the top bar: it folds open, and folds away once all is well again. */
 function PageErrors({ errors }: { errors: string[] }) {
@@ -112,8 +102,7 @@ export function App() {
 	if (me === undefined) {
 		if (!bootError) return null;
 		return (
-			<EmptyPage role="alert">
-				<h1>GitHive didn't answer</h1>
+			<EmptyPage role="alert" title="GitHive didn't answer">
 				<p>{bootError}. Reload the page to try again.</p>
 			</EmptyPage>
 		);
@@ -301,15 +290,17 @@ function RepoRoute(props: {
 	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
 	const ready = !!snapshot.data || notStarted;
-	const phase = ready ? "page" : snapshot.error ? "unavailable" : "loading";
-	// What takes the place of "Loading…" fades in; a page that's ready at once comes in with the page's own fade.
+	// While it loads, the page shows its header and tabs from the address, and its content takes the place of
+	// "Loading…" under them; a repo that can't be shown fades in in its place.
+	const phase = ready || !snapshot.error ? "page" : "unavailable";
 	const swapped = useChanged(phase);
 	let shown: ReactNode;
-	if (ready) {
+	if (phase === "page") {
 		shown = (
 			<RepoPage
 				repo={repo}
 				view={view}
+				loading={!ready}
 				snapshot={snapshot.data ? { ...snapshot.data, audit: audit.data } : null}
 				onStarted={() => {
 					snapshot.refresh();
@@ -334,13 +325,11 @@ function RepoRoute(props: {
 				}}
 			/>
 		);
-	} else if (!snapshot.error) {
-		shown = <Loading what={repo} />;
 	} else {
-		shown = <RepoUnavailable repo={repo} error={snapshot.error} />;
+		shown = <RepoUnavailable repo={repo} error={snapshot.error!} />;
 	}
 	return (
-		<div key={phase} className={cn("flex flex-col", swapped && "animate-fade")}>
+		<div key={phase} className={cn("flex flex-1 flex-col", swapped && "animate-fade")}>
 			{shown}
 		</div>
 	);
@@ -441,8 +430,7 @@ function tabTitle(route: Extract<Route, { page: "repo" }>): string[] {
 /** For pages that belong to a person signed in to GitHive, not an Access caller. */
 function ForPeople({ what }: { what: string }) {
 	return (
-		<EmptyPage>
-			<h1>{what} belong to people signed in to GitHive</h1>
+		<EmptyPage title={`${what} belong to people signed in to GitHive`}>
 			<p>
 				Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -453,8 +441,7 @@ function ForPeople({ what }: { what: string }) {
 
 function NotAnOperator() {
 	return (
-		<EmptyPage>
-			<h1>Admin is for GitHive's operators</h1>
+		<EmptyPage title="Admin is for GitHive's operators">
 			<p>
 				It's reached through Cloudflare Access, on GitHive's admin address.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -465,8 +452,7 @@ function NotAnOperator() {
 
 function NoAgentsHere() {
 	return (
-		<EmptyPage>
-			<h1>Agents belong to people signed in to GitHive</h1>
+		<EmptyPage title="Agents belong to people signed in to GitHive">
 			<p>
 				Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make some.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -481,8 +467,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 	const heading = hidden ? `There's no ${repo} you can see` : `${repo} isn't open for agents yet`;
 	const reason = hidden ? "It doesn't exist, or you aren't one of the people who can see it." : error;
 	return (
-		<EmptyPage>
-			<h1>{heading}</h1>
+		<EmptyPage title={heading}>
 			<p>
 				{reason} <a href={href.repos()}>Back to Repositories</a>.
 			</p>
@@ -492,8 +477,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 
 function PageNotFound() {
 	return (
-		<EmptyPage>
-			<h1>Page not found</h1>
+		<EmptyPage title="Page not found">
 			<p>
 				<a href={href.repos()}>Go to Repositories</a>.
 			</p>
