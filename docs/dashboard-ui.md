@@ -12,7 +12,9 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | The frame every page sits in (`Shell`, `Main`, `Page`, `PageHeader`, `EmptyPage`) | `web/src/components/Page.tsx` |
 | Routes, and views kept in the address (`readQuery`, `withQuery`) | `web/src/lib/routes.ts` |
 | Focus and scroll as the route changes (`useHashRoute`, `replaceHash`) | `web/src/hooks/useHashRoute.ts`, `lib/scrollMemory.ts` |
-| The keyboard's shortcuts, the ⌘K palette and their list | `lib/shortcuts.ts`, `lib/palette.ts`, `components/Keyboard.tsx` |
+| The keyboard's shortcuts, the ⌘K palette and their list | `lib/shortcuts.ts`, `lib/palette.ts`, `components/DashboardKeys.tsx`, `components/Keyboard.tsx` |
+| Focus back to what had it, for an overlay with no trigger | `useReturnFocus` in `web/src/hooks/` |
+| What loads as it's first shown, and "Loading…" in its place | `components/Lazy.tsx` |
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `ThemeMenu.tsx` |
 | Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) and `useAnnouncer` | `web/src/hooks/` |
@@ -147,12 +149,21 @@ Reach for `components/ui` before writing a control by hand:
 
 - **The decision box** (`DecisionBox`, from `lib/decision.ts`) is where a change is decided: its state, approvals per
   role and who gave each, the latest check on its head, a conflict with its branch, how many open changes its code
-  meets, and one primary action, Land now (confirmed first, naming what lands with it and the checks that run) or
-  Vote. Its ⋯ menu releases the claim. It's sticky in the sidebar beside every tab at 900px and up, under the header
-  below that, and it's `#decide` (focusable): `decide` brings it into view. Work its contents out in `lib/decision.ts`,
-  as pure functions, not in the component.
+  meets, and one primary action, Land now (confirmed first, naming what lands with it and the checks that run, as the
+  server gathers a batch: `landsWith`, sized as `lib/batchSize.ts` mirrors the server's) or Vote. Its ⋯ menu releases
+  the claim. Once landed or released, the action can't be pressed again, focus waits in the box, and the page reads the
+  change afresh. It's sticky in the sidebar beside every tab above 900px, under the header at 900px and below, and it's
+  `#decide` (focusable): `decide` focuses it, once per history entry (Back and Forward leave its scroll alone), and
+  scrolls to it only where it isn't sticky. Work its contents out in `lib/decision.ts`, as pure functions, not in the
+  component.
+- **The vote form** (`VoteForm`) starts as the role the change waits on, when the reader holds it, and says so when it
+  waits on one they can't give, and who can. What's half written is kept for the session per commit
+  (`lib/voteDraft.ts`), and sending it drops it.
+- While a vote or a release is sent, nothing in it is disabled (a disabled control drops focus to the page): its text
+  is `readOnly`, the form `aria-busy`, and its button `aria-disabled`.
 - **The Files tab** (`ChangeFiles`) folds each file, its lines drawn only while open, in `diff-add` and `diff-del`
-  (their `-strong` behind the line numbers), with git's hunk headers. `href.change(repo, id, "files", path)` opens one
+  (their `-strong` behind the line numbers), with git's hunk headers. The diff (up to about a megabyte) is read only on
+  this tab; its count stays on the tab once known for the push. `href.change(repo, id, "files", path)` opens one
   file; link a file of the change there, as Awareness and the Conflict panel do.
 - A person shows as "you" or "a person", never as a `person:` hash; their agents by their `<handle>/<agent>` names.
 
@@ -201,15 +212,22 @@ Everything is reached with Tab, and these save the trip (`?`, or Keyboard shortc
 | `⌘K` or `Ctrl-K` | Opens the palette: a repo, an open change in the repo shown, or a page |
 | `?` | Lists the shortcuts |
 
-Keys typed in a field, held with a modifier, or pressed in an open menu or dialog are left alone, but for ⌘K. The
-palette is a combobox over a listbox: arrow keys choose, Enter goes, Escape closes. A new shortcut is a case in
+Keys pressed in a field, anywhere in a form (a radio, a button), or in an open menu or dialog are left alone
+(`keysTaken`), and so are keys held with a modifier, but for ⌘K, which opens the palette from anywhere but over another
+dialog. The palette is a combobox over a listbox: arrow keys choose, Enter goes, Escape closes; it offers an operator
+Admin. It and the list of shortcuts have no trigger, so they give focus back to what had it as they close
+(`useReturnFocus`; the user menu's button, when the list opened from it), as a dialog a menu's item opens does. A new shortcut is a case in
 `readShortcut` (`lib/shortcuts.ts`) and a line in `SHORTCUTS` (`components/Keyboard.tsx`).
 
 ## Motion: nothing changes abruptly
 
 - State changes (hover, press, focus, selected) transition at `duration-fast`.
 - Going somewhere doesn't move anything: a page, a tab, and whatever replaces "Loading…" only fade in, quickly
-  (`animate-fade`), and the top bar, header and tabs stay still. A list's rows fade in one after another as it first
+  (`animate-fade`), and the top bar, header and tabs stay still. What most visits never need loads as it's first shown
+  (`React.lazy` in `Lazy`, `components/Lazy.tsx`): Admin, the org pages, your agents, New repository, signing in, a
+  repo's Settings, Code, History, Claims and Agents tabs, a change's Commits and Files, the palette and the list of
+  shortcuts. "Loading…" holds its place only after a moment (`LoadingLine`), so what loads at once never flashes it,
+  and what took its place fades in. A list's rows fade in one after another as it first
   shows (`stagger`, with `useStagger`), never again for a poll.
 - What arrives in a page that stays put (a new row, a message, a confirm) fades in rising a few pixels:
   `animate-appear`. What's there from a page's first render comes with that page's fade, so what fades in on its own
