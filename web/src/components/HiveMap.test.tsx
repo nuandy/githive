@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Goal } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
 import { ago, NOW, visibleText } from "../test/fixtures";
-import { HiveMap } from "./HiveMap";
+import { HiveMap, pickCell } from "./HiveMap";
 
 const FILES = [
 	"README.md",
@@ -110,5 +110,38 @@ describe("the hive map", () => {
 		expect(render({ cells: undefined })).toContain("Reading the tree…");
 		expect(render({ cells: undefined, error: "no commits" })).toContain("The tree couldn&#x27;t be read: no commits");
 		expect(render({ cells: { clusters: [], more: 0 } })).toContain("main has no files yet.");
+	});
+});
+
+describe("picking a cell", () => {
+	// Each step: the details open and the cell the goals are filtered to, then a click, a tap or Enter on a cell.
+	const play = (steps: string[]) => {
+		let opened: string | null = null;
+		let picked: string | undefined;
+		const seen: string[] = [];
+		for (const key of steps) {
+			const next = pickCell(opened, picked, key);
+			opened = next.opened;
+			if (next.filter) picked = picked === key ? undefined : key;
+			seen.push(`${opened ?? "-"}/${picked ?? "-"}`);
+		}
+		return seen;
+	};
+
+	it("opens a cell's details and filters to it, and a second pick closes both", () => {
+		expect(play(["a", "a"])).toEqual(["a/a", "-/-"]);
+	});
+
+	it("moves the details and the filter together from one cell to another", () => {
+		expect(play(["a", "b", "b"])).toEqual(["a/a", "b/b", "-/-"]);
+	});
+
+	it("opens the details again, keeping the filter, once they were closed another way (Escape)", () => {
+		// Escape closes the details and leaves the filter: details null, filter on the cell.
+		expect(pickCell(null, "b", "b")).toEqual({ opened: "b", filter: false });
+	});
+
+	it("closes the details without touching the filter once it was cleared elsewhere", () => {
+		expect(pickCell("a", undefined, "a")).toEqual({ opened: null, filter: false });
 	});
 });

@@ -245,8 +245,9 @@ export function HiveMap({
 	// Closed by a click elsewhere, focus stays where that click put it; closed by Escape, it comes back to the cell.
 	const outside = useRef(false);
 	const pick = (cell: Cell) => {
-		setOpened(picked === cell.key ? null : cell.key);
-		onPick(cell);
+		const next = pickCell(opened, picked, cell.key);
+		setOpened(next.opened);
+		if (next.filter) onPick(cell);
 	};
 
 	return (
@@ -349,8 +350,10 @@ export function HiveMap({
 						align={wide(anchor.current) ? "start" : "center"}
 						collisionPadding={12}
 						aria-label={cellPlace(openedCell)}
-						onInteractOutside={() => {
-							outside.current = true;
+						onInteractOutside={(event) => {
+							// A cell's own click moves the details to it, or closes them (see pick).
+							if ((event.target as Element | null)?.closest?.("[data-cell]")) event.preventDefault();
+							else outside.current = true;
 						}}
 						onCloseAutoFocus={(event) => {
 							event.preventDefault();
@@ -364,7 +367,7 @@ export function HiveMap({
 							cell={openedCell}
 							goals={goals ?? []}
 							picked={picked === openedCell.key}
-							onPick={() => pick(openedCell)}
+							onPick={() => onPick(openedCell)}
 							now={now}
 						/>
 					</PopoverContent>
@@ -372,6 +375,20 @@ export function HiveMap({
 			</Popover>
 		</section>
 	);
+}
+
+/**
+ * What a click, a tap or Enter on a cell does: its details open, or close if they're open, and the goals' filter
+ * follows them, on to the cell as they open and off it as they close. With another cell's details open, both move to
+ * this one. `filter` says whether the filter is to be switched (see HiveTab's onPick).
+ */
+export function pickCell(
+	opened: string | null,
+	picked: string | undefined,
+	key: string,
+): { opened: string | null; filter: boolean } {
+	const opening = opened !== key;
+	return { opened: opening ? key : null, filter: opening !== (picked === key) };
 }
 
 /** Whether the window a cell is in has room for its details beside it. */
