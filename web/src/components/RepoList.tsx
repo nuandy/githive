@@ -187,7 +187,7 @@ function RepoGroup(props: {
 function NoRepos({ canCreate }: { canCreate: boolean }) {
 	return (
 		<div className="px-6 py-10 text-center">
-			<Icon name="repo" size={32} className="inline align-baseline text-muted-foreground" />
+			<Icon name="repo" size={28} className="inline align-baseline text-muted-foreground" />
 			<h2 className="mt-3 mb-2 text-title">No repositories yet</h2>
 			<p className="mx-auto mt-0 mb-2 max-w-130 text-muted-foreground">
 				Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
@@ -198,7 +198,7 @@ function NoRepos({ canCreate }: { canCreate: boolean }) {
 				<div className="mt-4.5">
 					<Button asChild>
 						<a href={href.newRepo()}>
-							<Icon name="plus" size={15} /> New repository
+							<Icon name="plus" /> New repository
 						</a>
 					</Button>
 				</div>
@@ -255,7 +255,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 						</Button>
 						<Button asChild variant="primary">
 							<a href={href.newRepo()}>
-								<Icon name="plus" size={15} /> New repository
+								<Icon name="plus" /> New repository
 							</a>
 						</Button>
 					</div>

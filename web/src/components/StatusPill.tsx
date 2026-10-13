@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { ChangeStatus, StatusKind, Tone } from "../lib/changeStatus";
 import { cn } from "../lib/utils";
-import { Icon, type IconName } from "./Icon";
+import { Icon, type IconName, type IconSize } from "./Icon";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -37,7 +37,7 @@ export function StatusIcon({
 	size = 16,
 }: {
 	status: Pick<ChangeStatus, "kind" | "tone" | "label">;
-	size?: number;
+	size?: IconSize;
 }) {
 	return (
 		<Tooltip>
@@ -63,7 +63,7 @@ export function StatusPill({
 }) {
 	return (
 		<Badge tone={status.tone} solid={solid} size={size === "md" ? "default" : size}>
-			<Icon name={statusIconName(status.kind)} size={size === "lg" ? 16 : 13} />
+			<Icon name={statusIconName(status.kind)} size={size === "lg" ? 16 : 14} />
 			{status.label}
 		</Badge>
 	);
@@ -72,7 +72,7 @@ export function StatusPill({
 export function TonePill({ tone, children, icon }: { tone: Tone; children: ReactNode; icon?: IconName }) {
 	return (
 		<Badge tone={tone}>
-			{icon ? <Icon name={icon} size={13} /> : null}
+			{icon ? <Icon name={icon} size={14} /> : null}
 			{children}
 		</Badge>
 	);

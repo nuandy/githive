@@ -2,10 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ThemeMenu } from "../ThemeMenu";
 import { Badge, Counter, Lamp } from "./badge";
-import { Box, BoxHeader, BoxRow, Callout } from "./box";
+import { Box, BoxHeader, BoxRow, BoxTitle, Callout } from "./box";
 import { Button } from "./button";
 import { Collapse } from "./collapse";
 import { Input, NativeSelect, Textarea } from "./field";
+import { SaveBar } from "./save-bar";
 import { Segmented } from "./segmented";
 import { StatusIcon } from "../StatusPill";
 import { AlertDialog, AlertDialogAction, AlertDialogTrigger } from "./alert-dialog";
@@ -95,6 +96,44 @@ describe("the building blocks", () => {
 		expect(html).toContain('<section data-slot="box"');
 		expect(html).toContain("border-t-2");
 		expect(renderToStaticMarkup(<Callout tone="needs">Needs a person</Callout>)).toContain("bg-needs-soft");
+	});
+
+	it("titles a box's section in one size, an h2 unless asked for another level", () => {
+		const html = renderToStaticMarkup(
+			<BoxHeader>
+				<BoxTitle id="policy-title">Review policy</BoxTitle>
+			</BoxHeader>,
+		);
+		expect(html).toMatch(
+			/<h2 data-slot="box-title" class="[^"]*\btext-title-sm\b[^"]*\bfont-semibold\b[^"]*" id="policy-title">/,
+		);
+		expect(
+			renderToStaticMarkup(
+				<BoxTitle asChild>
+					<h3>Rule 1</h3>
+				</BoxTitle>,
+			),
+		).toMatch(/^<h3 data-slot="box-title"/);
+	});
+
+	it("saves at a form's foot: what happened, then Discard and Save, Save in ink", () => {
+		const clean = renderToStaticMarkup(<SaveBar dirty={false} onDiscard={() => undefined} status="Settings saved." />);
+		expect(clean).toMatch(/<p[^>]*role="status"[^>]*>Settings saved\.<\/p>/);
+		expect(clean).toContain("sticky bottom-0");
+		const buttons = clean.match(/<button[^>]*>[^<]*<\/button>/g) ?? [];
+		expect(buttons.map((button) => button.replace(/<[^>]*>/g, ""))).toEqual(["Discard", "Save"]);
+		expect(buttons[1]).toContain('type="submit"');
+		expect(buttons[1]).toContain("bg-primary");
+		for (const button of buttons) expect(button).toContain('disabled=""');
+
+		const busy = renderToStaticMarkup(
+			<SaveBar dirty busy onDiscard={() => undefined} saveLabel="Save branch rules" discardLabel="Discard edits" />,
+		);
+		expect(busy).toContain(">Saving…<");
+		expect(busy).toContain(">Discard edits<");
+		const editing = renderToStaticMarkup(<SaveBar dirty onDiscard={() => undefined} saveLabel="Save branch rules" />);
+		expect(editing).toContain(">Save branch rules<");
+		expect(editing).not.toContain('disabled=""');
 	});
 
 	it("keeps a closed collapse in the page but out of reach", () => {

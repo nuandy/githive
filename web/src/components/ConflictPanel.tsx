@@ -59,7 +59,7 @@ function ConflictedFile({
 	return (
 		<li className="grid min-w-0 gap-1.5 border-t border-border px-4 py-3">
 			<h3 className="flex items-center gap-1.5 text-ui">
-				<Icon name="file" size={13} className="text-muted-foreground" />
+				<Icon name="file" size={14} className="text-muted-foreground" />
 				<code>{file}</code>
 			</h3>
 			{touchedBy.length ? (

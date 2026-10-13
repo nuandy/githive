@@ -31,6 +31,19 @@ export function BoxHeader({ className, ...props }: ComponentProps<"div">) {
 	);
 }
 
+/** A section's title, in its header: one size and weight for every box. An h2, or the one heading it's given (asChild). */
+export function BoxTitle({
+	className,
+	asChild = false,
+	...props
+}: ComponentProps<"h2"> & {
+	/** Title the one child instead (an h3 under another title). */
+	asChild?: boolean;
+}) {
+	const Comp = asChild ? Slot.Root : "h2";
+	return <Comp data-slot="box-title" className={cn("text-title-sm leading-6 font-semibold", className)} {...props} />;
+}
+
 export function BoxBody({ className, ...props }: ComponentProps<"div">) {
 	return <div data-slot="box-body" className={cn("px-0.5 py-4", className)} {...props} />;
 }

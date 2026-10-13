@@ -35,12 +35,12 @@ export function ThemeMenu() {
 			>
 				<Icon
 					name="sun"
-					size={15}
+					size={16}
 					className="absolute transition-[rotate,scale,opacity] duration-slow ease-spring dark:scale-50 dark:-rotate-90 dark:opacity-0"
 				/>
 				<Icon
 					name="moon"
-					size={15}
+					size={16}
 					className="absolute scale-50 rotate-90 opacity-0 transition-[rotate,scale,opacity] duration-slow ease-spring dark:scale-100 dark:rotate-0 dark:opacity-100"
 				/>
 			</DropdownMenuTrigger>
@@ -49,7 +49,7 @@ export function ThemeMenu() {
 				<DropdownMenuRadioGroup value={choice} onValueChange={(value) => setChoice(value as ThemeChoice)}>
 					{CHOICES.map((each) => (
 						<DropdownMenuRadioItem key={each.value} value={each.value}>
-							<Icon name={each.icon} size={15} />
+							<Icon name={each.icon} size={16} />
 							{each.words}
 						</DropdownMenuRadioItem>
 					))}

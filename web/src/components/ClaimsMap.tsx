@@ -83,7 +83,7 @@ function FileNode({ node, holders }: NodeProps) {
 			<span className="min-w-0 wrap-anywhere">{node.name}</span>
 			{conflict ? (
 				<span className="ml-auto inline-flex text-warn" title="Open changes conflict in this file">
-					<Icon name="conflict" size={13} label="conflict" />
+					<Icon name="conflict" size={14} label="conflict" />
 				</span>
 			) : null}
 		</>
@@ -120,7 +120,7 @@ function FolderNode({ node, holders, depth }: NodeProps) {
 					{/* Points down open, at the folder's name folded. */}
 					<Icon
 						name="chevron"
-						size={13}
+						size={14}
 						className="text-muted-foreground transition-transform duration-fast ease-out [details:not([open])>summary>&]:-rotate-90"
 					/>
 					<Icon name="folder" size={14} className="text-link" />
@@ -196,7 +196,7 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 									</span>
 									{holder.conflicts.length ? (
 										<span className="ml-2 inline-flex items-center gap-1 text-meta text-warn">
-											<Icon name="conflict" size={13} /> conflicts in {holder.conflicts.length}{" "}
+											<Icon name="conflict" size={14} /> conflicts in {holder.conflicts.length}{" "}
 											{holder.conflicts.length === 1 ? "file" : "files"}
 										</span>
 									) : null}

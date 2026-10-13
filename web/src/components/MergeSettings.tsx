@@ -172,7 +172,7 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 					<Button disabled={busy || !dirty} onClick={discard}>
 						Discard edits
 					</Button>
-					<Button type="submit" variant="go" disabled={busy || !dirty}>
+					<Button type="submit" variant="primary" disabled={busy || !dirty}>
 						{busy ? "Saving…" : "Save settings"}
 					</Button>
 				</div>

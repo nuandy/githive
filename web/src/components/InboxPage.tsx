@@ -49,7 +49,7 @@ function InboxBody({ groups, loaded, error }: { groups: InboxGroup[]; loaded: bo
 		return (
 			<Box asChild>
 				<Empty className={cn(read)}>
-					<Icon name="check-circle" size={32} className="text-good" />
+					<Icon name="check-circle" size={28} className="text-good" />
 					<h2>Nothing waits on you</h2>
 					<p>
 						When a change needs a decision (reviewers disagree, checks keep failing, an agent is stuck), it shows up

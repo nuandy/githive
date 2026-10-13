@@ -108,7 +108,7 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 			<SaveBar>
 				<SaveErrors errors={errors} />
 				{saved && !dirty ? <p className="mt-0 mb-2 animate-appear text-good">Branch rules saved.</p> : null}
-				<Button type="submit" variant="go" disabled={busy || !dirty}>
+				<Button type="submit" variant="primary" disabled={busy || !dirty}>
 					{busy ? "Saving…" : "Save branch rules"}
 				</Button>
 			</SaveBar>

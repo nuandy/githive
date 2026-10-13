@@ -69,7 +69,7 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 					className="font-mono text-caption leading-4.5"
 					title={tree ? `At commit ${tree.commit}` : undefined}
 				>
-					<Icon name="commit" size={13} />
+					<Icon name="commit" size={14} />
 					{refParam ? shortSha(refParam) : shownRef}
 				</Badge>
 				{refParam ? (

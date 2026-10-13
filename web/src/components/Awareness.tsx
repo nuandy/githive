@@ -122,7 +122,7 @@ export function Awareness({
 			aria-labelledby="awareness-title"
 		>
 			<div className="flex items-center gap-2">
-				<Icon name="eye" size={15} className="text-muted-foreground" />
+				<Icon name="eye" size={16} className="text-muted-foreground" />
 				<h2 id="awareness-title" className="text-body-sm">
 					Where it meets other open changes
 				</h2>

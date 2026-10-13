@@ -147,14 +147,14 @@ function ChangeRow({
 					{claim.paths.length ? (
 						<span className="font-mono text-caption">
 							{" · "}
-							<Icon name="folder" size={12} className={INLINE_ICON} />
+							<Icon name="folder" size={14} className={INLINE_ICON} />
 							<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 						</span>
 					) : null}
 					{lease?.short ? (
 						<span className={cn("whitespace-nowrap", lease.free && "text-warn")} title={lease.long}>
 							{" · "}
-							<Icon name="clock" size={12} className={INLINE_ICON} />
+							<Icon name="clock" size={14} className={INLINE_ICON} />
 							{lease.short}
 						</span>
 					) : null}
