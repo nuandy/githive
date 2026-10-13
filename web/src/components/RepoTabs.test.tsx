@@ -283,7 +283,7 @@ describe("the Changes list", () => {
 		const none = renderToStaticMarkup(
 			<ChangeList snapshot={repo} repo="acme/web" shown="main" filter="needs-you" search="zzz" />,
 		);
-		expect(visibleText(none)).toContain("No change on main matches “zzz” under Needs you. Show all 0 Clear the search");
+		expect(visibleText(none)).toContain("No change on main matches “zzz” under Needs you. Clear the search");
 	});
 
 	it("counts the shown branch's open changes on its tab", () => {

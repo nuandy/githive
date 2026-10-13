@@ -102,7 +102,9 @@ function HistoryRows({ repo, changes }: { repo: string; changes: LandedChange[] 
 							<time dateTime={batch.at}>{batchWords(batch.at, batch.changes.length)}</time>
 						</p>
 						{/* Ruled down its side, so its changes read as one landing. */}
-						<ol className={cn(COMMIT_LIST, "mt-1.5 mb-2 ml-5.5 border-l-2 border-border")}>{batch.changes.map(row)}</ol>
+						<ol className={cn(COMMIT_LIST, "mt-1.5 mb-2 ml-5.5 border-l-2 border-border to-560:ml-2")}>
+							{batch.changes.map(row)}
+						</ol>
 					</li>
 				) : (
 					batch.changes.map(row)

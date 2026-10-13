@@ -411,7 +411,7 @@ export function ChangeList({
 					className={cn("m-0 px-4 py-8 text-center text-muted-foreground", fades && "animate-fade")}
 				>
 					{noneWords(filter, query, branch)}
-					{filter !== "all" ? (
+					{filter !== "all" && counts.all > 0 ? (
 						<>
 							{" "}
 							<a href={linkTo("all")}>Show all {counts.all}</a>

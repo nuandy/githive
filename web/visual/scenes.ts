@@ -210,8 +210,7 @@ const CHANGES = [
 	"footer-links",
 ];
 
-/** acme/storefront's tree grown past what the Territory names entry by entry: src/ a grid of lamps, assets/ more than
- * a region draws, the whole tree more than one read holds. */
+/** acme/storefront's tree grown past what one read holds: more files in src/, hundreds in assets/, cut short. */
 const BIG_TREE = {
 	ref: "main",
 	commit: STOREFRONT_REPO.heads.main,
@@ -232,6 +231,14 @@ const WHOLE_FOLDER = {
 };
 
 const DOCS_HISTORY = DOCS_REPO.hive!.histories.main!;
+
+/** acme/docs's history with its two newest changes landed in one batch, as the server notes one time for a batch. */
+const DOCS_BATCH = {
+	...DOCS_HISTORY,
+	changes: DOCS_HISTORY.changes.map((change, index) =>
+		index === 1 ? { ...change, at: DOCS_HISTORY.changes[0]!.at } : change,
+	),
+};
 
 const APP: Scene[] = [
 	page("repos", "/"),
@@ -297,6 +304,10 @@ const APP: Scene[] = [
 	// The demo run's banner, as on the demo repo's Hive tab.
 	page("storefront-hive-demo", STOREFRONT, { act: answering("/demo/runs/acme/storefront", LANDED_RUN) }),
 	page("storefront-changes", `${STOREFRONT}/changes`),
+	// The list narrowed by a chip, and by a search.
+	page("storefront-changes-needs-you", `${STOREFRONT}/changes?filter=needs-you`),
+	page("storefront-changes-search", `${STOREFRONT}/changes`, { act: fill("Find a change", "cart") }),
+	page("storefront-changes-none", `${STOREFRONT}/changes?filter=building`, { act: fill("Find a change", "zzz") }),
 	page("storefront-changes-release", `${STOREFRONT}/changes?branch=release%2F2.4`),
 	page("storefront-changes-unknown-branch", `${STOREFRONT}/changes?branch=nope`),
 	page("storefront-changes-new-branch", `${STOREFRONT}/changes`, { act: click("New branch") }),
@@ -308,25 +319,28 @@ const APP: Scene[] = [
 			click("Make branch"),
 		),
 	}),
-	page("storefront-changes-tree-error", `${STOREFRONT}/changes`, {
+	page("storefront-history", `${STOREFRONT}/history`),
+	// A change's files opened from its count.
+	page("storefront-history-files", `${STOREFRONT}/history`, { act: click(/^\d+ files?$/) }),
+	page("storefront-claims", `${STOREFRONT}/claims`),
+	page("storefront-claims-tree-error", `${STOREFRONT}/claims`, {
 		act: answering(`${STOREFRONT}/tree`, { error: "the tree is too big to read" }, { status: 500 }),
 	}),
-	page("storefront-changes-big-tree", `${STOREFRONT}/changes`, {
+	page("storefront-claims-big-tree", `${STOREFRONT}/claims`, {
 		act: steps(answering(`${STOREFRONT}/tree`, BIG_TREE), answering(STOREFRONT, WHOLE_FOLDER)),
 	}),
-	page("storefront-history", `${STOREFRONT}/history`),
-	page("storefront-claims", `${STOREFRONT}/claims`),
 	// The account menu open over the Claims tab: what its baselines show, as the first <summary> on the page, which
 	// it clicked, was the menu's while the menu was a <details>.
 	page("storefront-claims-open", `${STOREFRONT}/claims`, { act: openUserMenu }),
-	// A folder of the claims tree opened.
-	page("storefront-claims-tree", `${STOREFRONT}/claims`, {
-		act: async (p) => p.locator("main summary").first().click(),
-	}),
+	// Every file, not only what's claimed.
+	page("storefront-claims-all", `${STOREFRONT}/claims`, { act: async (p) => p.getByLabel("Only claimed").uncheck() }),
 	page("storefront-code", `${STOREFRONT}/code`),
 	page("storefront-code-folder", `${STOREFRONT}/code/src/lib`),
 	page("storefront-code-file", `${STOREFRONT}/code/src/lib/cart.ts`),
+	// A README formatted, and its source; a file another change holds, in its syntax colors; the branches to show.
 	page("storefront-code-readme", `${STOREFRONT}/code/README.md`),
+	page("storefront-code-readme-source", `${STOREFRONT}/code/README.md`, { act: click("Source") }),
+	page("storefront-code-branches", `${STOREFRONT}/code/src/lib/cart.ts`, { act: click(/^Branch: /) }),
 	page("storefront-code-image", `${STOREFRONT}/code/public/images/placeholder.png`),
 	page("storefront-code-lockfile", `${STOREFRONT}/code/package-lock.json`),
 	page("storefront-agents", `${STOREFRONT}/agents`),
@@ -353,6 +367,9 @@ const APP: Scene[] = [
 
 	page("docs-hive", "/repos/acme/docs"),
 	page("docs-history", "/repos/acme/docs/history"),
+	page("docs-history-batch", "/repos/acme/docs/history", {
+		act: answering("/repos/acme/docs/history?branch=main", DOCS_BATCH),
+	}),
 	page("docs-history-more", "/repos/acme/docs/history", {
 		act: answering("/repos/acme/docs/history?branch=main", { ...DOCS_HISTORY, total: DOCS_HISTORY.total + 12 }),
 	}),
