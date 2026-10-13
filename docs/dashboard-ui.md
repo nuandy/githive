@@ -84,6 +84,13 @@ lucide icons for `Icon`, and restyle it from the theme.
 - A fade-in fills `backwards`, not `both`: a transform left filling once it's done keeps the element on a layer of its
   own, which Chrome draws a little blurred at a fractional offset (and the visual check catches).
 
+## Trying it locally
+
+`npm run dev:web` serves the dashboard against githive.app's real data (signing in there doesn't carry over to
+localhost). `npm run dev:web:fixtures` needs no Worker or sign-in: the API answers from the visual check's synthetic
+repos, signed in as their admin (`GITHIVE_AS=visitor` or `operator` for the others), with their times moved up to
+now. Writes answer as if they worked and change nothing, and the live feed never connects.
+
 ## The visual regression check
 
 ```sh
