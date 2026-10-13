@@ -382,12 +382,17 @@ function HexCell({
 						"fill-card stroke-border stroke-[1.5]",
 						"[transition:fill_0.4s_ease,fill-opacity_0.4s_ease,stroke_0.4s_ease,stroke-opacity_0.4s_ease,stroke-width_0.2s_ease]",
 						look.shape,
-						"group-hover:stroke-3 group-focus-visible:stroke-3",
+						"group-hover:stroke-3",
 						lit && "stroke-3",
 						picked && "stroke-foreground stroke-3",
 						motion && SHAPE_MOTION[motion.motion],
 					)}
 					points={hexPoints(0, 0, RADIUS - GAP)}
+				/>
+				{/* Keyboard focus: the ring every focused thing has, hugging the cell in the gap before its neighbors. */}
+				<polygon
+					className="pointer-events-none fill-none stroke-ring stroke-2 opacity-0 group-focus-visible:opacity-100"
+					points={hexPoints(0, 0, RADIUS - GAP + 2)}
 				/>
 				{cell.state === "landing" ? (
 					<circle className="animate-hive-cell-blink fill-stage-landing" cx={0} cy={20} r={3.5} />

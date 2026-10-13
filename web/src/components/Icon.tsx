@@ -160,6 +160,10 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
+/** Three sizes: 14 beside small text (13px and under), 16 beside body text and alone in a button, 28 over an empty
+ * state's heading. */
+export type IconSize = 14 | 16 | 28;
+
 export function Icon({
 	name,
 	size = 16,
@@ -167,7 +171,7 @@ export function Icon({
 	label,
 }: {
 	name: IconName;
-	size?: number;
+	size?: IconSize;
 	className?: string;
 	label?: string;
 }) {

@@ -62,13 +62,7 @@ export function AgentRow(props: AgentRowProps) {
 	const { agent, fullName, error, issued, setIssued, client, origin, now, arrived } = props;
 	const active = !agent.revokedAt;
 	return (
-		<li
-			className={cn(
-				"grid gap-2.5 border-t border-border px-4 py-3.5 transition-opacity duration-base first:border-t-0",
-				!active && "opacity-70",
-				arrived && "animate-appear",
-			)}
-		>
+		<li className={cn("grid gap-2.5 border-t border-border px-4 py-3.5 first:border-t-0", arrived && "animate-appear")}>
 			<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
 				<div className="flex min-w-0 flex-wrap items-center gap-2">
 					<Icon name="bot" size={16} />

@@ -3,6 +3,7 @@ import type { LiveStatus } from "../lib/liveFeed";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Tabs, type TabItem } from "./Tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const LIVE_WORDS: Record<Exclude<LiveStatus, "off">, { label: string; title: string }> = {
 	live: { label: "Live", title: "Connected: this page updates as soon as anything changes." },
@@ -26,20 +27,26 @@ const DOT: Record<Exclude<LiveStatus, "off">, string> = {
 export function LiveDot({ status }: { status: LiveStatus }) {
 	if (status === "off") return null;
 	const words = LIVE_WORDS[status];
+	// What the state means shows on hover or focus.
 	return (
-		<span
-			className={cn(
-				"inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5",
-				"text-caption font-medium text-muted-foreground transition-colors duration-base",
-				status === "live" && "text-good",
-			)}
-			title={words.title}
-			role="status"
-			aria-live="polite"
-		>
-			<span className={cn("size-2 rounded-full transition-colors duration-base", DOT[status])} aria-hidden="true" />
-			{words.label}
-		</span>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					className={cn(
+						"inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5",
+						"text-caption font-medium text-muted-foreground transition-colors duration-base",
+						status === "live" && "text-good",
+					)}
+					tabIndex={0}
+					role="status"
+					aria-live="polite"
+				>
+					<span className={cn("size-2 rounded-full transition-colors duration-base", DOT[status])} aria-hidden="true" />
+					{words.label}
+				</span>
+			</TooltipTrigger>
+			<TooltipContent>{words.title}</TooltipContent>
+		</Tooltip>
 	);
 }
 

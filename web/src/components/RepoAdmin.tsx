@@ -32,9 +32,9 @@ interface RunProps {
 
 const label = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
 
-// On a page of its own (a repo GitHive hasn't started on), its headings are the browser's own size; in the Settings tab,
-// the tab sets them smaller (SettingsTab).
-const TITLE = "text-[1.5em] font-bold";
+// On a page of its own (a repo GitHive hasn't started on), its headings are titles; in the Settings tab, the tab sets
+// them smaller (SettingsTab).
+const TITLE = "text-title font-bold";
 
 function LevelOptions() {
 	return (

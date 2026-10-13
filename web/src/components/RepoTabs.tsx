@@ -147,14 +147,14 @@ function ChangeRow({
 					{claim.paths.length ? (
 						<span className="font-mono text-caption">
 							{" · "}
-							<Icon name="folder" size={12} className={INLINE_ICON} />
+							<Icon name="folder" size={14} className={INLINE_ICON} />
 							<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 						</span>
 					) : null}
 					{lease?.short ? (
 						<span className={cn("whitespace-nowrap", lease.free && "text-warn")} title={lease.long}>
 							{" · "}
-							<Icon name="clock" size={12} className={INLINE_ICON} />
+							<Icon name="clock" size={14} className={INLINE_ICON} />
 							{lease.short}
 						</span>
 					) : null}
@@ -244,10 +244,9 @@ export function ChangeList({
 	return (
 		<Box aria-labelledby="changes-title">
 			<BoxHeader>
-				{/* The browser's size for an h2: 1.5em of the 15px it's in. */}
 				<h2
 					id="changes-title"
-					className="inline-flex items-center gap-1.5 py-0.5 text-[22.5px] font-semibold text-foreground"
+					className="inline-flex items-center gap-1.5 py-0.5 text-title font-semibold text-foreground"
 					aria-current="page"
 				>
 					<Icon name="pull" />
@@ -302,7 +301,7 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 function ViolationRow({ violation }: { violation: RepoAudit["violations"][number] }) {
 	const by = violation.by ? identityName(violation.by) : "unverified";
 	return (
-		<li className={cn(AUDIT_ROW, violation.resolvedBy && "opacity-75")}>
+		<li className={AUDIT_ROW}>
 			<span className={cn(AUDIT_ICON, violation.resolvedBy ? "text-neutral" : "text-bad")}>
 				<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
 			</span>
@@ -311,6 +310,12 @@ function ViolationRow({ violation }: { violation: RepoAudit["violations"][number
 					<strong>{violation.rule}</strong> by {violation.author}
 					<span className="text-muted-foreground"> ({by})</span>
 					{" in"} <code>{shortSha(violation.commit)}</code>
+					{violation.resolvedBy ? (
+						<>
+							{" "}
+							<Badge size="sm">Resolved</Badge>
+						</>
+					) : null}
 				</p>
 				<p className="mt-0.5 mb-0 text-muted-foreground">{violation.detail}</p>
 				{violation.resolvedBy ? (
@@ -342,7 +347,9 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
 							{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
 						</p>
-						{vote.evidence ? <p className="mt-0.5 mb-0 text-ui text-muted-foreground">{vote.evidence}</p> : null}
+						{vote.evidence ? (
+							<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
+						) : null}
 					</div>
 				</li>
 			))}

@@ -340,6 +340,13 @@ describe("a repo's access settings", () => {
 		expect(admin).toContain('id="settings-required" type="number" min="0" inputMode="numeric" value="2"');
 		expect(admin).toContain('value="npm test"');
 		expect(visibleText(admin)).toContain("Save settings");
+		// Saving is in ink: green is for landing and approving.
+		const saves = admin.match(/<button[^>]*type="submit"[^>]*>(?:Save|Saving)[^<]*/g) ?? [];
+		expect(saves.length).toBeGreaterThan(0);
+		for (const save of saves) {
+			expect(save).toContain("bg-primary");
+			expect(save).not.toContain("bg-good");
+		}
 		expect(visibleText(admin)).toContain("Stricter rules for paths");
 		expect(visibleText(admin)).toContain("How the records are kept");
 		const writer = visibleText(render("write"));

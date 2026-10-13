@@ -73,7 +73,7 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 							{org.canCreateRepos ? (
 								<Button asChild>
 									<a href={href.newRepo(org.slug)}>
-										<Icon name="plus" size={15} /> New repository
+										<Icon name="plus" /> New repository
 									</a>
 								</Button>
 							) : null}

@@ -25,9 +25,9 @@ export function ThemeMenu() {
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				className={[
-					"relative inline-flex size-7.5 flex-none to-560:size-7 cursor-pointer items-center justify-center rounded-full border",
-					"border-border bg-transparent p-0 text-foreground transition-colors duration-fast",
-					"hover:bg-surface-2 focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+					"touch-target relative inline-flex size-7.5 flex-none to-560:size-7 cursor-pointer items-center justify-center rounded-full border",
+					"border-input bg-transparent p-0 text-foreground transition-colors duration-fast",
+					"hover:bg-surface-2",
 					"data-[state=open]:bg-surface-2",
 				].join(" ")}
 				aria-label={label}
@@ -35,12 +35,12 @@ export function ThemeMenu() {
 			>
 				<Icon
 					name="sun"
-					size={15}
+					size={16}
 					className="absolute transition-[rotate,scale,opacity] duration-slow ease-spring dark:scale-50 dark:-rotate-90 dark:opacity-0"
 				/>
 				<Icon
 					name="moon"
-					size={15}
+					size={16}
 					className="absolute scale-50 rotate-90 opacity-0 transition-[rotate,scale,opacity] duration-slow ease-spring dark:scale-100 dark:rotate-0 dark:opacity-100"
 				/>
 			</DropdownMenuTrigger>
@@ -49,7 +49,7 @@ export function ThemeMenu() {
 				<DropdownMenuRadioGroup value={choice} onValueChange={(value) => setChoice(value as ThemeChoice)}>
 					{CHOICES.map((each) => (
 						<DropdownMenuRadioItem key={each.value} value={each.value}>
-							<Icon name={each.icon} size={15} />
+							<Icon name={each.icon} size={16} />
 							{each.words}
 						</DropdownMenuRadioItem>
 					))}

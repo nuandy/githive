@@ -59,13 +59,13 @@ function ConflictedFile({
 	return (
 		<li className="grid min-w-0 gap-1.5 border-t border-border px-4 py-3">
 			<h3 className="flex items-center gap-1.5 text-ui">
-				<Icon name="file" size={13} className="text-muted-foreground" />
+				<Icon name="file" size={14} className="text-muted-foreground" />
 				<code>{file}</code>
 			</h3>
 			{touchedBy.length ? (
 				<>
 					<p className={LABEL}>Changed on {into} since this change left it, by:</p>
-					<ul className="m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
+					<ul className="prose m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
 						{touchedBy.map((touched) => (
 							<ChangedBy key={touched.commit} touched={touched} repo={repo} />
 						))}

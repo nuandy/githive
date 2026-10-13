@@ -19,7 +19,7 @@ const tab = cn(
 	"aria-[current=page]:font-semibold aria-[current=page]:text-foreground",
 	"after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-xs after:bg-primary",
 	"after:opacity-0 after:transition-opacity after:duration-fast aria-[current=page]:after:opacity-100",
-	"focus-visible:rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-link",
+	"focus-visible:rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
 );
 
 /** How many a tab holds; it bumps as the number changes. */

@@ -44,7 +44,7 @@ function Signatures({ overlap }: { overlap: Overlap }) {
 	const { before, after, change } = overlap.altered;
 	if (change !== "interface" || !before || !after) return null;
 	return (
-		<div className="mt-0.75 text-caption text-muted-foreground [&_code]:text-micro">
+		<div className="mt-0.75 text-caption text-muted-foreground [&_code]:text-caption">
 			<code>{before}</code>
 			<span aria-label="becomes"> → </span>
 			<code>{after}</code>
@@ -85,7 +85,8 @@ function AlteredBy({ overlap, repo }: { overlap: Overlap; repo: string }) {
 
 const NOTE = "m-0 text-meta";
 const HEADING = "mt-1 text-meta font-semibold text-muted-foreground";
-const LINES = "m-0 grid list-disc gap-2 pl-4.5 text-ui-lg";
+/** Sentences, one a bullet: their links are underlined as in a paragraph. */
+const LINES = "prose m-0 grid list-disc gap-2 pl-4.5 text-ui-lg";
 
 /**
  * The awareness section of a change's page, while its claim is in force and its footprint is kept. Beside the
@@ -121,7 +122,7 @@ export function Awareness({
 			aria-labelledby="awareness-title"
 		>
 			<div className="flex items-center gap-2">
-				<Icon name="eye" size={15} className="text-muted-foreground" />
+				<Icon name="eye" size={16} className="text-muted-foreground" />
 				<h2 id="awareness-title" className="text-body-sm">
 					Where it meets other open changes
 				</h2>

@@ -14,9 +14,10 @@ export interface Crumb {
 	href?: string;
 }
 
-// The bar's links to Inbox, Agents and Admin: round-ended pills, as tall as the theme and user menus beside them.
+// The bar's links to Inbox, Agents and Admin: round-ended pills, as tall as the theme and user menus beside them, and
+// like them 44px to a finger on a touch screen.
 const pill = cn(
-	"inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1",
+	"touch-target inline-flex shrink-0 items-center gap-1.5 rounded-full border border-input px-2.5 py-1",
 	"text-ui font-medium text-foreground transition-colors duration-fast hover:bg-surface-2 hover:no-underline",
 	"aria-[current=page]:border-link aria-[current=page]:text-link",
 );
@@ -50,11 +51,10 @@ export function UserMenu({
 			<DropdownMenuTrigger
 				aria-label={`Signed in as ${me.handle}`}
 				className={cn(
-					"inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-border bg-transparent",
+					"touch-target inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-input bg-transparent",
 					"py-0.75 pr-2.5 pl-0.75 to-560:pr-0.75",
 					"[font-family:inherit] text-ui leading-[inherit] font-medium text-foreground",
 					"transition-colors duration-fast hover:bg-surface-2 data-[state=open]:bg-surface-2",
-					"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
 				)}
 			>
 				{me.avatarUrl ? (
@@ -87,16 +87,16 @@ export function UserMenu({
 				</div>
 				<DropdownMenuItem asChild className={menuItem}>
 					<a href={href.orgs()} aria-current={orgsCurrent ? "page" : undefined}>
-						<Icon name="repo" size={15} /> Your organizations
+						<Icon name="repo" /> Your organizations
 					</a>
 				</DropdownMenuItem>
 				<DropdownMenuItem asChild className={menuItem}>
 					<a href={href.agents()} aria-current={agentsCurrent ? "page" : undefined}>
-						<Icon name="bot" size={15} /> Agents
+						<Icon name="bot" /> Agents
 					</a>
 				</DropdownMenuItem>
 				<DropdownMenuItem className={cn(menuItem, "leading-5")} onSelect={onSignOut}>
-					<Icon name="arrow" size={15} /> Sign out
+					<Icon name="arrow" /> Sign out
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -112,7 +112,7 @@ function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefin
 			aria-current={inboxCurrent ? "page" : undefined}
 			aria-label={inboxCount ? `Inbox, ${inboxCount} waiting on you` : "Inbox"}
 		>
-			<Icon name="alert" size={15} />
+			<Icon name="alert" size={14} />
 			<span className="to-560:hidden">Inbox</span>
 			{inboxCount ? <PillCount>{inboxCount}</PillCount> : null}
 		</a>
@@ -139,7 +139,7 @@ function PillCount({ children }: { children: number }) {
 function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
 	return (
 		<a className={pill} href={href.agents()} aria-current={agentsCurrent ? "page" : undefined} aria-label="Your agents">
-			<Icon name="bot" size={15} />
+			<Icon name="bot" size={14} />
 			<span className="to-560:hidden">Agents</span>
 		</a>
 	);
@@ -238,7 +238,7 @@ export function TopBar({
 						aria-current={adminCurrent ? "page" : undefined}
 						aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}
 					>
-						<Icon name="settings" size={15} />
+						<Icon name="settings" size={14} />
 						<span className="to-560:hidden">Admin</span>
 						{adminRequests ? <PillCount>{adminRequests}</PillCount> : null}
 					</a>

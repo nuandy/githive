@@ -113,7 +113,7 @@ export function ChangeSidebar({
 					<ul className={LIST}>
 						{record.paths.map((path) => (
 							<li key={path} className="flex min-w-0 items-center gap-1.5">
-								<Icon name="folder" size={13} className="text-muted-foreground" />
+								<Icon name="folder" size={14} className="text-muted-foreground" />
 								<code>{path}</code>
 							</li>
 						))}
@@ -123,7 +123,7 @@ export function ChangeSidebar({
 				)}
 				{lease ? (
 					<p className={cn(SMALL, "mt-2 flex items-start gap-1.5", lease.free ? "text-warn" : "text-muted-foreground")}>
-						<Icon name="clock" size={13} className="mt-0.5 shrink-0" />
+						<Icon name="clock" size={14} className="mt-0.5 shrink-0" />
 						{lease.long}
 					</p>
 				) : null}

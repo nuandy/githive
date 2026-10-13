@@ -38,7 +38,7 @@ export function DropdownMenuContent({ className, sideOffset = 6, ...props }: Com
 
 const item = [
 	"relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 outline-none select-none",
-	"transition-colors duration-fast focus:bg-accent focus:text-accent-foreground",
+	"transition-colors duration-fast data-highlighted:bg-link-soft data-highlighted:text-link",
 	"data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:shrink-0",
 ];
 

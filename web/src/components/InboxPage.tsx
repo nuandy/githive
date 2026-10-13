@@ -49,7 +49,7 @@ function InboxBody({ groups, loaded, error }: { groups: InboxGroup[]; loaded: bo
 		return (
 			<Box asChild>
 				<Empty className={cn(read)}>
-					<Icon name="check-circle" size={32} className="text-good" />
+					<Icon name="check-circle" size={28} className="text-good" />
 					<h2>Nothing waits on you</h2>
 					<p>
 						When a change needs a decision (reviewers disagree, checks keep failing, an agent is stuck), it shows up
@@ -98,7 +98,7 @@ function InboxRepo({ group, arrived }: { group: InboxGroup; arrived: boolean }) 
 									Urgent
 								</Badge>
 							) : null}
-							<p className="mt-0.75 mb-0 text-ui wrap-anywhere text-muted-foreground">{item.reason}</p>
+							<p className="mt-0.75 mb-0 max-w-measure text-ui wrap-anywhere text-muted-foreground">{item.reason}</p>
 						</div>
 					</li>
 				))}

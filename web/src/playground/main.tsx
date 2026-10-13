@@ -3,6 +3,7 @@ import "../theme.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Playground } from "./Playground";
+import { TooltipProvider } from "../components/ui/tooltip";
 import { keepThemeCurrent } from "../lib/theme";
 
 // The Hive playground, served in development only (web/playground.html): the real Hive tab, fed by the simulator.
@@ -11,6 +12,8 @@ keepThemeCurrent();
 
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
-		<Playground />
+		<TooltipProvider>
+			<Playground />
+		</TooltipProvider>
 	</StrictMode>,
 );

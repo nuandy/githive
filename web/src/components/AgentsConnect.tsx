@@ -47,7 +47,7 @@ export function Steps({ steps }: { steps: ConnectStep[] }) {
 }
 
 // A way to connect's title, with a pill beside it.
-const WAY_TITLE = "mt-0 mb-2.5 flex flex-wrap items-center gap-2 text-[14.5px]";
+const WAY_TITLE = "mt-0 mb-2.5 flex flex-wrap items-center gap-2 text-body";
 
 interface ConnectSectionProps {
 	client: McpClient;
@@ -66,7 +66,7 @@ export function ConnectSection({ client, chooseClient, origin, yourClient, clien
 				Connect an agent
 			</h2>
 			<div
-				className="inline-flex flex-wrap gap-1 justify-self-start rounded-md border border-border bg-surface-2 p-0.75"
+				className="inline-flex flex-wrap gap-1 justify-self-start rounded-md border border-input bg-surface-2 p-0.75"
 				role="radiogroup"
 				aria-label="Your agent's app"
 			>
@@ -76,7 +76,7 @@ export function ConnectSection({ client, chooseClient, origin, yourClient, clien
 						className={cn(
 							"inline-flex cursor-pointer items-center rounded-md px-3 py-1.25 text-ui-lg font-medium",
 							"transition-[color,background-color] duration-fast ease-out",
-							"has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-1 has-[input:focus-visible]:outline-link",
+							"has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-1 has-[input:focus-visible]:outline-ring",
 							client === option.id ? "bg-card text-foreground" : "text-muted-foreground",
 						)}
 					>

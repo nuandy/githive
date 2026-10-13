@@ -25,6 +25,9 @@ describe("a repo", () => {
 		expect(html).toContain("1 open violation");
 		expect(html).toContain("undeclared");
 		expect(html).toMatch(/resolved by ee872a3/);
+		// A resolved violation says so in a badge, at full contrast, rather than fading.
+		expect(html).toMatch(/data-slot="badge"[^>]*>Resolved</);
+		expect(html).not.toMatch(/opacity-\d/);
 		expect(html).toContain("rev-1");
 		expect(html).toContain("suite passes");
 		expect(
