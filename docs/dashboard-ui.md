@@ -108,13 +108,15 @@ Reach for `components/ui` before writing a control by hand:
 - `Box`, `BoxHeader`, `BoxTitle`, `BoxBody`, `BoxRow`: ruled sections, not cards (`asChild` rules a form). `BoxTitle`
   is a section's title at `title-sm`, semibold, an `h2` (or the heading it's given, `asChild`). `Callout` with a
   `tone`. `Empty`: nothing to show yet, an icon, an `h2` and a line or two, centered (`<Box asChild><Empty>` boxes it).
-- `SaveBar`: a form's foot, sticky at the bottom of its section: a status line (saved, or what went wrong), then
-  Discard and Save (`primary`, submits), both waiting while there's nothing to save (`canDiscard` lets Discard close
-  an editor with nothing changed). A form's problems go under their fields too: `problemsFor` (in
-  `SettingsParts.tsx`) gives a field `aria-invalid` (a red edge), `aria-describedby` and the line to show.
+- `SaveBar`: a form's foot, sticky at the bottom of its section: what a save did (`status`, said politely) or why it
+  failed and what's wrong with the form (`alert`, said at once; `saveBarSays` in `SettingsParts.tsx` gives both),
+  then Discard and Save (`primary`, submits), both waiting while there's nothing to save (`canDiscard` lets Discard
+  close an editor with nothing changed). A form's problems go under their fields too: `problemsFor` gives a field
+  `aria-invalid` (a red edge), `aria-describedby` and the line to show. A form held for the session (`useHeldDraft`)
+  shows what it saved until the repo is read again, and a part without edits follows the server's settings.
 - `TokenInput`: a list chosen as chips, offering what matches as you type (a combobox); it only chooses strings, so
-  a form saves what it would have had typed. `lib/tokens.ts` reads and writes a list's text and offers roles and
-  who may vote as them.
+  a form saves what it would have had typed. Enter adds what's typed, or the option the arrow keys lit, or the one
+  it names in full. `lib/tokens.ts` reads and writes a list's text and offers roles and who may vote as them.
 - `Input`, `Textarea`, `NativeSelect`, `Label`; `Field` holds a label, its control and a `FieldHint` under them.
 - `Collapse`: anything that opens and closes; `Fold` drops what it holds once folded, and unfolds it again as it comes
   back (a row a search leaves out, the fields for a choice). `DropdownMenu`: menus from a button; its items light up in
