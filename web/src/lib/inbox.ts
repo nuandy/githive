@@ -56,7 +56,7 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 			items.push({
 				kind: "audit",
 				key: "audit",
-				title: `${counted(violations, "merge")} for the audit to look at`,
+				title: `${counted(violations, "open audit violation")} to look at`,
 				reason: "They broke the repo's rules; the Audit tab says how.",
 				href: href.repo(repo.repo, "audit"),
 			});

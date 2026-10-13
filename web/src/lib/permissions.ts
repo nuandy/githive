@@ -13,7 +13,7 @@ export const atLeast = (level: Level | null | undefined, needed: Level) => !!lev
 export const LEVEL_WORDS: Record<Level, string> = {
 	read: "Read: see the repo, its changes and its code",
 	review: "Review: read, and vote on changes",
-	write: "Write: review, and claim, push and merge changes",
+	write: "Write: review, and claim, push and land changes",
 	admin: "Admin: write, and change settings, collaborators, and delete the repo",
 };
 

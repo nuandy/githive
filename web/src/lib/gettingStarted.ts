@@ -68,7 +68,7 @@ export function gettingStarted(rows: RepoRow[], agents: MyAgent[], connections: 
 		{
 			id: "land",
 			title: "See it land",
-			hint: "Its change is reviewed, checked and merged. The repository's Hive tab shows it happen.",
+			hint: "Its change is reviewed, checked and landed. The repository's Hive tab shows it happen.",
 			done: landed,
 			href: atWork ? href.repo(atWork.name) : null,
 			action: "Watch the Hive",

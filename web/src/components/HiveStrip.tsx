@@ -195,7 +195,7 @@ export function needsRows(
 			key: "audit",
 			icon: "shield",
 			lead: "The audit",
-			text: `flags ${counted(violations, "merge")} to look at`,
+			text: `flags ${counted(violations, "open violation")} to look at`,
 			verb: "See the audit",
 			href: href.repo(repo, "audit"),
 		});

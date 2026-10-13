@@ -688,7 +688,7 @@ function GoalRow({
 									chipBox(timeline, goal.agent),
 									"touch-target inline-flex cursor-pointer items-center justify-center gap-1.5 [font-family:inherit] whitespace-nowrap no-underline",
 								)}
-								aria-label={`Only ${goal.agent}'s goals`}
+								aria-label={`${agentChip(goal.agent)}: only ${goal.agent}'s goals`}
 								onClick={() => onAgent(goal.agent)}
 							>
 								{agentChip(goal.agent)}

@@ -91,7 +91,7 @@ describe("the inbox", () => {
 		expect(groups[0]!.items.map((item) => [item.kind, item.title, item.href])).toEqual([
 			["question", "Cache the cart", "#/repos/acme/shop/changes/cache"],
 			["vote", "Handle Stripe refund webhooks", "#/repos/acme/shop/changes/refunds"],
-			["audit", "2 merges for the audit to look at", "#/repos/acme/shop/audit"],
+			["audit", "2 open audit violations to look at", "#/repos/acme/shop/audit"],
 		]);
 		expect(groups[0]!.items[1]).toMatchObject({ role: "payments" });
 	});

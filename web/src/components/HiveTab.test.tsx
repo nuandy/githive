@@ -73,7 +73,7 @@ describe("the Hive tab", () => {
 		// A row each: who asks and how long ago, the question on one line, and what to do about it.
 		expect(text).toContain("Needs a person agent-12 asks · 1m “should sendFile follow symlinks?” Answer →");
 		// The fixture's audit flags a merge.
-		expect(text).toContain("The audit flags 1 merge to look at See the audit →");
+		expect(text).toContain("The audit flags 1 open violation to look at See the audit →");
 	});
 
 	it("lists three things that need a person, and says how many more the Inbox has", () => {

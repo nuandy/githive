@@ -687,7 +687,7 @@ export function SettingsTab({
 			</Callout>
 			<Box aria-labelledby="settings-merge-title">
 				<BoxHeader>
-					<BoxTitle id="settings-merge-title">How changes merge</BoxTitle>
+					<BoxTitle id="settings-merge-title">How changes land</BoxTitle>
 				</BoxHeader>
 				<BoxBody>
 					<dl className={TERMS}>

@@ -48,7 +48,7 @@ else {
 
 // The same once a filter's chip is cleared: it goes too.
 await panel
-	.getByRole("button", { name: /^Only .*'s goals$/ })
+	.getByRole("button", { name: /: only .*'s goals$/ })
 	.first()
 	.click();
 await panel.getByRole("button", { name: /: show every goal$/ }).click();

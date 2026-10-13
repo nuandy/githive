@@ -312,7 +312,7 @@ describe("a repo's access settings", () => {
 		expect(html).toMatch(/<label[^>]*for="collab-handle">Their handle<\/label>/);
 		expect(html).toMatch(/<label[^>]*for="collab-level">Permission<\/label>/);
 		expect(html).not.toContain("placeholder=");
-		expect(text).toContain("Write: review, and claim, push and merge changes.");
+		expect(text).toContain("Write: review, and claim, push and land changes.");
 		const danger = renderToStaticMarkup(<DangerZone repo="acme/web" deleteRepo={noop} onDeleted={() => {}} />);
 		expect(visibleText(danger)).toContain("Delete this repository");
 		// Deleting asks in a dialog, which wants the repo's name typed.
@@ -359,7 +359,7 @@ describe("a repo's access settings", () => {
 
 	it("shows everyone else what they may do, and nothing to change", () => {
 		const text = visibleText(renderToStaticMarkup(<RepoAccessBox repo="acme/web" access={access("write")} />));
-		expect(text).toContain("Write: review, and claim, push and merge changes");
+		expect(text).toContain("Write: review, and claim, push and land changes");
 		expect(text).toMatch(/Only the owner.s members and its collaborators/);
 		expect(text).not.toContain("Collaborators");
 		expect(text).not.toContain("Delete");
