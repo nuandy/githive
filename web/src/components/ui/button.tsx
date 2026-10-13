@@ -4,16 +4,16 @@ import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
 // A button in the signal box's look: a ruled box on paper, the ink fill for a primary action, green for the go-ahead
-// (merge, approve), red ink for what can't be undone. Colors, hover and focus fade in rather than switch.
+// (merge, approve), red ink for what can't be undone. Colors and hover fade in rather than switch; focus is the
+// outline every focusable thing has (theme.css).
 
 export const buttonVariants = cva(
 	[
 		"inline-flex items-center justify-center gap-1.5 whitespace-nowrap",
 		"[font-family:inherit] [font-size:inherit] font-semibold leading-5 no-underline",
 		"cursor-pointer rounded-md border",
-		"transition-[color,background-color,border-color,box-shadow,opacity] duration-fast ease-out",
+		"transition-[color,background-color,border-color,opacity] duration-fast ease-out",
 		"hover:no-underline",
-		"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
 		"disabled:cursor-not-allowed disabled:opacity-55",
 	],
 	{

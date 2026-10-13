@@ -59,17 +59,12 @@ function ProviderButtons({
 	return (
 		<div className={cn("mt-1.5 grid w-full gap-2.5", appear)}>
 			{providers.map((provider, index) => (
-				// The first is in ink. Keyboard focus outlines them, as it does links, rather than ringing them.
+				// The first is in ink.
 				<Button
 					key={provider}
 					asChild
 					variant={index === 0 ? "primary" : "default"}
-					className={cn(
-						"gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal",
-						"focus-visible:shadow-none focus-visible:outline-2 focus-visible:outline-offset-2",
-						"focus-visible:outline-solid focus-visible:outline-link",
-						index === 0 ? "focus-visible:border-primary" : "focus-visible:border-border-strong",
-					)}
+					className="gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal"
 				>
 					<a href={signInHref(provider, hash, invite)}>
 						<ProviderMark provider={provider} />

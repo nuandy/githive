@@ -27,7 +27,7 @@ export function ThemeMenu() {
 				className={[
 					"relative inline-flex size-7.5 flex-none to-560:size-7 cursor-pointer items-center justify-center rounded-full border",
 					"border-border bg-transparent p-0 text-foreground transition-colors duration-fast",
-					"hover:bg-surface-2 focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+					"hover:bg-surface-2",
 					"data-[state=open]:bg-surface-2",
 				].join(" ")}
 				aria-label={label}

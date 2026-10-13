@@ -16,6 +16,13 @@ describe("the building blocks", () => {
 		expect(html).toContain("bg-card");
 	});
 
+	it("leaves a button's and a field's focus to the outline everything has", () => {
+		for (const html of [renderToStaticMarkup(<Button>Save</Button>), renderToStaticMarkup(<Input />)]) {
+			expect(html).not.toContain("outline-none");
+			expect(html).not.toContain("focus-visible:border");
+		}
+	});
+
 	it("lets a later class win over a variant's", () => {
 		const html = renderToStaticMarkup(
 			<Button variant="go" className="px-6">
@@ -138,6 +145,13 @@ describe("the dashboard's source", () => {
 		expect(Object.keys(sources).length).toBeGreaterThan(50);
 		const offenders = Object.keys(sources).filter((file) =>
 			/#[0-9a-f]{6}\b|ThreeDFace|font-family:monospace/i.test(sources[file]!),
+		);
+		expect(offenders).toEqual([]);
+	});
+
+	it("draws focus one way: the outline, never a border and halo instead", () => {
+		const offenders = Object.keys(sources).filter((file) =>
+			/shadow-focus|focus-visible:outline-none|focus-visible:border-ring/.test(sources[file]!),
 		);
 		expect(offenders).toEqual([]);
 	});

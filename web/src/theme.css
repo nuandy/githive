@@ -284,8 +284,6 @@
 	--radius-3xl: calc(var(--radius) * 3.5);
 
 	--shadow-raised: var(--shadow-raised);
-	/* A focused control's ring, drawn as a shadow so it follows the control's corners. */
-	--shadow-focus: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
 @theme {
@@ -469,6 +467,8 @@
 		text-decoration: underline;
 		text-underline-offset: 0.18em;
 	}
+	/* One focus ring for everything that takes focus: buttons, fields, links, menus' triggers. Only what sits inside a
+	   group draws it inside itself (a segmented control's choice, a tab), and a menu's items light up instead. */
 	:focus-visible {
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;

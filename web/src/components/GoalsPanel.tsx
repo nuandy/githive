@@ -280,7 +280,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 												"flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-dashed border-border-strong",
 												"bg-transparent px-2.5 py-[7px] text-left [font-family:inherit] text-ui leading-5 font-normal whitespace-normal",
 												"text-foreground no-underline [transition:border-color_0.2s_ease,background-color_0.2s_ease]",
-												"hover:bg-surface-2 focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+												"hover:bg-surface-2",
 											)}
 											onClick={() => setShowFinished(true)}
 											aria-expanded={showFinished}
@@ -521,7 +521,6 @@ function GoalRow({
 						className={cn(
 							chipBox(timeline),
 							"inline-flex cursor-pointer items-center justify-center gap-1.5 [font-family:inherit] whitespace-nowrap no-underline",
-							"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
 						)}
 						title={`Only ${goal.agent}'s goals`}
 						onClick={() => onAgent(goal.agent)}
@@ -533,7 +532,6 @@ function GoalRow({
 						className={cn(
 							MAIN,
 							"group/main cursor-pointer rounded-md border-0 bg-transparent [font-family:inherit] [font-size:inherit] leading-[inherit] font-normal text-inherit no-underline",
-							"focus-visible:shadow-focus focus-visible:outline-none",
 						)}
 						aria-expanded={open}
 						onClick={onToggle}

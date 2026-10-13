@@ -54,7 +54,6 @@ export function UserMenu({
 					"py-0.75 pr-2.5 pl-0.75 to-560:pr-0.75",
 					"[font-family:inherit] text-ui leading-[inherit] font-medium text-foreground",
 					"transition-colors duration-fast hover:bg-surface-2 data-[state=open]:bg-surface-2",
-					"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
 				)}
 			>
 				{me.avatarUrl ? (
