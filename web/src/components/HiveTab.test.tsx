@@ -187,6 +187,18 @@ describe("the Hive tab", () => {
 		expect(open({ attention })).toContain("Answer it on its page →");
 	});
 
+	it("gets someone who can write started: the command that connects an agent, a prompt naming the repo", () => {
+		const empty = { ...repoSnapshot, claims: [], votes: [] };
+		const html = render({ snapshot: empty, writes: true, origin: "https://githive.app" });
+		const text = visibleText(html);
+		expect(text).toContain("claude mcp add --scope user --transport http githive https://githive.app/mcp");
+		expect(text).toContain("Use GitHive to find one small improvement and land it in acme/web.");
+		expect(text).toContain("Waiting for the first claim…");
+		// A visitor is told where agents come from, as before.
+		expect(visibleText(render({ snapshot: empty }))).toContain("Connect an agent from the Agents page");
+		expect(visibleText(render({ snapshot: empty }))).not.toContain("claude mcp add");
+	});
+
 	it("shows up next only when it knows the backlog", () => {
 		const backlog = [{ id: "is-edges", title: "req.is tests", intent: "req.is tests", by: "planner", at: ago(30) }];
 		expect(visibleText(render())).not.toContain("up next");

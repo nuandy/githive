@@ -28,11 +28,14 @@ export function HiveTab({
 	branch,
 	snapshot,
 	api,
+	writes = false,
 }: {
 	repo: string;
 	branch: string;
 	snapshot: RepoSnapshot;
 	api: HiveApi;
+	/** The reader can write here: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
 }) {
 	const load = api.landing;
 	const landing = usePoll(load ? `landing:${repo}:${branch}` : null, () => load!(repo, branch), 5_000);
@@ -57,6 +60,8 @@ export function HiveTab({
 				branch={branch}
 				query={query}
 				onQuery={setQuery}
+				writes={writes}
+				origin={window.location.origin}
 				snapshot={onBranch}
 				elsewhere={elsewhere}
 				{...(landing.data ? { landing: landing.data } : {})}
@@ -75,6 +80,9 @@ export function HiveTab({
 export interface HiveProps {
 	repo: string;
 	branch: string;
+	/** The reader can write here, and where GitHive is: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
+	origin?: string;
 	/** The view the address asks for (its window, Story or Timeline, the agent, the open row), and changing it. */
 	query?: HiveQuery;
 	onQuery?(query: HiveQuery): void;
@@ -165,6 +173,8 @@ export function Hive(props: HiveProps) {
 				range={range}
 				since={since}
 				now={now}
+				{...(props.writes ? { writes: true } : {})}
+				{...(props.origin ? { origin: props.origin } : {})}
 			/>
 			{/* The hive beside the goals; on narrow screens, under them. */}
 			<div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start gap-5 to-1100:grid-cols-[minmax(0,1fr)]">

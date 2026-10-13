@@ -5,12 +5,15 @@ import { displayName } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
 import { needsYou } from "../lib/needsYou";
 import { counted } from "../lib/plural";
+import { connectSteps } from "../lib/session";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { type ChangeState, STATES } from "../lib/status";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
 import { cn } from "../lib/utils";
+import { rememberedClient } from "./AgentsConnect";
+import { CopyBlock } from "./CopyBlock";
 import { Icon, type IconName } from "./Icon";
 import { StateMark } from "./StateMark";
 import { Lamp } from "./ui/badge";
@@ -49,6 +52,8 @@ export function HiveStrip({
 	range,
 	since,
 	now,
+	writes = false,
+	origin = "",
 }: {
 	repo: string;
 	goals: Goal[];
@@ -63,6 +68,10 @@ export function HiveStrip({
 	/** Where the goals panel's clock starts (before now - range when quiet stretches fold). */
 	since: number;
 	now: number;
+	/** The reader can write here: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
+	/** Where GitHive is, for the command that connects an agent. */
+	origin?: string;
 }) {
 	const counts = stageCounts(goals, upNext ?? 0, since);
 	const folded = since < now - range;
@@ -74,7 +83,7 @@ export function HiveStrip({
 		<header>
 			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} now={now} />
 			{!goals.length && !justFinished(stretch, now) ? (
-				<EmptyHive stretch={stretch} now={now} />
+				<EmptyHive repo={repo} stretch={stretch} now={now} writes={writes} origin={origin} />
 			) : (
 				<ol
 					className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2 p-0"
@@ -291,14 +300,75 @@ function AllLanded({
 	);
 }
 
-/** No goals at all: how to bring an agent in, or when the last work finished. */
-function EmptyHive({ stretch, now }: { stretch: LandingStretch | undefined; now: number }) {
+/** What to ask an agent once it's connected, naming the repo, ready to paste. */
+export const firstPrompt = (repo: string) => `Use GitHive to find one small improvement and land it in ${repo}.`;
+
+/**
+ * No goals at all: when the last work finished, and how to bring an agent in. Someone who can write here gets it
+ * ready to copy, the command that connects their agent and a prompt naming this repo, then the hive listening for
+ * the first claim; a visitor, where agents come from.
+ */
+function EmptyHive({
+	repo,
+	stretch,
+	now,
+	writes,
+	origin,
+}: {
+	repo: string;
+	stretch: LandingStretch | undefined;
+	now: number;
+	writes: boolean;
+	origin: string;
+}) {
+	const last = stretch
+		? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. `
+		: "";
+	if (!writes)
+		return (
+			<div className="animate-hive-appear">
+				<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
+				<p className="m-0 mt-1 text-muted-foreground">
+					{last}
+					Connect an agent from the Agents page: it claims work here, and shows up as it does.
+				</p>
+			</div>
+		);
+	const connect = connectSteps(rememberedClient(), origin).find((step) => step.copy);
 	return (
-		<div className="animate-hive-appear">
-			<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
-			<p className="m-0 mt-1 text-muted-foreground">
-				{stretch ? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. ` : ""}
-				Connect an agent from the Agents page: it claims work here, and shows up as it does.
+		<div className="grid max-w-measure animate-hive-appear gap-3">
+			<div>
+				<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
+				<p className="m-0 mt-1 text-muted-foreground">
+					{last}
+					Bring one in: connect it to GitHive, then ask it for work here.
+				</p>
+			</div>
+			<ol className="m-0 grid list-none gap-3 p-0">
+				{connect?.copy ? (
+					<li className="grid gap-1.5">
+						<span className="text-ui">
+							<b>1.</b> {connect.text}
+						</span>
+						<CopyBlock text={connect.copy} label="Copy" />
+						<span className="text-ui text-muted-foreground">
+							Then sign in when it asks. <a href={href.agents()}>The Agents page</a> has every step, and other clients.
+						</span>
+					</li>
+				) : null}
+				<li className="grid gap-1.5">
+					<span className="text-ui">
+						<b>{connect?.copy ? "2." : "1."}</b> Ask it, or put your own task in its place:
+					</span>
+					<CopyBlock text={firstPrompt(repo)} label="Copy" />
+				</li>
+			</ol>
+			<p className="m-0 inline-flex items-center gap-2.5 text-ui text-muted-foreground" role="status">
+				<span
+					aria-hidden="true"
+					className="size-2 flex-none animate-live rounded-full bg-good [box-shadow:0_0_0_3px_color-mix(in_srgb,var(--good)_25%,transparent)] motion-reduce:animate-none"
+				/>
+				Waiting for the first claim…
 			</p>
 		</div>
 	);
