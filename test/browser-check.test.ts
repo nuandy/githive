@@ -3,7 +3,13 @@ import { existsSync } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isBrowserCheck, setUpBrowserCheck } from "../src/gate-browser";
+import {
+	INSTALLING_NOTE,
+	installBrowserCheck,
+	installedBrowser,
+	isBrowserCheck,
+	setUpBrowserCheck,
+} from "../src/gate-browser";
 
 // The browser check: githive-browser-check opens a site in Chromium and fails on errors and on buttons that do
 // nothing. The Gate sets it up in a check container when a repo's checks name it.
@@ -106,19 +112,29 @@ describe("setting up the browser check in a Gate", () => {
 		expect(isBrowserCheck("my-githive-browser-check")).toBe(false);
 	});
 
-	it("sets up only for checks that run it, reporting an install only when one ran", async () => {
+	it("writes the command for checks that run it, leaving Chromium to the command's first real run", async () => {
 		const quiet = fakeContainer({ exitCode: 0, output: "" });
 		expect(await setUpBrowserCheck(quiet.container, ["npm test"])).toEqual([]);
 		expect(quiet.ran).toHaveLength(0);
-		expect(await setUpBrowserCheck(quiet.container, ["npm test", "githive-browser-check"])).toEqual([]);
-		const [setUp] = quiet.ran;
-		expect(setUp!.cmd.slice(0, 2)).toEqual(["bash", "-lc"]);
-		execFileSync("bash", ["-n", "-c", setUp!.cmd[2]!]);
-		const installed = fakeContainer({ exitCode: 0, output: "installed\n" });
-		expect(await setUpBrowserCheck(installed.container, ["githive-browser-check"])).toMatchObject([
-			{ command: "install the browser check (Chromium and puppeteer-core)", exitCode: 0 },
+		const skipped = 'grep -q "is being built" src/main.js || githive-browser-check';
+		expect(await setUpBrowserCheck(quiet.container, ["npm test", skipped])).toEqual([]);
+		const [written] = quiet.ran;
+		expect(written!.cmd.slice(0, 2)).toEqual(["bash", "-lc"]);
+		execFileSync("bash", ["-n", "-c", written!.cmd[2]!]);
+		expect(written!.cmd[2]).not.toMatch(/^apt-get/m);
+		const failed = fakeContainer({ exitCode: 1, output: "No space left on device" });
+		expect(await setUpBrowserCheck(failed.container, ["githive-browser-check"])).toMatchObject([
+			{ command: "set up the browser check", exitCode: 1 },
 		]);
-		const failed = fakeContainer({ exitCode: 100, output: "E: Unable to locate package chromium" });
-		expect(await setUpBrowserCheck(failed.container, ["githive-browser-check"])).toMatchObject([{ exitCode: 100 }]);
+	});
+
+	it("installs ahead on a warm-up, and knows a check that had to install", async () => {
+		const warm = fakeContainer({ exitCode: 0, output: "" });
+		await installBrowserCheck(warm.container, ["githive-browser-check"]);
+		expect(warm.ran).toHaveLength(2);
+		execFileSync("bash", ["-n", "-c", warm.ran[1]!.cmd[2]!]);
+		const result = (output: string) => ({ command: "githive-browser-check", exitCode: 0, output });
+		expect(installedBrowser([result(`${INSTALLING_NOTE}\nbrowser check passed`)])).toBe(true);
+		expect(installedBrowser([result("browser check passed")])).toBe(false);
 	});
 });
