@@ -64,7 +64,8 @@ export function AdminRequests({
 								confirming={confirming}
 								setConfirming={setConfirming}
 								label="Turn down"
-								question={`Turn down ${request.email}?`}
+								question={`Turn down ${request.email}? They can't sign in, and the invitations orgs sent them are cancelled.`}
+								keep="Keep request"
 								busy={busy === declineKey}
 								onConfirm={() => run(declineKey, () => actions.decline(request.email), failed(key))}
 							/>

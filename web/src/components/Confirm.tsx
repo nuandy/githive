@@ -5,7 +5,8 @@ import { Button } from "./ui/button";
  * A destructive action asked twice, in the page (never confirm()): the first
  * click asks the question, the second does it. One question is open at a
  * time; `confirming` says which. The question fades in where the button was,
- * with focus on Cancel; Cancel or Escape puts the button, and focus, back.
+ * with focus on the button that keeps things as they are; it, or Escape, puts
+ * the button, and focus, back.
  */
 export function ConfirmButton({
 	id,
@@ -13,6 +14,7 @@ export function ConfirmButton({
 	setConfirming,
 	label,
 	question,
+	keep = "Cancel",
 	busy,
 	onConfirm,
 }: {
@@ -20,7 +22,10 @@ export function ConfirmButton({
 	confirming: string | null;
 	setConfirming: (id: string | null) => void;
 	label: string;
+	/** The question, naming what doing it changes: "Delete @acme/payments? Roles granted to it stop counting…". */
 	question: string;
+	/** The button that says no, by what it keeps ("Keep invitation"), so it never reads "Cancel" beside "Yes, cancel…". */
+	keep?: string;
 	busy: boolean;
 	onConfirm: () => void;
 }) {
@@ -64,7 +69,7 @@ export function ConfirmButton({
 				{busy ? "Working…" : `Yes, ${label.toLowerCase()}`}
 			</Button>
 			<Button ref={cancel} size="sm" onClick={decline} disabled={busy}>
-				Cancel
+				{keep}
 			</Button>
 		</span>
 	);

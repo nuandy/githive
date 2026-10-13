@@ -88,7 +88,8 @@ export function AdminHosted({
 								confirming={confirming}
 								setConfirming={setConfirming}
 								label="Remove"
-								question={`Stop ${person.handle} starting hosted agents?`}
+								question={`Remove ${person.handle}? They can't start GitHive's hosted agents until you allow them again.`}
+								keep={`Keep ${person.handle}`}
 								busy={busy === key}
 								onConfirm={() => run(key, () => actions.disallowHosted(person.handle))}
 							/>

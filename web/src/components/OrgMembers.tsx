@@ -6,11 +6,12 @@ import { addedMessage, assignableRoles } from "../lib/orgs";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
-import type { ConfirmProps, SectionProps } from "./OrgPage";
+import type { ConfirmProps, SectionProps, UndoProps } from "./OrgPage";
 import { Badge } from "./ui/badge";
 import { Box, BoxHeader } from "./ui/box";
 import { Button } from "./ui/button";
 import { FieldHint, Input, NativeSelect } from "./ui/field";
+import { UndoLine } from "./ui/undo-line";
 import { INLINE, INLINE_INPUT, NOTE, ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED, STACK, TITLE } from "./ui/manage";
 
 type Member = OrgDetail["members"][number];
@@ -51,9 +52,10 @@ export function MembersSection({
 	confirming,
 	setConfirming,
 	errorFor,
-}: SectionProps & ConfirmProps & { me: { handle: string }; manager: boolean }) {
+	undo,
+}: SectionProps & ConfirmProps & UndoProps & { me: { handle: string }; manager: boolean }) {
 	const roles = assignableRoles(org.role);
-	const rowProps = { org, actions, run, busy, confirming, setConfirming, errorFor };
+	const rowProps = { org, actions, run, busy, confirming, setConfirming, errorFor, undo };
 	// Someone added or invited since the page showed fades in.
 	const arrived = useArrivals([
 		...org.members.map((member) => member.handle),
@@ -91,6 +93,7 @@ export function MembersSection({
 						))
 					: null}
 			</ul>
+			<UndoLine undo={undo} where="members" className="[&>p]:my-2" />
 			{manager ? <AddMemberForm org={org} actions={actions} run={run} busy={busy} roles={roles} /> : null}
 		</Box>
 	);
@@ -172,7 +175,7 @@ function AddMemberForm({
 	);
 }
 
-interface MemberRowProps extends SectionProps, ConfirmProps {
+interface MemberRowProps extends SectionProps, ConfirmProps, UndoProps {
 	member: Member;
 	isMe: boolean;
 	/** Whether you may change this member's role or remove them. */
@@ -183,7 +186,7 @@ interface MemberRowProps extends SectionProps, ConfirmProps {
 	arrived: boolean;
 }
 
-function MemberRow({ member, isMe, editable, roles, errorFor, arrived, ...rest }: MemberRowProps) {
+function MemberRow({ member, isMe, editable, roles, errorFor, arrived, undo: _, ...rest }: MemberRowProps) {
 	const key = `member:${member.handle}`;
 	return (
 		<li className={cn(RULED, arrived && "animate-appear")}>
@@ -246,7 +249,8 @@ function MemberControls({
 				confirming={confirming}
 				setConfirming={setConfirming}
 				label="Remove"
-				question={`Remove ${member.handle} from ${org.slug}?`}
+				question={`Remove ${member.handle} from ${org.slug}? They lose what its members can do, and their teams.`}
+				keep={`Keep ${member.handle}`}
 				busy={busy === rowKey}
 				onConfirm={() => run(rowKey, () => actions.removeMember(org.slug, member.handle))}
 			/>
@@ -262,10 +266,21 @@ function InviteRow({
 	confirming,
 	setConfirming,
 	errorFor,
+	undo,
 	invite,
 	arrived,
-}: SectionProps & ConfirmProps & { invite: Invite; arrived: boolean }) {
+}: SectionProps & ConfirmProps & UndoProps & { invite: Invite; arrived: boolean }) {
 	const key = `invite:${invite.email}`;
+	const cancel = () =>
+		run(key, () => actions.cancelInvite(org.slug, invite.email)).then(
+			(ok) =>
+				ok &&
+				undo.offer(
+					"members",
+					{ done: `Cancelled ${invite.email}'s invitation.`, undone: `${invite.email} is invited again.` },
+					() => actions.addMember(org.slug, invite.email, invite.role),
+				),
+		);
 	return (
 		<li className={cn(RULED, arrived && "animate-appear")}>
 			<div className={ROW}>
@@ -279,9 +294,10 @@ function InviteRow({
 					confirming={confirming}
 					setConfirming={setConfirming}
 					label="Cancel invitation"
-					question={`Cancel ${invite.email}'s invitation?`}
+					question={`Cancel ${invite.email}'s invitation? They won't join ${org.slug} when they sign in.`}
+					keep="Keep invitation"
 					busy={busy === key}
-					onConfirm={() => run(key, () => actions.cancelInvite(org.slug, invite.email))}
+					onConfirm={cancel}
 				/>
 			</div>
 			{errorFor(key)}

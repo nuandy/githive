@@ -293,7 +293,8 @@ function ConnectedApps({
 							confirming={confirming}
 							setConfirming={setConfirming}
 							label="Disconnect"
-							question={`Disconnect ${connection.client}?`}
+							question={`Disconnect ${connection.client}? It stops acting as ${connection.agent ?? "your agent"} until it signs in again.`}
+							keep={`Keep ${connection.client}`}
 							busy={busy === key}
 							onConfirm={() => run(key, () => actions.disconnect(connection.id), showError(connection.id))}
 						/>

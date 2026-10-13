@@ -7,11 +7,13 @@ import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useRowActions } from "../hooks/useRowActions";
 import { useStagger } from "../hooks/useStagger";
+import { type Undo, useUndo } from "../hooks/useUndo";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Box, BoxBody, BoxHeader } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, NativeSelect } from "./ui/field";
+import { UndoLine } from "./ui/undo-line";
 import { INLINE, INLINE_INPUT, LINE, NOTE, ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED, STACK, TERMS } from "./ui/manage";
 
 /** What the repo's Settings can change. */
@@ -130,6 +132,7 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 	const [listError, setListError] = useState<string | null>(null);
 	const [handle, setHandle] = useState("");
 	const [level, setLevel] = useState<Level>("write");
+	const undo = useUndo();
 	const load = () =>
 		manage.collaborators(repo).then(
 			(list) => {
@@ -184,9 +187,11 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 						confirming={confirming}
 						setConfirming={setConfirming}
 						arrived={arrived(collaborator.handle)}
+						undo={undo}
 					/>
 				))}
 			</ul>
+			<UndoLine undo={undo} where="collaborators" className="[&>p]:my-2" />
 			<form className={cn("px-0.5 py-4", STACK)} onSubmit={add}>
 				<div className={INLINE}>
 					<label className="sr-only" htmlFor="collab-handle">
@@ -260,6 +265,7 @@ export function VisibilityToggle({
 					setConfirming={setConfirming}
 					label="Make public"
 					question={`Make ${repo} public? Anyone signed in to GitHive can read its code and history.`}
+					keep="Keep private"
 					busy={busy === "visibility"}
 					onConfirm={() => make("public")}
 				/>
@@ -283,6 +289,7 @@ interface CollaboratorRowProps extends RunProps {
 	setConfirming: (id: string | null) => void;
 	/** Added since the list was first read: it fades in. */
 	arrived: boolean;
+	undo: Undo;
 }
 
 function CollaboratorRow({
@@ -296,10 +303,24 @@ function CollaboratorRow({
 	busy,
 	errorFor,
 	arrived,
+	undo,
 }: CollaboratorRowProps) {
-	const { handle } = collaborator;
+	const { handle, permission } = collaborator;
 	const key = `collab:${handle}`;
 	const runThenReload = (work: () => Promise<unknown>) => run(key, work).then((ok) => (ok ? reload() : undefined));
+	const remove = () =>
+		run(key, () => manage.removeCollaborator(repo, handle)).then(async (ok) => {
+			if (!ok) return;
+			await reload();
+			undo.offer(
+				"collaborators",
+				{ done: `Removed ${handle}.`, undone: `${handle} is back, with ${label(permission)}.` },
+				async () => {
+					await manage.setCollaborator(repo, handle, permission);
+					await reload();
+				},
+			);
+		});
 	return (
 		<li className={cn(RULED, arrived && "animate-appear")}>
 			<div className={ROW}>
@@ -321,9 +342,10 @@ function CollaboratorRow({
 						confirming={confirming}
 						setConfirming={setConfirming}
 						label="Remove"
-						question={`Remove ${handle}?`}
+						question={`Remove ${handle}? They and their agents lose ${label(permission)} access to ${repo}.`}
+						keep={`Keep ${handle}`}
 						busy={busy === key}
-						onConfirm={() => runThenReload(() => manage.removeCollaborator(repo, handle))}
+						onConfirm={remove}
 					/>
 				</div>
 			</div>

@@ -5,6 +5,7 @@ import { canLeave, canManage } from "../lib/orgs";
 import { LEVELS, type Level } from "../lib/permissions";
 import { href } from "../lib/routes";
 import { useRowActions } from "../hooks/useRowActions";
+import { type Undo, useUndo } from "../hooks/useUndo";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
@@ -49,6 +50,8 @@ export interface SectionProps {
 	errorFor: (key: string) => React.ReactNode;
 }
 export type ConfirmProps = { confirming: string | null; setConfirming: (id: string | null) => void };
+/** The page's undo line, offered after what can be taken back. */
+export type UndoProps = { undo: Undo };
 
 /**
  * An organization: its repositories (those you can see); to its members, its
@@ -59,6 +62,7 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 	const manager = canManage(org.role);
 	const mine = org.personal && org.slug === me.handle;
 	const { run, busy, confirming, setConfirming, errorFor } = useRowActions();
+	const undo = useUndo();
 	const leave = () => run("leave", () => actions.removeMember(org.slug, me.handle)).then((ok) => ok && onLeft());
 	const confirm = { confirming, setConfirming };
 
@@ -82,7 +86,8 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 									id="leave"
 									{...confirm}
 									label="Leave"
-									question={`Leave ${org.slug}?`}
+									question={`Leave ${org.slug}? You lose what its members can do until someone adds you again.`}
+									keep={`Stay in ${org.slug}`}
 									busy={busy === "leave"}
 									onConfirm={leave}
 								/>
@@ -106,6 +111,7 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 						busy={busy}
 						{...confirm}
 						errorFor={errorFor}
+						undo={undo}
 					/>
 					<TeamsSection
 						org={org}
@@ -115,6 +121,7 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 						busy={busy}
 						{...confirm}
 						errorFor={errorFor}
+						undo={undo}
 					/>
 					{manager ? <SettingsSection org={org} actions={actions} run={run} busy={busy} errorFor={errorFor} /> : null}
 				</>

@@ -6,10 +6,11 @@ import { useStagger } from "../hooks/useStagger";
 import { SLUG_HINT, slugProblem } from "../lib/orgs";
 import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
-import type { ConfirmProps, SectionProps } from "./OrgPage";
+import type { ConfirmProps, SectionProps, UndoProps } from "./OrgPage";
 import { Box, BoxHeader } from "./ui/box";
 import { Button } from "./ui/button";
 import { FieldHint, Input, NativeSelect } from "./ui/field";
+import { UndoLine } from "./ui/undo-line";
 import { INLINE, INLINE_INPUT, LINE, NOTE, ROW, ROW_MAIN, ROWS, RULED, STACK, TITLE } from "./ui/manage";
 
 type Team = OrgDetail["teams"][number];
@@ -24,13 +25,14 @@ export function TeamsSection({
 	confirming,
 	setConfirming,
 	errorFor,
-}: SectionProps & ConfirmProps & { manager: boolean }) {
+	undo,
+}: SectionProps & ConfirmProps & UndoProps & { manager: boolean }) {
 	const [slug, setSlug] = useState("");
 	const [name, setName] = useState("");
 	const [createError, setCreateError] = useState<string | null>(null);
 	const [adding, setAdding] = useState<Record<string, string>>({});
 	const problem = slug ? slugProblem(slug) : null;
-	const rowProps = { org, manager, actions, run, busy, confirming, setConfirming, errorFor };
+	const rowProps = { org, manager, actions, run, busy, confirming, setConfirming, errorFor, undo };
 	// A team made since the page showed fades in.
 	const arrived = useArrivals(org.teams.map((team) => team.slug));
 	const staggers = useStagger(org.teams.length > 0);
@@ -132,7 +134,7 @@ function NewTeamHint({ orgSlug, slug, problem }: { orgSlug: string; slug: string
 	);
 }
 
-interface TeamRowProps extends SectionProps, ConfirmProps {
+interface TeamRowProps extends SectionProps, ConfirmProps, UndoProps {
 	manager: boolean;
 	team: Team;
 	/** Made since the page showed: it fades in. */
@@ -151,12 +153,22 @@ function TeamRow({
 	confirming,
 	setConfirming,
 	errorFor,
+	undo,
 	team,
 	arrived,
 	adding,
 	setAdding,
 }: TeamRowProps) {
 	const key = `team:${team.slug}`;
+	const name = `@${org.slug}/${team.slug}`;
+	const takeOff = (handle: string) =>
+		run(key, () => actions.removeTeamMember(org.slug, team.slug, handle)).then(
+			(ok) =>
+				ok &&
+				undo.offer(key, { done: `Took ${handle} off ${name}.`, undone: `${handle} is back on ${name}.` }, () =>
+					actions.addTeamMember(org.slug, team.slug, handle),
+				),
+		);
 	const others = org.members.map((member) => member.handle).filter((handle) => !team.members.includes(handle));
 	const addChosen = () =>
 		run(key, () => actions.addTeamMember(org.slug, team.slug, adding!)).then((ok) => ok && setAdding(""));
@@ -176,7 +188,8 @@ function TeamRow({
 						confirming={confirming}
 						setConfirming={setConfirming}
 						label="Delete team"
-						question={`Delete @${org.slug}/${team.slug}? Roles granted to it stop counting its members.`}
+						question={`Delete ${name}? Roles granted to it stop counting its members.`}
+						keep="Keep team"
 						busy={busy === key}
 						onConfirm={() => run(key, () => actions.deleteTeam(org.slug, team.slug))}
 					/>
@@ -194,9 +207,9 @@ function TeamRow({
 							<Button
 								variant="ghost"
 								className="border-0 px-1.5 py-0 text-ui leading-4.5"
-								aria-label={`Take ${handle} off @${org.slug}/${team.slug}`}
+								aria-label={`Take ${handle} off ${name}`}
 								disabled={busy === key}
-								onClick={() => run(key, () => actions.removeTeamMember(org.slug, team.slug, handle))}
+								onClick={() => takeOff(handle)}
 							>
 								×
 							</Button>
@@ -226,6 +239,7 @@ function TeamRow({
 					</Button>
 				</div>
 			) : null}
+			<UndoLine undo={undo} where={key} />
 			{errorFor(key)}
 		</li>
 	);

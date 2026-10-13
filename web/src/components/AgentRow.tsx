@@ -147,7 +147,8 @@ function AgentControls({
 				confirming={confirming}
 				setConfirming={setConfirming}
 				label="Revoke"
-				question={`Revoke ${fullName}, its tokens and connected apps?`}
+				question={`Revoke ${fullName}? Its tokens and connected apps stop working, for good.`}
+				keep="Keep agent"
 				busy={busy === agentKey}
 				onConfirm={() => run(agentKey, () => actions.revokeAgent(agent.id), setError)}
 			/>
@@ -211,7 +212,8 @@ function TokenStatus({
 			confirming={confirming}
 			setConfirming={setConfirming}
 			label="Revoke"
-			question="Revoke this token?"
+			question={`Revoke ${tokenLabel(token.prefix)}? Whatever signs in with it stops working.`}
+			keep="Keep token"
 			busy={busy === key}
 			onConfirm={() => run(key, () => actions.revokeToken(token.id), setError)}
 		/>
