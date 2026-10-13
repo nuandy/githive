@@ -116,15 +116,32 @@ export interface GoalsPanelProps {
 	onSeen(change: string): void;
 	onHover(change: string | null): void;
 	now: number;
-	/** The view to start in, where there's no remembered one (tests). */
-	view?: View;
+	/**
+	 * Story or Timeline: with `onView`, the one the address asks for, else the one remembered in this browser; without
+	 * it, the view to start in where there's no remembered one (tests).
+	 */
+	view?: View | undefined;
+	onView?(view: View): void;
+	/** The row the address opens, and telling it which row was opened last (or that it was closed). */
+	row?: string | undefined;
+	onRow?(row: string | undefined): void;
 }
 
 export function GoalsPanel(props: GoalsPanelProps) {
 	const { repo, branch, goals, range, filter, now } = props;
-	const [view, setView] = useView(props.view);
+	const [ownView, setOwnView] = useView(props.view);
+	const view = props.onView ? (props.view ?? ownView) : ownView;
+	const setView = (next: View) => {
+		setOwnView(next);
+		props.onView?.(next);
+	};
 	const timeline = view === "timeline";
-	const [open, setOpen] = useState<Set<string>>(new Set());
+	const [open, setOpen] = useState<Set<string>>(() => new Set(props.row ? [props.row] : []));
+	// A row the address names opens, when the page opens and whenever the address changes to it.
+	const linked = props.row;
+	useEffect(() => {
+		if (linked) setOpen((current) => (current.has(linked) ? current : new Set([...current, linked])));
+	}, [linked]);
 	const [showFinished, setShowFinished] = useState(false);
 	const [held, setHeld] = useState<string | null>(null);
 	const panel = useRef<HTMLElement>(null);
@@ -179,6 +196,8 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	);
 	const toggle = (key: string) => {
 		props.onSeen(key);
+		if (!open.has(key)) props.onRow?.(key);
+		else if (key === props.row) props.onRow?.(undefined);
 		setOpen((current) => {
 			const next = new Set(current);
 			if (next.has(key)) next.delete(key);
@@ -439,7 +458,7 @@ function matches(goal: Goal, filter: HiveFilter | null): boolean {
 	return filter.goals.includes(goal.key);
 }
 
-/** Story or Timeline, remembered in this browser. */
+/** Story or Timeline, remembered in this browser: the default where the address doesn't say. */
 function useView(initial: View = "story"): [View, (view: View) => void] {
 	const [view, setView] = useState<View>(() => {
 		try {

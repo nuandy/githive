@@ -162,6 +162,31 @@ describe("the Hive tab", () => {
 		expect(text).toContain("Its last stretch of work finished");
 	});
 
+	it("opens as its address says: the window, the view, the agent shown and the row open", () => {
+		const claims = [claim("ipv6", { head: "a1" }), claim("brotli", { agent: "carol-claude", intent: "Add brotli" })];
+		const html = render({
+			snapshot: { ...repoSnapshot, claims, votes: [] },
+			query: { window: 6 * 60 * 60_000, view: "timeline", agent: "agent-12", row: "ipv6" },
+		});
+		expect(html).toContain('data-view="timeline"');
+		expect(html).toMatch(/aria-pressed="true"[^>]*>6 h</);
+		expect(visibleText(html)).toContain("only agent-12 ×");
+		expect(html).toMatch(/aria-expanded="true" aria-controls="steps-ipv6"/);
+	});
+
+	it("asks for an answer on a change's page only when it needs a person, never while it's building", () => {
+		const awaiting = { approved: false, approvals: 0, required: 1, vetoedBy: [], awaiting: ["security"] };
+		const attention = { reason: "may I bump the router?", agent: "agent-12", at: ago(1) };
+		const open = (extra: Partial<Claim>) =>
+			visibleText(
+				render({ snapshot: { ...repoSnapshot, claims: [claim("x", extra)], votes: [] }, query: { row: "x" } }),
+			);
+		// Still building, though a role waits to vote on it once it's pushed.
+		expect(open({ approval: awaiting })).toContain("Open the change →");
+		expect(open({ approval: awaiting })).not.toContain("Answer it on its page");
+		expect(open({ attention })).toContain("Answer it on its page →");
+	});
+
 	it("shows up next only when it knows the backlog", () => {
 		const backlog = [{ id: "is-edges", title: "req.is tests", intent: "req.is tests", by: "planner", at: ago(30) }];
 		expect(visibleText(render())).not.toContain("up next");

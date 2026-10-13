@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isLoose, repoPath, splitRepo } from "./repoName";
-import { href, parseRoute } from "./routes";
+import { hiveQuery, href, parseRoute, withHiveQuery } from "./routes";
 
 describe("hash routes", () => {
 	it("parses the pages", () => {
@@ -73,6 +73,33 @@ describe("hash routes", () => {
 			path: "src/x#y.ts",
 			ref: "feature/1",
 		});
+	});
+});
+
+describe("the Hive tab's view in its address", () => {
+	const HOUR = 60 * 60_000;
+
+	it("reads the time window, the view, the agent shown and the row open", () => {
+		const hash = "#/repos/acme/web?window=6h&view=timeline&agent=agent-7&row=links";
+		expect(hiveQuery(hash)).toEqual({ window: 6 * HOUR, view: "timeline", agent: "agent-7", row: "links" });
+		// Still the repo's Hive tab.
+		expect(parseRoute(hash)).toEqual({ page: "repo", repo: "acme/web", tab: "hive" });
+		expect(hiveQuery("#/repos/acme/web?window=15m")).toEqual({ window: 15 * 60_000 });
+	});
+
+	it("leaves out what it doesn't know", () => {
+		expect(hiveQuery("#/repos/acme/web")).toEqual({});
+		expect(hiveQuery("#/repos/acme/web?window=7h&view=grid&agent=&row=")).toEqual({});
+	});
+
+	it("writes them back, beside whatever else the address says, and drops what's unset", () => {
+		expect(withHiveQuery("#/repos/acme/web", { window: 6 * HOUR })).toBe("#/repos/acme/web?window=6h");
+		expect(withHiveQuery("#/repos/acme/web?branch=next&view=story", { view: "timeline" })).toBe(
+			"#/repos/acme/web?branch=next&view=timeline",
+		);
+		expect(withHiveQuery("#/repos/acme/web?window=6h&row=x", {})).toBe("#/repos/acme/web");
+		const odd = { agent: "service:abc/alice claude", row: "a&b" };
+		expect(hiveQuery(withHiveQuery("#/repos/acme/web", odd))).toEqual(odd);
 	});
 });
 
