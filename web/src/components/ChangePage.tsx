@@ -151,8 +151,8 @@ function cleanHead(claim: Claim, votes: Vote[], check: MergeCheck | undefined): 
 }
 
 /**
- * Merge for a person, once a change is approved, waits on nothing and its head is clean. It's the same merge an agent
- * asks for.
+ * Land, for a person, once a change is approved, waits on nothing and its head is clean. It's the same landing an
+ * agent asks for: its checks run first.
  */
 function MergeButton({
 	repo,
@@ -172,8 +172,8 @@ function MergeButton({
 			const merged = await merge(repo, change);
 			setOutcome(
 				merged.ok
-					? { ok: true, text: `Merged as ${merged.commit?.slice(0, 8)}.` }
-					: { ok: false, text: (merged.reasons ?? ["It couldn't merge."]).join(" ") },
+					? { ok: true, text: `Landed as ${merged.commit?.slice(0, 8)}.` }
+					: { ok: false, text: (merged.reasons ?? ["It couldn't land."]).join(" ") },
 			);
 		} catch (err) {
 			setOutcome({ ok: false, text: messageOf(err) });
@@ -184,13 +184,13 @@ function MergeButton({
 	return (
 		<HeaderAction outcome={outcome}>
 			<Button variant="go" onClick={mergeChange} disabled={busy}>
-				{busy ? "Merging… (its checks run first)" : "Merge"}
+				{busy ? "Landing… (its checks run first)" : "Land"}
 			</Button>
 		</HeaderAction>
 	);
 }
 
-/** The header's line about the change: who merged or released it, or who wants to merge it. */
+/** The header's line about the change: who landed or released it, or who wants to land it. */
 function ChangeHeadline({
 	agent,
 	ending,
@@ -207,7 +207,7 @@ function ChangeHeadline({
 	if (ending?.kind === "merged") {
 		return (
 			<>
-				<strong>{agent}</strong> merged {branchCode} into {into} {timeAgo(ending.release.at)}
+				<strong>{agent}</strong> landed {branchCode} on {into} {timeAgo(ending.release.at)}
 			</>
 		);
 	}
@@ -220,7 +220,7 @@ function ChangeHeadline({
 	}
 	return (
 		<>
-			<strong>{agent}</strong> wants to merge {branchCode} into {into}
+			<strong>{agent}</strong> wants to land {branchCode} on {into}
 			{record?.since ? <span className="text-muted-foreground"> · opened {timeAgo(record.since)}</span> : null}
 		</>
 	);
@@ -315,7 +315,7 @@ function MergeBox({
 	return (
 		<section
 			className={cn("relative rounded-md border border-border bg-card", INDENT, merged && "border-good/45")}
-			aria-label="Merge status"
+			aria-label="Landing status"
 		>
 			<div className="flex items-start gap-3 px-4 py-3">
 				<span
@@ -375,7 +375,7 @@ function ClaimMergeBox({
 	);
 }
 
-/** How a change that's no longer in force ended: merged, or its claim released. */
+/** How a change that's no longer in force ended: landed, or its claim released. */
 function EndingMergeBox({ ending, branch, repo }: { ending: ChangeEnding; branch: string; repo: string }) {
 	const merged = ending.kind === "merged";
 	return (
@@ -383,7 +383,7 @@ function EndingMergeBox({ ending, branch, repo }: { ending: ChangeEnding; branch
 			tone={merged ? "good" : "neutral"}
 			icon={merged ? "merge" : "ban"}
 			merged={merged}
-			title={merged ? `Merged into ${branch}` : "Claim released"}
+			title={merged ? `Landed on ${branch}` : "Claim released"}
 		>
 			{merged ? (
 				<>

@@ -17,7 +17,7 @@ describe("a repo", () => {
 		expect(html).toContain("1/2 approvals");
 		expect(html).toContain("b1c2d3e");
 		expect(html).toContain("Changes requested");
-		expect(html).toMatch(/3<\/span> merged on main/);
+		expect(html).toMatch(/3<\/span> landed on main/);
 	});
 
 	it("shows the audit, with open and resolved violations apart, and recent reviews", () => {
@@ -142,7 +142,7 @@ describe("a repo", () => {
 				tab="conversation"
 			/>,
 		);
-		expect(html).toMatch(/<strong>agent-c<\/strong> wants to merge <code[^>]*>changes\/c-1<\/code>/);
+		expect(html).toMatch(/<strong>agent-c<\/strong> wants to land <code[^>]*>changes\/c-1<\/code> on <code/);
 		expect(html).toContain("rev-1</strong> (tests reviewer) approved these changes");
 		expect(html).toContain("First draft of section C");
 		expect(html).toContain("1 of 2 approvals");

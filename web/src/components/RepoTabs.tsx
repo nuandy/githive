@@ -261,7 +261,7 @@ export function ChangeList({
 				{snapshot.audit ? (
 					<span className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground">
 						<Icon name="merge" />
-						<Bumping count={snapshot.audit.merges} /> merged on {snapshot.branch ?? "main"}
+						<Bumping count={snapshot.audit.merges} /> landed on {snapshot.branch ?? "main"}
 					</span>
 				) : null}
 			</BoxHeader>

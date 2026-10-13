@@ -51,33 +51,33 @@ const page = (props: Partial<ChangePageProps>) =>
 		),
 	);
 
-/** The Merge button, not the merge box's label or a sentence about merging. */
-const MERGE = /\bMerge\b(?! status)/;
+/** The Land button, not "Landed" or "Landing" in a sentence. */
+const LAND = /\bLand\b/;
 
-describe("merging a change", () => {
-	it("offers no Merge for a change whose checks failed on its head", () => {
+describe("landing a change", () => {
+	it("offers no Land for a change whose checks failed on its head", () => {
 		const text = page({ history: withVotes([vote({})]) });
 		expect(text).toContain("Checks failed");
-		expect(text).not.toMatch(MERGE);
+		expect(text).not.toMatch(LAND);
 	});
 
-	it("offers no Merge for a change a reviewer rejected on its head", () => {
+	it("offers no Land for a change a reviewer rejected on its head", () => {
 		const text = page({ history: withVotes([vote({ reviewer: "ines", role: "review" })]) });
 		expect(text).toContain("Changes requested");
-		expect(text).not.toMatch(MERGE);
+		expect(text).not.toMatch(LAND);
 	});
 
-	it("offers no Merge for a change that conflicts with main", () => {
+	it("offers no Land for a change that conflicts with main", () => {
 		const text = page({ history: { ...historyFixture, merge: conflict() } });
 		expect(text).toContain("Conflicts with main");
-		expect(text).not.toMatch(MERGE);
+		expect(text).not.toMatch(LAND);
 	});
 
-	it("offers Merge for an approved change with a clean head", () => {
+	it("offers Land for an approved change with a clean head", () => {
 		const text = page({});
 		expect(text).toContain("Approved");
-		expect(text).toMatch(MERGE);
-		expect(page({ history: { ...historyFixture, merge: conflict({ clean: true, conflicts: [] }) } })).toMatch(MERGE);
+		expect(text).toMatch(LAND);
+		expect(page({ history: { ...historyFixture, merge: conflict({ clean: true, conflicts: [] }) } })).toMatch(LAND);
 	});
 
 	it("counts only what was found on its head, not on an earlier push", () => {
@@ -89,7 +89,7 @@ describe("merging a change", () => {
 			},
 		});
 		expect(text).toContain("Approved");
-		expect(text).toMatch(MERGE);
+		expect(text).toMatch(LAND);
 	});
 });
 
