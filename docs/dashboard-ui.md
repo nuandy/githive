@@ -27,7 +27,8 @@ markup, drawn from the theme.
 - Actions: `primary` (the ink fill of a primary action), `link` and `link-soft` (links, focus, "in progress"), `ring`.
 - The lamps, always the same meaning: `amber` (claimed, in line, checking), `good` (approved, passed, landed), `bad`
   (failed, vetoed), `needs` (waits on a person), plus `warn` (amber dark enough for text) and `neutral`. Each has a
-  `-soft` background.
+  `-soft` background. Text on a solid `good`, `bad`, `warn` or `needs` fill is that color's `-foreground`
+  (`bg-good text-good-foreground`), never `text-white`: dark mode's lamps are bright, and take dark text.
 - Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
   `mark-line`).
 

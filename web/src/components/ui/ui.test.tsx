@@ -54,7 +54,7 @@ describe("the building blocks", () => {
 				Failed
 			</Badge>,
 		);
-		expect(solid).toContain("bg-bad text-white");
+		expect(solid).toContain("bg-bad text-bad-foreground");
 		expect(solid).not.toContain("bg-bad-soft");
 		expect(renderToStaticMarkup(<Counter>13</Counter>)).toContain(">13<");
 	});

@@ -99,6 +99,11 @@
 	--neutral: #56636b;
 	--neutral-soft: #e8ecea;
 	--destructive: var(--bad);
+	/* Text on a lamp's solid fill (Merge, a solid pill, the inbox count): white, and on dark's brighter lamps, dark. */
+	--good-foreground: #ffffff;
+	--bad-foreground: #ffffff;
+	--warn-foreground: #ffffff;
+	--needs-foreground: #ffffff;
 
 	--diff-add: #e3f2e9;
 	--diff-add-strong: #c6e6d3;
@@ -169,6 +174,10 @@
 	--needs-soft: #3a1d1a;
 	--neutral: #9aa8a6;
 	--neutral-soft: #232f35;
+	--good-foreground: #121a1f;
+	--bad-foreground: #121a1f;
+	--warn-foreground: #121a1f;
+	--needs-foreground: #121a1f;
 
 	--diff-add: #12261c;
 	--diff-add-strong: #1b3a29;
@@ -235,12 +244,16 @@
 	--color-amber-soft: var(--amber-soft);
 	--color-good: var(--good);
 	--color-good-soft: var(--good-soft);
+	--color-good-foreground: var(--good-foreground);
 	--color-warn: var(--warn);
 	--color-warn-soft: var(--warn-soft);
+	--color-warn-foreground: var(--warn-foreground);
 	--color-bad: var(--bad);
 	--color-bad-soft: var(--bad-soft);
+	--color-bad-foreground: var(--bad-foreground);
 	--color-needs: var(--needs);
 	--color-needs-soft: var(--needs-soft);
+	--color-needs-foreground: var(--needs-foreground);
 	--color-neutral: var(--neutral);
 	--color-neutral-soft: var(--neutral-soft);
 	--color-diff-add: var(--diff-add);

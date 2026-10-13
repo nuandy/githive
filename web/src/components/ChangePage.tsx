@@ -248,10 +248,10 @@ function approvalIcon(approval: Claim["approval"]): IconName {
 
 /** The merge box's lamp, by how the change stands; neutral, or the link's tone, is grey. */
 const MERGE_ICON: Partial<Record<Tone, string>> = {
-	good: "bg-good text-white",
-	bad: "bg-bad text-white",
+	good: "bg-good text-good-foreground",
+	bad: "bg-bad text-bad-foreground",
 	warn: "bg-warn-soft text-warn",
-	needs: "bg-needs text-white",
+	needs: "bg-needs text-needs-foreground",
 };
 
 /** The box under the conversation saying where the change stands: its lamp, a line in bold, and a muted line. */

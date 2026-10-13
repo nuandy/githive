@@ -172,10 +172,10 @@ export function TimelineList({ className, children }: { className?: string; chil
 
 /** A badge's colors by tone; neutral, or none, is the rule's own grey. */
 const BADGE: Partial<Record<Tone, string>> = {
-	good: "bg-good text-white",
-	bad: "bg-bad text-white",
+	good: "bg-good text-good-foreground",
+	bad: "bg-bad text-bad-foreground",
 	warn: "bg-warn-soft text-warn",
-	needs: "bg-needs text-white",
+	needs: "bg-needs text-needs-foreground",
 	accent: "bg-link-soft text-link",
 };
 
@@ -183,7 +183,7 @@ const BADGE: Partial<Record<Tone, string>> = {
 const KIND_BADGE: Partial<Record<TimelineKind, string>> = {
 	pushed: "bg-background text-muted-foreground",
 	note: "bg-background text-muted-foreground",
-	merged: "bg-good text-white",
+	merged: "bg-good text-good-foreground",
 };
 
 /** One entry: its badge on the rule, and what happened beside it. */
