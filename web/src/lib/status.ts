@@ -181,6 +181,8 @@ export function changeState(claim: Claim, context: StateContext = {}): ClaimStat
 		!!claim.head &&
 		!!landing?.checking?.changes.some((checked) => checked.change === claim.change && checked.head === claim.head);
 	if (now !== undefined && isAbandoned(claim, votes, checking, now)) return "abandoned";
+	// The batch being checked lands it all the same, so a veto or a rejection cast meanwhile doesn't change where it
+	// stands (claimStatus says who asked).
 	if (checking) return "landing";
 	if (claim.approval.vetoedBy.length) return "changes-requested";
 	// A batch that failed leaves the change approved ("checks" blocks nothing) and its head rejected.

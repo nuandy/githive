@@ -123,6 +123,15 @@ describe("a change's state", () => {
 		expect(changeState(claim({ approval: approved, head: "b".repeat(40) }), { landing })).toBe("approved");
 	});
 
+	it("is landing still when a veto or a rejection comes while it's checked: the batch lands it all the same", () => {
+		const vetoed = { ...approved, approved: false, vetoedBy: ["sec-bot"] };
+		const security = vote({ reviewer: "sec-bot", role: "security" });
+		expect(changeState(claim({ approval: vetoed }), { landing, votes: [security] })).toBe("landing");
+		expect(changeState(claim({ approval: approved }), { landing, votes: [vote()] })).toBe("landing");
+		const rejected = { reviewers: [{ role: "security", status: "done", verdict: "reject" }] };
+		expect(changeState(claim({ approval: approved, hosted: rejected }), { landing })).toBe("landing");
+	});
+
 	it("is abandoned once its agent's turn has gone unanswered, when the time is given", () => {
 		const hours = (n: number) => Date.parse("2026-10-09T00:00:00.000Z") + n * 3_600_000;
 		expect(changeState(claim({ head: null }), { now: hours(1) })).toBe("abandoned");
