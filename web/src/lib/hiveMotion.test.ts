@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, NOW } from "../test/fixtures";
 import type { Goal } from "./goals";
-import { goalMotions, holdLayout, MOST_MOTIONS, pendingWords, RIPPLE_MS } from "./hiveMotion";
+import { announcement, goalMotions, holdLayout, MOST_MOTIONS, pendingWords, RIPPLE_MS } from "./hiveMotion";
 
 const goal = (change: string, steps: Goal["steps"], extra: Partial<Goal> = {}): Goal => ({
 	key: change,
@@ -50,6 +50,22 @@ describe("what moves on the Hive tab", () => {
 	it("plays at most a few from one read; the rest just appear", () => {
 		const after = Array.from({ length: 30 }, (_, index) => goal(`g${index}`, [{ kind: "claimed", at: ago(index) }]));
 		expect(goalMotions([], after, NOW)).toHaveLength(MOST_MOTIONS);
+	});
+});
+
+describe("what a screen reader hears", () => {
+	it("says a landing, a failure, and what a person is needed for: a question, or a vote", () => {
+		const shown = goal("refunds", [], { agent: "devon/codex", title: "Handle refunds" });
+		expect(announcement(shown, "landed")).toBe("devon/codex landed Handle refunds");
+		expect(announcement(shown, "failed")).toBe("Handle refunds failed its checks");
+		const asks = {
+			...shown,
+			waiting: { kind: "question" as const, change: "refunds", agent: "", reason: "?", at: "" },
+		};
+		expect(announcement(asks, "asking")).toBe("devon/codex is asking a person about Handle refunds");
+		const votes = { ...shown, waiting: { kind: "vote" as const, change: "refunds", role: "payments" } };
+		expect(announcement(votes, "asking")).toBe("Handle refunds waits on a payments vote from a person");
+		expect(announcement(shown, "pushed")).toBeUndefined();
 	});
 });
 

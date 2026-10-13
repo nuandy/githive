@@ -90,9 +90,12 @@ export const MOTION_MS: Record<Motion, number> = {
 };
 
 /** Which motions are worth announcing to a screen reader, and how. */
-export function announcement(goal: Pick<Goal, "agent" | "title">, motion: Motion): string | undefined {
+export function announcement(goal: Pick<Goal, "agent" | "title" | "waiting">, motion: Motion): string | undefined {
 	if (motion === "landed") return `${goal.agent} landed ${goal.title}`;
-	if (motion === "asking") return `${goal.agent} is asking a person about ${goal.title}`;
+	if (motion === "asking")
+		return goal.waiting?.kind === "vote"
+			? `${goal.title} waits on a ${goal.waiting.role} vote from a person`
+			: `${goal.agent} is asking a person about ${goal.title}`;
 	if (motion === "failed") return `${goal.title} failed its checks`;
 	return undefined;
 }

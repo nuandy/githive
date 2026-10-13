@@ -179,6 +179,15 @@ describe("the hive's goals", () => {
 		const [waiting] = hiveGoals({ claims: [claim("deps", { head: "d1", approval })], votes: [], settings });
 		expect(waiting?.state).toBe("needs-person");
 		expect(goalStatus(waiting!)).toEqual({ words: "needs a person for a security vote", tone: "bad" });
+		// Only the role people alone may vote as: an agent may give the other.
+		const both = { ...approval, awaiting: ["qa", "security"] };
+		const policy = { required: 1, vetoes: ["security", "qa"], grants: { security: ["person:*"], qa: ["qa-bot"] } };
+		const [one] = hiveGoals({
+			claims: [claim("deps", { head: "d1", approval: both })],
+			votes: [],
+			settings: { policy },
+		});
+		expect(goalStatus(one!)).toEqual({ words: "needs a person for a security vote", tone: "bad" });
 	});
 
 	it("tells two agents' stories apart when one released a change and the other took it up", () => {

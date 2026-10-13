@@ -1,7 +1,15 @@
 import type { BacklogItem, HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { claimAgent } from "./claimStatus";
 import { timeOf } from "./model";
-import { type ChangeState, changeState, type RepoPolicy, type StateContext, STATES } from "./status";
+import {
+	type ChangeState,
+	changeState,
+	type RepoPolicy,
+	type StateContext,
+	STATES,
+	type Waiting,
+	waitingOn,
+} from "./status";
 
 // The Hive tab's goals: each change an agent announced, and everything that has happened to it since, put together
 // from the claims, votes, the hive's event log and what's landing. A goal is the unit the tab tells a story about;
@@ -64,6 +72,8 @@ export interface Goal {
 	head?: string | null;
 	approval?: Claim["approval"];
 	attention?: Claim["attention"];
+	/** What it waits on a person for, in force (status.ts, waitingOn): a question, or a vote only people may give. */
+	waiting?: Waiting;
 	/** Oldest first. */
 	steps: GoalStep[];
 	/** It began before the oldest event the log keeps, so its first steps may be missing. */
@@ -264,6 +274,7 @@ export function hiveGoals({
 			const last = index === stories.length - 1;
 			const held = last ? claim : undefined;
 			const ending = held ? undefined : endingOf(story);
+			const waiting = held && waitingOn(held, { votes, settings });
 			// A story whose claim is gone without a landing or a release we know of: on another branch, or its end fell
 			// out of the log. Either way it's no story to tell here.
 			if (!held && !ending) continue;
@@ -283,6 +294,7 @@ export function hiveGoals({
 				...(ending ? { finished: ending.at } : {}),
 				...(held ? { head: held.head, approval: held.approval } : {}),
 				...(held?.attention ? { attention: held.attention } : {}),
+				...(waiting ? { waiting } : {}),
 				steps: story,
 				earlierSteps: oldest === undefined || oldest > timeAt(announced),
 			});
@@ -426,9 +438,12 @@ export function goalStatus(goal: Goal): { words: string; tone: "accent" | "amber
 			return { words: `${short} · ${approval?.approvals ?? 0} of ${approval?.required ?? 1}${after}`, tone: "accent" };
 		}
 		case "needs-person": {
-			if (goal.attention) return { words: `${short}: ${goal.attention.reason}`, tone: "bad" };
-			const awaiting = approval?.awaiting ?? [];
-			return { words: `${short} for a ${awaiting.join(" and ") || "blocking"} vote`, tone: "bad" };
+			const waiting = goal.waiting;
+			const asks = goal.attention?.reason ?? (waiting?.kind === "question" ? waiting.reason : undefined);
+			if (asks) return { words: `${short}: ${asks}`, tone: "bad" };
+			// Only the role people alone may vote as: an agent may give the others it waits for.
+			const role = waiting?.kind === "vote" ? waiting.role : undefined;
+			return { words: role ? `${short} for a ${role} vote` : short, tone: "bad" };
 		}
 		case "approved":
 			return { words: `${short}, lands with the next batch${after}`, tone: "good" };
