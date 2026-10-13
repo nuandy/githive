@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Connection, MyAgent } from "../api";
 import { NOW, ago, visibleText } from "../test/fixtures";
 import { AgentLimitsPanel, LimitField, nextLimit } from "./AgentLimitsPanel";
-import { AgentsView, type AgentActions } from "./AgentsPage";
+import { AgentsView, type AgentActions, withIssued } from "./AgentsPage";
 import { TopBar } from "./TopBar";
 
 // A menu draws its choices only once it's open, into a portal, and a server render has neither: here every menu
@@ -194,10 +194,24 @@ describe("the Agents page", () => {
 	});
 
 	it("shows a new token once, with the command that uses it", () => {
-		const text = visibleText(render({ initialIssued: { agentId: "a1", token: "ghv_secretSECRETsecret" } }));
+		const text = visibleText(render({ initialIssued: { a1: "ghv_secretSECRETsecret" } }));
 		expect(text).toContain("Copy it now");
 		expect(text).toContain("ghv_secretSECRETsecret");
 		expect(text).toContain("--header Authorization: Bearer ghv_secretSECRETsecret");
+	});
+
+	it("keeps each agent's new token until it's dismissed", () => {
+		// Making a token for a second agent leaves the first one's shown; Done puts away only its own.
+		expect(withIssued({ a: "t1" }, "b", "t2")).toEqual({ a: "t1", b: "t2" });
+		expect(withIssued({ a: "t1", b: "t2" }, "a", null)).toEqual({ b: "t2" });
+		const other: MyAgent = { ...agents[0]!, id: "a3", name: "reviewer", tokens: [] };
+		const text = visibleText(
+			render({ agents: [agents[0]!, other], initialIssued: { a1: "ghv_firstFIRSTfirst", a3: "ghv_secondSECOND" } }),
+		);
+		expect(text).toContain("New token for ada/builder");
+		expect(text).toContain("ghv_firstFIRSTfirst");
+		expect(text).toContain("New token for ada/reviewer");
+		expect(text).toContain("ghv_secondSECOND");
 	});
 
 	it("lists connected apps with the agent each acts as", () => {

@@ -1,17 +1,32 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useChanged } from "../hooks/useChanged";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 
-function buttonText(copied: "copied" | "selected" | null, label: string): string {
+type Copied = "copied" | "selected" | null;
+
+function buttonText(copied: Copied, label: string): string {
 	if (copied === "copied") return "Copied";
 	if (copied === "selected") return "Selected: press ⌘C";
 	return label;
 }
 
-/** A command or secret to copy: shown in full, with a Copy button that falls back to selecting the text. */
+/**
+ * A command or secret to copy: shown in full, with a Copy button that falls back to selecting the text. The button is
+ * named by what it copies, never by the text, which may be a secret; a status line says it's copied, for a while.
+ */
 export function CopyBlock({ text, label = "Copy", className }: { text: string; label?: string; className?: string }) {
 	const codeRef = useRef<HTMLElement>(null);
-	const [copied, setCopied] = useState<"copied" | "selected" | null>(null);
+	const [copied, setCopied] = useState<Copied>(null);
+	const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+	useEffect(() => () => clearTimeout(timer.current), []);
+	const show = (state: Copied) => {
+		setCopied(state);
+		clearTimeout(timer.current);
+		timer.current = setTimeout(() => setCopied(null), 2000);
+	};
+	// The button's words cross-fade as they change; as the page first shows, they come with it.
+	const changed = useChanged(copied);
 	const selectText = () => {
 		const node = codeRef.current;
 		const selection = typeof window !== "undefined" ? window.getSelection() : null;
@@ -20,25 +35,29 @@ export function CopyBlock({ text, label = "Copy", className }: { text: string; l
 		range.selectNodeContents(node);
 		selection.removeAllRanges();
 		selection.addRange(range);
-		setCopied("selected");
+		show("selected");
 	};
 	const copy = () => {
 		// Called inside the click so the browser allows it. If a browser refuses anyway, the text is selected instead.
 		try {
-			navigator.clipboard.writeText(text).then(() => setCopied("copied"), selectText);
+			navigator.clipboard.writeText(text).then(() => show("copied"), selectText);
 		} catch {
 			selectText();
 		}
 	};
-	const shortText = text.length > 40 ? `${text.slice(0, 40)}…` : text;
 	return (
 		<div className={cn("flex min-w-0 items-start gap-2 to-560:flex-col to-560:items-stretch", className)}>
 			<pre className="min-w-0 flex-1 border border-border px-3 py-2.25">
 				<code ref={codeRef}>{text}</code>
 			</pre>
-			<Button className="min-w-18 shrink-0" onClick={copy} aria-label={`${label}: ${shortText}`}>
-				{buttonText(copied, label)}
+			<Button className="min-w-18 shrink-0" onClick={copy}>
+				<span key={copied ?? "label"} className={cn(changed && "animate-fade")}>
+					{buttonText(copied, label)}
+				</span>
 			</Button>
+			<span role="status" className="sr-only">
+				{copied ? buttonText(copied, label) : null}
+			</span>
 		</div>
 	);
 }
