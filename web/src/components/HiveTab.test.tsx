@@ -57,9 +57,10 @@ describe("the Hive tab", () => {
 		const text = visibleText(html);
 		expect(text).toContain("✓ 1 landed");
 		expect(text).toContain("Wire up the game src/main.js");
-		// The brief is one click away, not in the row.
+		// The brief is one click away, not in the row; the title goes to the change, and the chevron opens the row.
 		expect(text).not.toContain("put the game together");
-		expect(html).toContain(`title="${BRIEF.replace(/'/g, "&#x27;")}"`);
+		expect(html).toMatch(/<a [^>]*href="#\/repos\/acme\/web\/changes\/app"[^>]*>Wire up the game src\/main.js<\/a>/);
+		expect(html).toMatch(/<button [^>]*aria-expanded="false" aria-controls="steps-app" aria-label="Steps of Wire up/);
 		expect(text).not.toContain("an agent");
 		expect(text).not.toContain("bfa0f510");
 	});

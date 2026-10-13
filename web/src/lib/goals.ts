@@ -111,6 +111,30 @@ export function shortTitle(intent: string): string {
 	return title.replace(/[,;:]$/, "");
 }
 
+/** Words a shared start must have before it folds, and how many of its last it keeps to lead into the rest. */
+const SHARED_WORDS = 4;
+const LEAD_WORDS = 2;
+
+/**
+ * Titles as a list shows them side by side: where several start with the same four or more words (a swarm's "Add
+ * edge-case tests for …"), that start folds to its last two, so what tells each apart comes first and survives a cut:
+ * "…tests for res.links() in test/res.links.edges.js". The title in full is in its tooltip.
+ */
+export function distinctTitles(titles: string[]): string[] {
+	const words = titles.map((title) => title.split(" "));
+	return titles.map((title, index) => {
+		let shared = 0;
+		for (const [at, other] of words.entries()) {
+			if (at === index || titles[at] === title) continue;
+			let same = 0;
+			while (same < other.length && same < words[index]!.length - 1 && other[same] === words[index]![same]) same++;
+			shared = Math.max(shared, same);
+		}
+		if (shared < SHARED_WORDS) return title;
+		return `…${words[index]!.slice(shared - LEAD_WORDS).join(" ")}`;
+	});
+}
+
 const timeAt = (iso: string) => timeOf(iso) ?? 0;
 const byTime = <T extends { at: string }>(a: T, b: T) => timeAt(a.at) - timeAt(b.at);
 
