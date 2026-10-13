@@ -6,6 +6,7 @@ import { Box, BoxHeader, BoxRow, Callout } from "./box";
 import { Button } from "./button";
 import { Collapse } from "./collapse";
 import { Input, NativeSelect, Textarea } from "./field";
+import { Segmented } from "./segmented";
 
 describe("the building blocks", () => {
 	it("draws a plain button that doesn't submit forms", () => {
@@ -54,7 +55,7 @@ describe("the building blocks", () => {
 				Failed
 			</Badge>,
 		);
-		expect(solid).toContain("bg-bad text-white");
+		expect(solid).toContain("bg-bad text-bad-foreground");
 		expect(solid).not.toContain("bg-bad-soft");
 		expect(renderToStaticMarkup(<Counter>13</Counter>)).toContain(">13<");
 	});
@@ -98,6 +99,23 @@ describe("the building blocks", () => {
 		])
 			expect(html).toContain("border-border-strong");
 	});
+
+	it("doesn't clip a focused choice's ring", () => {
+		const html = renderToStaticMarkup(
+			<Segmented
+				label="Window"
+				options={[
+					{ value: 1, words: "1 h" },
+					{ value: 6, words: "6 h" },
+				]}
+				value={1}
+				onPick={() => undefined}
+			/>,
+		);
+		expect(html).not.toMatch(/data-slot="segmented"[^>]*overflow-hidden/);
+		expect(html).toContain("focus-visible:outline-2");
+		expect(html).not.toContain("focus-visible:outline-none");
+	});
 });
 
 describe("the theme menu", () => {
@@ -105,5 +123,22 @@ describe("the theme menu", () => {
 		const html = renderToStaticMarkup(<ThemeMenu />);
 		expect(html).toContain('aria-label="Theme: same as this device (light)"');
 		expect(html).toContain('aria-haspopup="menu"');
+	});
+});
+
+describe("the dashboard's source", () => {
+	// Every file under web/src but the tests, as text.
+	const sources = import.meta.glob<string>(["../../**/*.{ts,tsx}", "!../../**/*.test.{ts,tsx}"], {
+		query: "?raw",
+		import: "default",
+		eager: true,
+	});
+
+	it("uses no raw colors or system styles: every color comes from theme.css", () => {
+		expect(Object.keys(sources).length).toBeGreaterThan(50);
+		const offenders = Object.keys(sources).filter((file) =>
+			/#[0-9a-f]{6}\b|ThreeDFace|font-family:monospace/i.test(sources[file]!),
+		);
+		expect(offenders).toEqual([]);
 	});
 });

@@ -119,14 +119,14 @@ function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefin
 	);
 }
 
-/** How many wait, on a pill: white on the color of what needs a person. It bumps as the number changes. */
+/** How many wait, on a pill in the color of what needs a person. It bumps as the number changes. */
 function PillCount({ children }: { children: number }) {
 	const changed = useChanged(children);
 	return (
 		<span
 			key={children}
 			className={cn(
-				"min-w-4.5 rounded-full bg-needs px-1.5 text-center text-micro leading-4.5 font-bold text-white",
+				"min-w-4.5 rounded-full bg-needs px-1.5 text-center text-micro leading-4.5 font-bold text-needs-foreground",
 				changed && "animate-bump",
 			)}
 		>

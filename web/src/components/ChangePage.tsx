@@ -291,10 +291,10 @@ function approvalIcon(approval: Claim["approval"], rejected: boolean): IconName 
 
 /** The merge box's lamp, by how the change stands; neutral, or the link's tone, is grey. */
 const MERGE_ICON: Partial<Record<Tone, string>> = {
-	good: "bg-good text-white",
-	bad: "bg-bad text-white",
+	good: "bg-good text-good-foreground",
+	bad: "bg-bad text-bad-foreground",
 	warn: "bg-warn-soft text-warn",
-	needs: "bg-needs text-white",
+	needs: "bg-needs text-needs-foreground",
 };
 
 /** The box under the conversation saying where the change stands: its lamp, a line in bold, and a muted line. */
@@ -447,7 +447,7 @@ function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord
 		<article className={cn("relative min-w-0 rounded-md border border-border bg-card", INDENT)}>
 			{/* Its author's avatar, out in the margin the column is indented by. */}
 			<span
-				className="absolute top-3 -left-11 inline-flex size-8 items-center justify-center rounded-full bg-link-soft text-[#b86e00] to-720:hidden"
+				className="absolute top-3 -left-11 inline-flex size-8 items-center justify-center rounded-full bg-link-soft text-warn to-720:hidden"
 				aria-hidden="true"
 			>
 				<Icon name="user" />

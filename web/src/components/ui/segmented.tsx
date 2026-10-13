@@ -23,7 +23,7 @@ export function Segmented<T extends string | number>({
 			data-slot="segmented"
 			role="group"
 			aria-label={label}
-			className={cn("inline-flex overflow-hidden rounded-md border border-border-strong", className)}
+			className={cn("inline-flex rounded-md border border-border-strong", className)}
 			{...props}
 		>
 			{options.map((option) => (
@@ -32,11 +32,13 @@ export function Segmented<T extends string | number>({
 					type="button"
 					aria-pressed={option.value === value}
 					className={cn(
-						"inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-none border-0 bg-transparent px-2.5 py-0.5",
+						"relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-none border-0 bg-transparent px-2.5 py-0.5",
+						// The end choices round to the box's inside corners, so the box needn't clip them (and their focus ring).
+						"first:rounded-l-[calc(var(--radius)-1px)] last:rounded-r-[calc(var(--radius)-1px)]",
 						"[font-family:inherit] text-caption leading-5 font-semibold whitespace-nowrap text-muted-foreground no-underline",
 						"transition-[background-color,color] duration-200 ease-[ease] not-first:border-l not-first:border-border",
 						"hover:not-aria-pressed:bg-surface-2 aria-pressed:bg-surface-3 aria-pressed:text-foreground",
-						"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+						"focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
 					)}
 					onClick={() => onPick(option.value)}
 				>

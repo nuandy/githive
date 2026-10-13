@@ -99,6 +99,11 @@
 	--neutral: #56636b;
 	--neutral-soft: #e8ecea;
 	--destructive: var(--bad);
+	/* Text on a lamp's solid fill (Merge, a solid pill, the inbox count): white, and on dark's brighter lamps, dark. */
+	--good-foreground: #ffffff;
+	--bad-foreground: #ffffff;
+	--warn-foreground: #ffffff;
+	--needs-foreground: #ffffff;
 
 	--diff-add: #e3f2e9;
 	--diff-add-strong: #c6e6d3;
@@ -115,9 +120,10 @@
 	--claim-6: #ef4444;
 	--claim-7: #06b6d4;
 
-	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark. */
+	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;
+	--mark-dot: #e59a0b;
 
 	--shadow-raised: 0 10px 28px rgba(30, 43, 51, 0.18);
 
@@ -169,6 +175,10 @@
 	--needs-soft: #3a1d1a;
 	--neutral: #9aa8a6;
 	--neutral-soft: #232f35;
+	--good-foreground: #121a1f;
+	--bad-foreground: #121a1f;
+	--warn-foreground: #121a1f;
+	--needs-foreground: #121a1f;
 
 	--diff-add: #12261c;
 	--diff-add-strong: #1b3a29;
@@ -235,12 +245,16 @@
 	--color-amber-soft: var(--amber-soft);
 	--color-good: var(--good);
 	--color-good-soft: var(--good-soft);
+	--color-good-foreground: var(--good-foreground);
 	--color-warn: var(--warn);
 	--color-warn-soft: var(--warn-soft);
+	--color-warn-foreground: var(--warn-foreground);
 	--color-bad: var(--bad);
 	--color-bad-soft: var(--bad-soft);
+	--color-bad-foreground: var(--bad-foreground);
 	--color-needs: var(--needs);
 	--color-needs-soft: var(--needs-soft);
+	--color-needs-foreground: var(--needs-foreground);
 	--color-neutral: var(--neutral);
 	--color-neutral-soft: var(--neutral-soft);
 	--color-diff-add: var(--diff-add);
@@ -257,6 +271,7 @@
 	--color-claim-7: var(--claim-7);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
+	--color-mark-dot: var(--mark-dot);
 
 	/* Corners: steps of --radius, so a theme changes one number. At 4px these are 1, 2, 3, 4, 5, 6, 12 and 14px. */
 	--radius-2xs: calc(var(--radius) * 0.25);
@@ -485,6 +500,11 @@
 	}
 	summary {
 		cursor: pointer;
+	}
+	/* Radios and checkboxes in the link's slate, not the system's blue. */
+	input[type="radio"],
+	input[type="checkbox"] {
+		accent-color: var(--link);
 	}
 }
 

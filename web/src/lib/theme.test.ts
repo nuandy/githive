@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import css from "../theme.css?raw";
 
 // lib/theme.ts keeps the choice in a module-level store, so each test loads it fresh into a fake window: storage,
 // the system's color scheme (which a test can flip) and <html>'s class and data-theme.
@@ -99,4 +100,36 @@ describe("the theme", () => {
 		page.setSystemDark(true);
 		expect(page.dark()).toBe(false);
 	});
+});
+
+// Text on a solid status fill (Merge, a solid badge, the inbox count) takes that fill's -foreground, which must read
+// on it in each scheme. A scheme that doesn't set a value inherits :root's.
+describe("text on a solid status color", () => {
+	const block = (selector: string) => {
+		const start = css.indexOf(`\n${selector} {`);
+		return css.slice(start, css.indexOf("}", start));
+	};
+	const declared = (selector: string, name: string) =>
+		block(selector).match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1];
+	const value = (selector: string, name: string) => declared(selector, name) ?? declared(":root", name);
+	const luminance = (hex: string) => {
+		const [r, g, b] = [1, 3, 5]
+			.map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+			.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+		return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+	};
+	const contrast = (a: string, b: string) => {
+		const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+		return (light! + 0.05) / (dark! + 0.05);
+	};
+
+	for (const scheme of [":root", ".dark"])
+		for (const tone of ["good", "bad", "warn", "needs"])
+			it(`reads at 4.5:1 or more: ${tone}, ${scheme}`, () => {
+				const fill = value(scheme, tone);
+				const text = value(scheme, `${tone}-foreground`);
+				expect(fill).toBeDefined();
+				expect(text, `--${tone}-foreground`).toBeDefined();
+				expect(contrast(fill!, text!)).toBeGreaterThanOrEqual(4.5);
+			});
 });
