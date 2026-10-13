@@ -153,7 +153,7 @@ describe("a repo", () => {
 		expect(withQuestion).toContain("agent-c asks you");
 		expect(withQuestion).toContain("reviewers disagree on the cache size");
 		expect(withQuestion).toContain("Submit vote");
-		expect(withQuestion).toMatch(/<option value="review"[^>]*>review reviewer<\/option>/);
+		expect(withQuestion).toMatch(/<option value="review"[^>]*>reviewer<\/option>/);
 		expect(withQuestion).toMatch(/<option value="security"[^>]*>security reviewer<\/option>/);
 		const loading = renderToStaticMarkup(
 			<ChangePage

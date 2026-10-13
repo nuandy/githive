@@ -3,6 +3,7 @@ import type { RepoSnapshot, VoteInput } from "../api";
 import { messageOf } from "../lib/errors";
 import { shortSha } from "../lib/model";
 import type { Claim } from "../lib/claimStatus";
+import { roleName } from "../lib/roles";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Button } from "./ui/button";
@@ -38,7 +39,7 @@ export function VoteForm({
 }) {
 	const roles = voteRoles(policy);
 	const [role, setRole] = useState(roles[0] ?? "review");
-	const [verdict, setVerdict] = useState<Verdict>("approve");
+	const [verdict, setVerdict] = useState<Verdict | null>(null);
 	const [evidence, setEvidence] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
@@ -48,18 +49,23 @@ export function VoteForm({
 	if (error && error !== lastError) setLastError(error);
 	const [lastDone, setLastDone] = useState(done);
 	if (done && done !== lastDone) setLastDone(done);
+	// What it still needs before it can be sent, said under its button.
+	const missing = busy ? undefined : stillNeeds(verdict, evidence, !!claim.attention);
+	const [lastMissing, setLastMissing] = useState(missing);
+	if (missing && missing !== lastMissing) setLastMissing(missing);
 	if (!claim.head) return null;
 	const head = claim.head;
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		if (!evidence.trim() || busy) return;
+		if (!verdict || !evidence.trim() || busy) return;
 		setBusy(true);
 		setError(undefined);
 		setDone(undefined);
 		try {
 			await api.vote(repo, claim.change, { role, verdict, evidence: evidence.trim() });
 			setDone(`Your ${role} vote was recorded.`);
+			setVerdict(null);
 			setEvidence("");
 		} catch (err) {
 			setError(messageOf(err));
@@ -88,7 +94,7 @@ export function VoteForm({
 					<NativeSelect id="vote-role" value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
 						{roles.map((option) => (
 							<option key={option} value={option}>
-								{option} reviewer
+								{roleName(option)}
 							</option>
 						))}
 					</NativeSelect>
@@ -99,7 +105,9 @@ export function VoteForm({
 					blocks={policy.vetoes.includes(role)}
 					disabled={busy}
 				/>
-				<Label htmlFor="vote-evidence">What you checked</Label>
+				<Label htmlFor="vote-evidence">
+					{claim.attention ? `Your answer to ${claim.attention.agent}` : "What you checked"}
+				</Label>
 				<Textarea
 					id="vote-evidence"
 					rows={3}
@@ -121,11 +129,21 @@ export function VoteForm({
 						{done ?? lastDone}
 					</p>
 				</Fold>
-				<div className="flex justify-end">
-					<Button type="submit" variant={verdict === "approve" ? "go" : "danger"} disabled={busy || !evidence.trim()}>
-						<Icon name={verdict === "approve" ? "check" : "x"} />
+				<div className="grid justify-items-end">
+					<Button
+						type="submit"
+						variant={verdict ? SUBMIT[verdict].variant : "default"}
+						disabled={busy || !!missing}
+						aria-describedby={missing ? "vote-missing" : undefined}
+					>
+						{verdict ? <Icon name={SUBMIT[verdict].icon} /> : null}
 						{busy ? "Submitting…" : "Submit vote"}
 					</Button>
+					<Fold open={!!missing}>
+						<p id="vote-missing" className="m-0 pt-1.5 text-meta text-muted-foreground">
+							{missing ?? lastMissing}
+						</p>
+					</Fold>
 				</div>
 			</div>
 		</form>
@@ -136,9 +154,24 @@ const FEEDBACK = "m-0 pt-2 text-ui wrap-anywhere";
 
 type Verdict = "approve" | "reject";
 
+/** The submit button once a verdict is chosen: green to approve, red to request changes. */
+const SUBMIT = {
+	approve: { variant: "go", icon: "check" },
+	reject: { variant: "danger", icon: "x" },
+} as const;
+
+/** What a vote still needs before it can be sent, as a sentence; nothing once it can be. */
+function stillNeeds(verdict: Verdict | null, evidence: string, answering: boolean): string | undefined {
+	const said = !!evidence.trim();
+	if (verdict && said) return undefined;
+	if (said) return "Choose a verdict.";
+	if (verdict) return answering ? "Write your answer." : "Say what you checked.";
+	return answering ? "Choose a verdict and write your answer." : "Choose a verdict and say what you checked.";
+}
+
 /** Approve, or request changes, which blocks the merge when voting as a veto role. */
 function VerdictChoice(props: {
-	verdict: Verdict;
+	verdict: Verdict | null;
 	setVerdict: (verdict: Verdict) => void;
 	blocks: boolean;
 	disabled: boolean;
