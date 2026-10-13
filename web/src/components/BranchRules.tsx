@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { useArrivals } from "../hooks/useArrivals";
 import { useHeldDraft } from "../hooks/useHeldDraft";
 import { branchRuleProblems, branchRulesFrom, emptyRule, type RuleDraft, ruleDraftsFrom } from "../lib/branchRules";
@@ -11,12 +11,12 @@ import { Icon } from "./Icon";
 import type { SettingsContext } from "./MergeSettings";
 import {
 	COMMAND,
-	failedStatus,
 	type FieldProblem,
 	problemsFor,
-	problemsStatus,
 	REMOVE,
 	RULE,
+	type Said,
+	saveBarSays,
 	savedStatus,
 	SETTINGS_FIELDS,
 	SettingField,
@@ -38,12 +38,12 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 	const held = useHeldDraft(drafts, draftKey(repo, "branch-rules"), ruleDraftsFrom(snapshot.branchRules), rulesDiffer);
 	const [busy, setBusy] = useState(false);
 	const [tried, setTried] = useState(false);
-	const [status, setStatus] = useState<ReactNode>(null);
+	const [said, setSaid] = useState<Said>(null);
 	const { draft: rules, base } = held;
 	const problems = tried ? branchRuleProblems(rules) : [];
 
 	const change = (next: (current: RuleDraft[]) => RuleDraft[]) => {
-		setStatus(null);
+		setSaid(null);
 		held.edit(next);
 	};
 	const edit = (index: number, patch: Partial<RuleDraft>) =>
@@ -58,18 +58,18 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 		const result = branchRulesFrom(rules);
 		if (!result.rules) return;
 		setBusy(true);
-		setStatus(null);
+		setSaid(null);
 		try {
 			const done = await save({ branch_rules: result.rules });
 			held.saved(ruleDraftsFrom(done.branchRules));
 			setTried(false);
 			const count = done.branchRules?.length ?? 0;
-			setStatus(
-				savedStatus(count ? `Saved. ${counted(count, "branch rule")} from now on.` : "Saved. No branch rules."),
-			);
+			setSaid({
+				saved: savedStatus(count ? `Saved. ${counted(count, "branch rule")} from now on.` : "Saved. No branch rules."),
+			});
 			onSaved?.();
 		} catch (err) {
-			setStatus(failedStatus(messageOf(err)));
+			setSaid({ failed: messageOf(err) });
 		} finally {
 			setBusy(false);
 		}
@@ -77,7 +77,7 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 	const discard = () => {
 		held.discard();
 		setTried(false);
-		setStatus(null);
+		setSaid(null);
 	};
 
 	return (
@@ -118,12 +118,7 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 					</div>
 				</div>
 			</SettingsPart>
-			<SaveBar
-				status={problems.length ? problemsStatus(problems) : status}
-				dirty={rulesDiffer(rules, base)}
-				busy={busy}
-				onDiscard={discard}
-			/>
+			<SaveBar {...saveBarSays(said, problems)} dirty={rulesDiffer(rules, base)} busy={busy} onDiscard={discard} />
 		</form>
 	);
 }

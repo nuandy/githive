@@ -8,11 +8,12 @@ import { Icon } from "./Icon";
 import type { SettingsContext } from "./MergeSettings";
 import {
 	COMMAND,
-	failedStatus,
+	type Said,
 	SETTINGS_FIELDS,
 	SettingField,
 	SettingHint,
 	SettingsPart,
+	saveBarSays,
 	savedStatus,
 } from "./SettingsParts";
 import {
@@ -134,7 +135,7 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 		(form) => Object.keys(inputOf(form)).length > 0,
 	);
 	const [busy, setBusy] = useState(false);
-	const [status, setStatus] = useState<ReactNode>(null);
+	const [said, setSaid] = useState<Said>(null);
 	// Save with the repo left blank asks Disconnect's question; answered, focus goes back to the field.
 	const [asking, setAsking] = useState(false);
 	const field = useRef<HTMLInputElement>(null);
@@ -144,20 +145,20 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 	const blank = disconnects(form, github);
 
 	const edit = (patch: Partial<GitHubDraft>) => {
-		setStatus(null);
+		setSaid(null);
 		held.edit((current) => ({ ...current, ...patch, touched: true }));
 	};
 	const send = async (settings: SettingsInput, saved: string) => {
 		setBusy(true);
-		setStatus(null);
+		setSaid(null);
 		try {
 			await save(settings);
 			held.saved(githubForm(savedLink(github, settings, form), true));
-			setStatus(savedStatus(saved));
+			setSaid({ saved: savedStatus(saved) });
 			onSaved?.();
 			return true;
 		} catch (err) {
-			setStatus(failedStatus(messageOf(err)));
+			setSaid({ failed: messageOf(err) });
 			return false;
 		} finally {
 			setBusy(false);
@@ -188,9 +189,9 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 					github={github}
 					branch={branch}
 					busy={busy}
-					status={status}
+					says={saveBarSays(said)}
 					onChange={() => {
-						setStatus(null);
+						setSaid(null);
 						held.edit((current) => ({ ...current, editing: true }));
 					}}
 					onDisconnect={() => disconnect(github)}
@@ -272,13 +273,13 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 				</fieldset>
 			</SettingsPart>
 			<SaveBar
-				status={status}
+				{...saveBarSays(said)}
 				dirty={Object.keys(input).length > 0}
 				// A connected link's editor closes again with nothing changed.
 				canDiscard={!!github}
 				busy={busy}
 				onDiscard={() => {
-					setStatus(null);
+					setSaid(null);
 					held.discard();
 				}}
 				discardLabel={github ? "Cancel" : "Discard"}
@@ -301,14 +302,15 @@ function Connected({
 	github,
 	branch,
 	busy,
-	status,
+	says,
 	onChange,
 	onDisconnect,
 }: {
 	github: RepoGitHub;
 	branch: string;
 	busy: boolean;
-	status: ReactNode;
+	/** What the last save said: politely once saved, at once if it failed. */
+	says: { status?: ReactNode; alert?: ReactNode };
 	onChange(): void;
 	onDisconnect(): Promise<boolean>;
 }) {
@@ -349,9 +351,14 @@ function Connected({
 				</Button>
 				<Disconnect github={github} busy={busy} onDisconnect={onDisconnect} />
 			</div>
-			<p className="m-0 text-ui" role="status">
-				{status}
-			</p>
+			<div className="text-ui">
+				<p className="m-0" role="status">
+					{says.status}
+				</p>
+				<p className="m-0" role="alert">
+					{says.alert}
+				</p>
+			</div>
 		</div>
 	);
 }

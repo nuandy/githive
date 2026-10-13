@@ -2,13 +2,14 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
 
-// The foot of a form that saves: a line saying what happened (saved, or what went wrong) and, at the far end, Discard
-// and Save. It stays in view at the bottom of the window while its section scrolls past, over a fade of the page.
+// The foot of a form that saves: a line saying what happened (saved, politely; what went wrong, at once) and, at the
+// far end, Discard and Save. It stays in view at the bottom of the window while its section scrolls past, over a fade of the page.
 // Save submits the form, in ink: green is for landing and approving. Both wait while there's nothing to save or a save
 // is under way.
 
 export function SaveBar({
 	status,
+	alert,
 	dirty,
 	busy = false,
 	onDiscard,
@@ -18,8 +19,10 @@ export function SaveBar({
 	className,
 	...props
 }: Omit<ComponentProps<"div">, "children"> & {
-	/** What the last save said, or what's wrong with the form. */
+	/** What the last save did. */
 	status?: ReactNode;
+	/** Why the last save failed, or what's wrong with the form: said at once. */
+	alert?: ReactNode;
 	/** Whether there are edits to save or discard. */
 	dirty: boolean;
 	/** A save is under way. */
@@ -40,9 +43,15 @@ export function SaveBar({
 			)}
 			{...props}
 		>
-			<p className="m-0 mr-auto min-w-0 text-ui wrap-anywhere text-muted-foreground" role="status">
-				{status}
-			</p>
+			{/* Both live regions are there before anything is said in them, so what's said is heard. */}
+			<div className="mr-auto min-w-0 text-ui wrap-anywhere text-muted-foreground">
+				<p className="m-0" role="status">
+					{status}
+				</p>
+				<p className="m-0" role="alert">
+					{alert}
+				</p>
+			</div>
 			<div className="flex gap-2">
 				<Button disabled={busy || !canDiscard} onClick={onDiscard}>
 					{discardLabel}

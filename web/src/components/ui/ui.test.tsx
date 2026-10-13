@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tool
 import { Announcer } from "./announcer";
 import { TokenInput } from "./token-input";
 import { UndoLine } from "./undo-line";
+import { type FieldProblem, type Said, saveBarSays } from "../SettingsParts";
 import { mayAnnounce, SAY_EVERY_MS } from "../../hooks/useAnnouncer";
 
 describe("the building blocks", () => {
@@ -144,6 +145,21 @@ describe("the building blocks", () => {
 		const editing = renderToStaticMarkup(<SaveBar dirty onDiscard={() => undefined} saveLabel="Save branch rules" />);
 		expect(editing).toContain(">Save branch rules<");
 		expect(editing).not.toContain('disabled=""');
+	});
+
+	it("says what a save did politely, and why it failed, or what's wrong with the form, at once", () => {
+		const bar = (said: Said, problems: FieldProblem[] = []) =>
+			renderToStaticMarkup(<SaveBar dirty onDiscard={() => undefined} {...saveBarSays(said, problems)} />);
+		const saved = bar({ saved: "Saved. No branch rules." });
+		expect(saved).toMatch(/<p[^>]*role="status"[^>]*>Saved\. No branch rules\.<\/p>/);
+		// Both regions are there before anything is said in them.
+		expect(saved).toMatch(/<p[^>]*role="alert"[^>]*><\/p>/);
+		const failed = bar({ failed: "Not an admin of acme/web." });
+		expect(failed).toMatch(/<p[^>]*role="alert"[^>]*><span[^>]*text-bad[^>]*>Not an admin of acme\/web\.<\/span><\/p>/);
+		expect(failed).toMatch(/<p[^>]*role="status"[^>]*><\/p>/);
+		const problems = bar({ saved: "Saved." }, [{ field: "rule-0-paths", text: "Rule 1 names no paths." }]);
+		expect(problems).toMatch(/<p[^>]*role="alert"[^>]*><span[^>]*>Rule 1 names no paths\.<\/span><\/p>/);
+		expect(problems).not.toContain(">Saved.<");
 	});
 
 	it("says why an Undo failed in one sentence, then offers it again", () => {
