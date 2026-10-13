@@ -15,6 +15,7 @@ import { Popover, PopoverTrigger } from "./popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { Announcer } from "./announcer";
 import { TokenInput } from "./token-input";
+import { UndoLine } from "./undo-line";
 import { mayAnnounce, SAY_EVERY_MS } from "../../hooks/useAnnouncer";
 
 describe("the building blocks", () => {
@@ -143,6 +144,25 @@ describe("the building blocks", () => {
 		const editing = renderToStaticMarkup(<SaveBar dirty onDiscard={() => undefined} saveLabel="Save branch rules" />);
 		expect(editing).toContain(">Save branch rules<");
 		expect(editing).not.toContain('disabled=""');
+	});
+
+	it("says why an Undo failed in one sentence, then offers it again", () => {
+		const failed = (error: string) =>
+			renderToStaticMarkup(
+				<UndoLine
+					where="members"
+					undo={{
+						state: { kind: "offered", id: 1, where: "members", done: "Removed sol.", undone: "", undo, error },
+						offer: () => undefined,
+						undo,
+					}}
+				/>,
+			);
+		const undo = async () => undefined;
+		expect(failed("not found")).toMatch(/undo: not found\. Try again\.</);
+		// The server's words keep their own full stop, and get no second one.
+		expect(failed("Not found.")).toMatch(/undo: Not found\. Try again\.</);
+		expect(failed("not found")).toContain(">Undo</button>");
 	});
 
 	it("keeps a closed collapse in the page but out of reach", () => {

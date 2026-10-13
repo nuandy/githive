@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChangeDiff, ChangeHistory, MergeCheck, RepoLanding, RepoSnapshot } from "../api";
 import type { Claim, Vote } from "../lib/claimStatus";
 import { ago, historyFixture, inlineText, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
+import { landFailure } from "./ChangeActions";
 import { ChangePage, type ChangePageProps } from "./ChangePage";
 
 // A change's page: where it stands, and what a person may do about it from there.
@@ -108,6 +109,14 @@ describe("landing a change", () => {
 		expect(text).not.toContain("Approved");
 		expect(text).not.toMatch(LAND);
 		expect(visibleText(box(render({ landing })))).toContain("Being checked to land");
+	});
+
+	it("says why it couldn't land in a sentence: the server's words after the colon, as they came", () => {
+		expect(landFailure(new Error("checks failed: npm test exited 1"))).toEqual({
+			ok: false,
+			text: "It couldn't land: checks failed: npm test exited 1.",
+		});
+		expect(landFailure(new Error("no change c-9."))).toEqual({ ok: false, text: "It couldn't land: no change c-9." });
 	});
 
 	it("says checks run after approval when none ran yet, naming them", () => {

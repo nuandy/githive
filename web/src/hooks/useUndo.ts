@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { messageOf } from "../lib/errors";
+import { reasonOf } from "../lib/errors";
 
 /** How long an action that can be taken back offers Undo. */
 export const UNDO_MS = 10_000;
@@ -82,7 +82,8 @@ export function useUndo(ms = UNDO_MS) {
 			await state.undo();
 			dispatch({ type: "undone", id });
 		} catch (err) {
-			dispatch({ type: "failed", id, error: messageOf(err) });
+			// The server's words, set in the line's own sentence.
+			dispatch({ type: "failed", id, error: reasonOf(err) });
 		}
 		expireLater(id);
 	};
