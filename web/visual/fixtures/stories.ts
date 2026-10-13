@@ -55,6 +55,8 @@ export interface Story {
 	hosted?: Claim["hosted"];
 	/** The files its merge touched, when they aren't its claimed paths. */
 	files?: string[];
+	/** How many files its merge touched, when that's more than `files` lists (the server lists 20). */
+	filesTotal?: number;
 	/** Its agent's last merge check, when it isn't a clean one against the branch's head. */
 	merge?: (head: string, branchHead: string) => MergeCheck;
 	/** Where its code meets other open changes. */
@@ -461,6 +463,7 @@ export function buildHive(input: HiveInput): Hive {
 	// The project branch's history.
 	const landed: LandedChange[] = onProject.map((story) => {
 		const storyHead = headAt(story, -Infinity)!;
+		const files = story.files ?? touched(story.paths, input.files);
 		const reviews = votes
 			.filter((vote) => vote.commit === storyHead && vote.verdict === "approve")
 			.map((vote) => ({
@@ -476,7 +479,8 @@ export function buildHive(input: HiveInput): Hive {
 			head: storyHead,
 			title: firstLine(story.intent),
 			intent: story.intent,
-			files: story.files ?? touched(story.paths, input.files),
+			files,
+			filesTotal: story.filesTotal ?? files.length,
 			reviews,
 			at: ago(landedAt(story)!),
 		};

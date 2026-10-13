@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LandedChange } from "../api";
-import { batchesOf, batchWords, lastChangeTo } from "./landed";
+import { batchesOf, batchWords, filesCut, lastChangeTo } from "./landed";
 
 const landed = (change: string, files: string[], at?: string): LandedChange => ({
 	commit: `${change}-merge`,
@@ -24,11 +24,33 @@ const changes = [
 
 describe("the last change to a file", () => {
 	it("is the newest landed change that touched it", () => {
-		expect(lastChangeTo("src/lib/currency.ts", changes)?.change).toBe("prices");
-		expect(lastChangeTo("scripts/seed.ts", changes)?.change).toBe("seed");
-		expect(lastChangeTo("src/lib/format.ts", changes.slice(1))?.change).toBe("seed");
+		expect(lastChangeTo("src/lib/currency.ts", changes)).toEqual({ change: changes[0] });
+		expect(lastChangeTo("scripts/seed.ts", changes)?.change.change).toBe("seed");
+		expect(lastChangeTo("src/lib/format.ts", changes.slice(1))?.change.change).toBe("seed");
 		expect(lastChangeTo("README.md", changes)).toBeUndefined();
 		expect(lastChangeTo("src/lib", changes)).toBeUndefined();
+	});
+
+	it("is unsure when a newer change's file list is cut short, or commits History doesn't list came since", () => {
+		const twenty = Array.from({ length: 20 }, (_, n) => `src/f${n}.ts`);
+		const wide = { ...landed("format", twenty), filesTotal: 46 };
+		expect(lastChangeTo("scripts/seed.ts", [wide, ...changes])).toEqual({ change: changes[3], unsure: "cut" });
+		// Newer than the one it names, a list that's whole leaves it sure; its own list being cut doesn't matter.
+		expect(lastChangeTo("scripts/seed.ts", [{ ...wide, filesTotal: 20 }, ...changes])).toEqual({ change: changes[3] });
+		expect(lastChangeTo("src/f0.ts", [wide, ...changes])).toEqual({ change: wide });
+		// An older server doesn't say how many: a list of 20 may be cut.
+		expect(lastChangeTo("scripts/seed.ts", [landed("format", twenty), ...changes])?.unsure).toBe("cut");
+		const pushedSince = { ...changes[3]!, unlistedSince: true as const };
+		expect(lastChangeTo("scripts/seed.ts", [...changes.slice(0, 3), pushedSince])).toEqual({
+			change: pushedSince,
+			unsure: "unlisted",
+		});
+	});
+
+	it("knows a list is cut when it lists fewer files than its change changed", () => {
+		expect(filesCut({ files: ["a"], filesTotal: 3 })).toBe(true);
+		expect(filesCut({ files: ["a"], filesTotal: 1 })).toBe(false);
+		expect(filesCut({ files: ["a"] })).toBe(false);
 	});
 });
 

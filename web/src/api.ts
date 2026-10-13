@@ -314,7 +314,15 @@ export interface LandedChange {
 	head: string;
 	title: string;
 	intent?: string;
+	/** The files its merge changed: the first 20 of them. */
 	files: string[];
+	/** How many files its merge changed: more than `files` lists when that's cut short (newer servers). */
+	filesTotal?: number;
+	/**
+	 * Commits that aren't landed changes (pushed with plain git, a revert) reached the branch after it, and History
+	 * lists neither them nor their files (newer servers).
+	 */
+	unlistedSince?: true;
 	reviews: HistoryReview[];
 	at?: string;
 }

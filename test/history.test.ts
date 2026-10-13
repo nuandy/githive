@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BranchCommit } from "../src/toolkit/git-records";
 import { branchHistory } from "../src/toolkit/history";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
-import { pushChange } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 
@@ -50,11 +50,16 @@ const call = (name: string, args: Record<string, unknown>, key?: string) =>
 	callTool(name, { repo: "p", ...args }, context(key)) as Promise<Record<string, unknown>>;
 
 /** Claim, push, approve and merge a change: what an agent and its reviewer do. */
-async function land(change: string, intent: string, evidence: string) {
+async function land(
+	change: string,
+	intent: string,
+	evidence: string,
+	files: Record<string, string> = { [`src/${change}/x.js`]: `${change}\n` },
+) {
 	const agent = `agent-${change}`;
 	const { key } = (await call("register", { agent })) as { key: string };
 	await call("claim", { change, agent, paths: [`src/${change}/`], intent }, key);
-	const head = await pushChange(server.url, work, agent, change, { [`src/${change}/x.js`]: `${change}\n` });
+	const head = await pushChange(server.url, work, agent, change, files);
 	await call("vote", { commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence });
 	expect(await call("merge", { change, agent }, key)).toMatchObject({ ok: true });
 	return head;
@@ -77,6 +82,27 @@ describe("a branch's history", { timeout: 120_000 }, () => {
 			files: ["src/login-limit/x.js"],
 			reviews: [{ reviewer: "reviewer", role: "review", verdict: "approve", evidence: "Ran the login tests" }],
 		});
+	});
+
+	it("counts each change's files past the 20 it lists, and marks those commits it doesn't list came after", async () => {
+		await call("settings", { required: 1 });
+		const many = Object.fromEntries(
+			Array.from({ length: 25 }, (_, n) => [`src/wide/f${String(n).padStart(2, "0")}.js`, `${n}\n`]),
+		);
+		await land("wide", "Touch 25 files", "Read them", many);
+		// A commit pushed to main with plain git: History doesn't list it, or the files it changed.
+		const plain = await agentClone(server.url, work, "someone");
+		plain.write("README.md", "Edited by hand\n");
+		await plain.run("add", "-A");
+		await plain.run("commit", "--quiet", "-m", "Edit the README by hand");
+		await plain.run("push", "--quiet", "origin", "main");
+		await land("narrow", "Touch one file", "Read it");
+
+		const [narrow, wide] = (await branchHistory(context(), "p")).changes;
+		expect(narrow).toMatchObject({ change: "narrow", files: ["src/narrow/x.js"], filesTotal: 1 });
+		expect(narrow).not.toHaveProperty("unlistedSince");
+		expect(wide).toMatchObject({ change: "wide", filesTotal: 25, unlistedSince: true });
+		expect(wide!.files).toEqual(Object.keys(many).slice(0, 20));
 	});
 
 	it("is empty before anything lands, and refuses a branch GitHive lands nothing on", async () => {

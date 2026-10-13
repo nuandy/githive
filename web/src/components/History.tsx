@@ -143,7 +143,7 @@ function HistoryRow({ repo, landed, arrived }: { repo: string; landed: LandedCha
 							aria-controls={files}
 							onClick={() => setOpen(!open)}
 						>
-							{fileCount(landed.files.length)}
+							{fileCount(landed.filesTotal ?? landed.files.length)}
 							<Icon
 								name="chevron"
 								size={14}
@@ -165,8 +165,15 @@ function HistoryRow({ repo, landed, arrived }: { repo: string; landed: LandedCha
 	);
 }
 
-/** The files a change landed, each linked to the code as it landed. */
-export function LandedFiles({ repo, landed }: { repo: string; landed: Pick<LandedChange, "commit" | "files"> }) {
+/** The files a change landed, each linked to the code as it landed, and how many more than it lists there are. */
+export function LandedFiles({
+	repo,
+	landed,
+}: {
+	repo: string;
+	landed: Pick<LandedChange, "commit" | "files" | "filesTotal">;
+}) {
+	const more = (landed.filesTotal ?? landed.files.length) - landed.files.length;
 	return (
 		<ul className="m-0 grid list-none gap-0.5 py-1.5 pl-0.5">
 			{landed.files.map((file) => (
@@ -180,6 +187,7 @@ export function LandedFiles({ repo, landed }: { repo: string; landed: Pick<Lande
 					</a>
 				</li>
 			))}
+			{more > 0 ? <li className="pl-5 text-caption text-muted-foreground">and {more} more</li> : null}
 		</ul>
 	);
 }
