@@ -264,6 +264,9 @@ function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord
 	);
 }
 
+/** What lands with a change no longer in force: nothing. */
+const NO_BATCH = { changes: [], left: 0, room: 0 };
+
 /** A branch named in the header, in the link's blue. */
 const BRANCH = "bg-link-soft text-caption text-link";
 
@@ -483,7 +486,7 @@ export function ChangePage({
 						conflict={claim?.head ? conflictOf({ ...claim, into: branch }, history?.merge) : null}
 						meets={claim && history?.awareness ? meetsCount(history.awareness, snapshot.claims) : null}
 						action={action}
-						batch={claim ? landsWith(claim, snapshot, landing).map((each) => each.change) : []}
+						batch={claim ? landsWith(claim, snapshot, landing, verify) : NO_BATCH}
 						land={merge && claim ? () => merge(repo, changeId) : undefined}
 						release={releaseIt}
 						github={!!claim && isGitHubClaim(claim)}

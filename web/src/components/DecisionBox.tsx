@@ -3,6 +3,7 @@ import type { ReleaseAnswer } from "../api";
 import type { ChangeStatus } from "../lib/changeStatus";
 import type { changeEnding } from "../lib/changeTimeline";
 import {
+	type Batch,
 	type CheckResult,
 	type ConflictState,
 	type PrimaryAction,
@@ -54,7 +55,7 @@ export interface DecisionBoxProps {
 	meets: number | null;
 	action: PrimaryAction;
 	/** The other changes that would land with it. */
-	batch: string[];
+	batch: Batch;
 	land?: (() => Promise<MergeAnswer>) | undefined;
 	release?: ((reason: string) => Promise<ReleaseAnswer>) | undefined;
 	/** GitHub's change: releasing it gives it up until GitHub's branch moves. */

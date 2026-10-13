@@ -3,7 +3,8 @@ import { entriesOverlap } from "../../../src/claim-paths";
 import { settingsForBranch } from "../../../src/toolkit/branch-rules";
 import { identityName } from "./agent";
 import { openOverlaps } from "./awareness";
-import type { Claim, Vote } from "./claimStatus";
+import { batchLimit } from "./batchSize";
+import { type Claim, isFromGitHub, type Vote } from "./claimStatus";
 import { changeState, rejectionsOnHead, type StateContext } from "./status";
 
 // What the decision box on a change's page works out, from the claim, the votes on its head, the repo's policy, the
@@ -217,41 +218,74 @@ export function landable(
 	return changeState(claim, { votes, landing: context.landing, policy: context.policy }) === "approved";
 }
 
+/** The other changes that land with one, as the server would gather its batch now. */
+export interface Batch {
+	/** Those it takes, oldest claims first. */
+	changes: string[];
+	/** Those ready past its room, left for a later batch. */
+	left: number;
+	/** How many others a batch has room for now: its size (batchSize.ts), less this change. */
+	room: number;
+}
+
 /**
- * The other changes that land with this one, oldest claims first, as the server gathers a batch: on the same branch,
- * approved, nothing rejecting their heads, waiting on nothing, and not in the batch being checked already. The
- * snapshot's votes are its latest, so this is the best guess the page can make; the server decides as it lands.
+ * The other changes that land with this one, as the server gathers a batch (src/toolkit/merge-batch.ts): on the same
+ * branch, pushed, approved, nothing rejecting their heads, waiting on nothing, not GitHub's (left to their own merge),
+ * not just landed at that head, and not in the batch being checked already; the oldest claims first, as many as the
+ * batch has room for. The snapshot's votes are its latest, so this is the best guess the page can make; the server
+ * decides as it lands.
  */
 export function landsWith(
 	claim: Claim,
 	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "branch">,
-	landing: RepoLanding | undefined,
-): Claim[] {
+	landing: Pick<RepoLanding, "checking" | "recent"> | undefined,
+	checks: string[],
+): Batch {
 	const branch = branchOf(claim, snapshot);
 	const checking = new Set((landing?.checking?.changes ?? []).map((each) => each.change));
-	return snapshot.claims
+	const recent = landing?.recent ?? [];
+	const landed = new Set(recent.filter((each) => each.how === "landed").map((each) => `${each.change} ${each.head}`));
+	const ready = snapshot.claims
 		.filter(
 			(other) =>
 				other.change !== claim.change &&
 				branchOf(other, snapshot) === branch &&
 				!!other.head &&
+				!landed.has(`${other.change} ${other.head}`) &&
+				!isFromGitHub(other) &&
 				other.approval.approved &&
 				!other.waitsOn?.length &&
 				!checking.has(other.change) &&
 				!rejectionsOnHead(other, snapshot.votes).length,
 		)
 		.sort((a, b) => a.since.localeCompare(b.since));
+	const room = batchLimit(recent, checks) - 1;
+	return {
+		changes: ready.slice(0, room).map((each) => each.change),
+		left: Math.max(0, ready.length - room),
+		room,
+	};
 }
 
 /** "a", "a and b", "a, b and c". */
 export const listed = (items: string[]) =>
 	items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
+/**
+ * What lands with it, in words: "It lands with footer-links and product-reviews", "It lands on its own"; or, when more
+ * are ready than the batch has room for, "It lands with up to 3 of the 5 other ready changes, the oldest first".
+ */
+export function batchWords(batch: Batch): string {
+	if (!batch.changes.length) return "It lands on its own";
+	if (!batch.left) return `It lands with ${listed(batch.changes)}`;
+	const ready = batch.changes.length + batch.left;
+	return `It lands with up to ${batch.room} of the ${ready} other ready changes, the oldest first`;
+}
+
 /** The confirm's question: "Land checkout-tax now? It lands with footer-links and product-reviews, after npm test." */
-export function landQuestion(change: string, batch: Pick<Claim, "change">[], checks: string[]): string {
-	const others = batch.length ? `It lands with ${listed(batch.map((each) => each.change))}` : "It lands on its own";
+export function landQuestion(change: string, batch: Batch, checks: string[]): string {
 	const after = checks.length ? `, after ${listed(checks)}.` : ", with no checks to run.";
-	return `Land ${change} now? ${others}${after}`;
+	return `Land ${change} now? ${batchWords(batch)}${after}`;
 }
 
 /** The reader's own latest vote on the change's head, if they gave one. */

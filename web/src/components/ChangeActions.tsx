@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import type { ReleaseAnswer } from "../api";
 import { messageOf } from "../lib/errors";
-import { listed } from "../lib/decision";
+import { type Batch, batchWords } from "../lib/decision";
 import { shortSha } from "../lib/model";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
@@ -57,7 +57,7 @@ export function LandNow({
 }: {
 	change: string;
 	/** The other ready changes that land with it. */
-	batch: string[];
+	batch: Batch;
 	/** The checks that run first. */
 	checks: string[];
 	land: () => Promise<MergeAnswer>;
@@ -91,14 +91,8 @@ export function LandNow({
 				<AlertDialogHeader>
 					<AlertDialogTitle>Land {change} now?</AlertDialogTitle>
 					<AlertDialogDescription>
-						{batch.length ? (
-							<>
-								It lands with {listed(batch)}
-								{checks.length ? ", after " : ", with no checks to run."}
-							</>
-						) : (
-							<>It lands on its own{checks.length ? ", after " : ", with no checks to run."}</>
-						)}
+						{batchWords(batch)}
+						{checks.length ? ", after " : ", with no checks to run."}
 						{checks.length ? <Checks checks={checks} /> : null}
 					</AlertDialogDescription>
 					<p className="m-0 text-ui text-muted-foreground">

@@ -238,15 +238,56 @@ describe("landing", () => {
 			vote({ commit: "checks-failed-head", reviewer: "githive-checks", role: "checks", verdict: "reject" }),
 		];
 		const checking = { base: "b", since: ago(1), changes: [{ change: "in-batch", head: "in-batch-head", agent: "x" }] };
-		const batch = landsWith(own, snapshot([own, ...others], votes), { branch: "main", checking, recent: [] });
-		expect(batch.map((each) => each.change)).toEqual(["product-reviews", "footer-links"]);
+		const landing = { branch: "main", checking, recent: [] };
+		const batch = landsWith(own, snapshot([own, ...others], votes), landing, ["npm test"]);
+		expect(batch).toEqual({ changes: ["product-reviews", "footer-links"], left: 0, room: 19 });
 		expect(landQuestion(own.change, batch, ["npm test"])).toBe(
 			"Land checkout-tax now? It lands with product-reviews and footer-links, after npm test.",
 		);
-		expect(landQuestion(own.change, [], [])).toBe("Land checkout-tax now? It lands on its own, with no checks to run.");
-		expect(landQuestion(own.change, batch.slice(0, 1), ["npm ci", "npm test", "npm run e2e"])).toBe(
+		const alone = { changes: [], left: 0, room: 19 };
+		expect(landQuestion(own.change, alone, [])).toBe(
+			"Land checkout-tax now? It lands on its own, with no checks to run.",
+		);
+		const one = { changes: ["product-reviews"], left: 0, room: 3 };
+		expect(landQuestion(own.change, one, ["npm ci", "npm test", "npm run e2e"])).toBe(
 			"Land checkout-tax now? It lands with product-reviews, after npm ci, npm test and npm run e2e.",
 		);
+	});
+
+	it("leaves out GitHub's changes and those that just landed, as the server does", () => {
+		const own = approved("checkout-tax");
+		const github = approved("github-pr", { agent: "githive-github", source: "github/feature" });
+		const landed = approved("just-landed");
+		const recent = [
+			{ change: "just-landed", head: "just-landed-head", agent: "x", how: "landed" as const, at: ago(1) },
+			// An earlier push that landed says nothing of this one.
+			{ change: "footer-links", head: "an-earlier-head", agent: "x", how: "landed" as const, at: ago(9) },
+		];
+		const footer = approved("footer-links");
+		const batch = landsWith(own, snapshot([own, github, landed, footer]), { checking: null, recent }, []);
+		expect(batch.changes).toEqual(["footer-links"]);
+	});
+
+	it("takes as many as the server's batch has room for, oldest first, and says so when more are ready", () => {
+		const own = approved("checkout-tax");
+		const ready = ["a", "b", "c", "d", "e"].map((change, index) => approved(change, { since: ago(100 - index) }));
+		// Ten failures in a row: the server's batches shrink to their least, four changes.
+		const failing = Array.from({ length: 10 }, (_, index) => ({
+			change: `failed-${index}`,
+			head: `h${index}`,
+			agent: "x",
+			how: "failed" as const,
+			at: ago(20 - index),
+		}));
+		const landing = { branch: "main", checking: null, recent: failing };
+		const batch = landsWith(own, snapshot([own, ...ready]), landing, ["npm test"]);
+		expect(batch).toEqual({ changes: ["a", "b", "c"], left: 2, room: 3 });
+		expect(landQuestion(own.change, batch, ["npm test"])).toBe(
+			"Land checkout-tax now? It lands with up to 3 of the 5 other ready changes, the oldest first, after npm test.",
+		);
+		// With no checks to fail, a batch takes all that's ready.
+		expect(landsWith(own, snapshot([own, ...ready]), landing, []).changes).toHaveLength(5);
+		expect(landsWith(own, snapshot([own, ...ready]), landing, []).room).toBe(63);
 	});
 
 	it("is offered only for an approved change that waits on nothing, with a clean head, not landing yet", () => {
