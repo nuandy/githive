@@ -2,25 +2,24 @@ import { useState } from "react";
 import type { AccountApi, AgentLimits, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
+import { useConnectionWatch } from "../hooks/useConnectionWatch";
 import { usePoll } from "../hooks/usePoll";
-import { timeAgo } from "../lib/relativeTime";
-import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
-import { cn } from "../lib/utils";
 import { type RunAction, useRowActions } from "../hooks/useRowActions";
 import { useStagger } from "../hooks/useStagger";
-import { AgentRow, type RowShared } from "./AgentRow";
-import { ConfirmButton } from "./Confirm";
+import { connectionsOf, otherConnections, whenWords } from "../lib/myAgents";
+import { MCP_CLIENTS, type McpClient } from "../lib/session";
+import { cn } from "../lib/utils";
+import { AgentCard, RevokedAgent, type RowShared } from "./AgentRow";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
+import { ConfirmButton } from "./Confirm";
 import { Page } from "./Page";
-import { Box, BoxHeader, Callout } from "./ui/box";
+import { Box, BoxHeader, BoxTitle, Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input } from "./ui/field";
 import { ROWS } from "./ui/manage";
 
 // A box's own line in place of its rows: that they're loading, or that there are none, with a paragraph's margins.
 const LINE = "my-3.75 px-0.5 py-4 text-muted-foreground";
-// A box's title on this page.
-const TITLE = "text-body-sm";
 
 type User = Extract<Me, { kind: "user" }>;
 
@@ -34,66 +33,52 @@ export interface AgentActions {
 	disconnect(id: string): Promise<unknown>;
 }
 
-/** New tokens shown once, by agent: each stays until its Done. */
-type Issued = Record<string, string>;
-
-/** The new tokens shown, with an agent's new one added beside the others', or with its own put away (null). */
-export function withIssued(issued: Issued, agentId: string, token: string | null): Issued {
-	if (token !== null) return { ...issued, [agentId]: token };
-	const { [agentId]: _done, ...rest } = issued;
-	return rest;
-}
-
-/** The Agents page as it looks: how to connect, your agents and their tokens, and connected apps. */
+/**
+ * Your agents, as the page shows them: how to connect one and what to ask it, then each agent in a card (its state,
+ * the apps it signs in from, its limits and its tokens), the revoked ones folded away, and any app tied to none.
+ */
 export function AgentsView({
 	me,
 	origin,
 	agents,
 	connections,
+	repos,
 	error,
 	actions,
-	initialIssued = {},
+	readConnections,
+	onConnected,
 	now = Date.now(),
 }: {
 	me: User;
 	origin: string;
 	agents: MyAgent[] | undefined;
 	connections: Connection[] | undefined;
+	/** Your repositories, most recently active first; undefined while loading. */
+	repos?: string[] | undefined;
 	error?: string;
 	actions: AgentActions;
-	/** Tokens just made, by agent, shown once (tests start with some). */
-	initialIssued?: Issued;
+	/** Reads the connections again: looked at every few seconds after a command that connects is copied. */
+	readConnections?: () => Promise<Connection[]>;
+	/** A new connection came while looking. */
+	onConnected?: () => void;
 	now?: number;
 }) {
 	const { run, busy, confirming, setConfirming, failed: showError, errorText: errorFor } = useRowActions();
-	const [expiry, setExpiry] = useState<Record<string, number | null>>({});
-	const [issued, setIssued] = useState<Issued>(initialIssued);
 	const { client, chooseClient, clientLabel, yourClient } = useChosenClient();
-	/** The apps connected as an agent over OAuth, each named once. */
-	const signsInFrom = (agentId: string) => {
-		const own = (connections ?? []).filter((connection) => connection.agentId === agentId);
-		return [...new Set(own.map((connection) => connection.client))];
-	};
-	const daysFor = (agentId: string) => {
-		const chosen = expiry[agentId];
-		return chosen === undefined ? DEFAULT_TOKEN_DAYS : chosen;
-	};
+	const watch = useConnectionWatch(readConnections, connections, onConnected);
 	const shared: RowShared = { actions, run, busy, confirming, setConfirming, now };
+	const others = agents && connections ? otherConnections(agents, connections) : [];
 
-	const agentRow = (agent: MyAgent, arrived: boolean) => (
-		<AgentRow
+	const agentCard = (agent: MyAgent, arrived: boolean) => (
+		<AgentCard
 			key={agent.id}
 			arrived={arrived}
 			{...shared}
 			agent={agent}
 			fullName={`${me.handle}/${agent.name}`}
-			days={daysFor(agent.id)}
-			chooseDays={(days) => setExpiry({ ...expiry, [agent.id]: days })}
-			issued={issued[agent.id] ?? null}
-			setIssued={(token) => setIssued((current) => withIssued(current, agent.id, token))}
+			apps={connectionsOf(agent.id, connections ?? [])}
 			error={errorFor(agent.id)}
 			setError={showError(agent.id)}
-			signsInFrom={signsInFrom(agent.id)}
 			client={client}
 			origin={origin}
 		/>
@@ -102,7 +87,7 @@ export function AgentsView({
 	return (
 		<Page className="grid gap-4">
 			<header>
-				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Agents</h1>
+				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Your agents</h1>
 				<p className="m-0 text-muted-foreground">
 					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
 					writes is attributed to it, under you.
@@ -121,21 +106,24 @@ export function AgentsView({
 				origin={origin}
 				yourClient={yourClient}
 				clientLabel={clientLabel}
+				repos={repos}
+				watch={watch.state}
+				onCopied={() => void watch.start()}
 			/>
 
 			<Box aria-labelledby="agents-title">
 				<NewAgentForm handle={me.handle} create={(name) => actions.createAgent(name)} run={run} busy={busy} />
-				<AgentList agents={agents} yourClient={yourClient} agentRow={agentRow} />
+				<AgentList agents={agents} yourClient={yourClient} agentCard={agentCard} handle={me.handle} now={now} />
 			</Box>
 
-			<Box aria-labelledby="apps-title">
-				<BoxHeader>
-					<h2 id="apps-title" className={TITLE}>
-						Connected apps
-					</h2>
-				</BoxHeader>
-				<ConnectedApps connections={connections} {...shared} errorFor={errorFor} showError={showError} />
-			</Box>
+			{others.length ? (
+				<Box aria-labelledby="apps-title">
+					<BoxHeader>
+						<BoxTitle id="apps-title">Other connected apps</BoxTitle>
+					</BoxHeader>
+					<OtherApps connections={others} {...shared} errorFor={errorFor} showError={showError} />
+				</Box>
+			) : null}
 		</Page>
 	);
 }
@@ -152,7 +140,7 @@ function useChosenClient() {
 	return { client, chooseClient, clientLabel, yourClient };
 }
 
-/** Names and makes a new agent under your handle. Its error shows under the list's header. */
+/** Names and makes a new agent under your handle. Its error shows under the box's header, tied to the name. */
 function NewAgentForm(props: {
 	handle: string;
 	create: (name: string) => Promise<unknown>;
@@ -171,9 +159,7 @@ function NewAgentForm(props: {
 	return (
 		<>
 			<BoxHeader className="justify-between">
-				<h2 id="agents-title" className={TITLE}>
-					Your agents
-				</h2>
+				<BoxTitle id="agents-title">Agents</BoxTitle>
 				<form className="flex min-w-0 flex-wrap items-center gap-1.5" onSubmit={submit}>
 					<label htmlFor="new-agent-name" className="sr-only">
 						New agent's name
@@ -185,10 +171,14 @@ function NewAgentForm(props: {
 						id="new-agent-name"
 						className="w-40 font-mono text-meta leading-[inherit]"
 						value={newName}
-						onChange={(event) => setNewName(event.target.value)}
+						onChange={(event) => {
+							setNewName(event.target.value);
+							setCreateError(null);
+						}}
 						placeholder="builder"
 						autoComplete="off"
 						spellCheck={false}
+						{...(createError ? { "aria-invalid": true, "aria-describedby": "new-agent-error" } : {})}
 					/>
 					<Button type="submit" variant="primary" size="sm" disabled={busy !== null || !newName.trim()}>
 						{busy === "create" ? "Making…" : "New agent"}
@@ -196,7 +186,7 @@ function NewAgentForm(props: {
 				</form>
 			</BoxHeader>
 			{createError ? (
-				<p className="m-0 animate-appear px-4 pt-2.5 text-bad" role="alert">
+				<p id="new-agent-error" className="m-0 animate-appear px-0.5 pt-2.5 text-bad" role="alert">
 					{createError}
 				</p>
 			) : null}
@@ -204,15 +194,19 @@ function NewAgentForm(props: {
 	);
 }
 
-/** Your agents, active ones first; or that they're loading, or that there are none. */
+/** Your agents, each in its card; the revoked ones folded away under how many; or that they're loading, or none. */
 function AgentList({
 	agents,
 	yourClient,
-	agentRow,
+	agentCard,
+	handle,
+	now,
 }: {
 	agents: MyAgent[] | undefined;
 	yourClient: string;
-	agentRow: (agent: MyAgent, arrived: boolean) => React.ReactNode;
+	agentCard: (agent: MyAgent, arrived: boolean) => React.ReactNode;
+	handle: string;
+	now: number;
 }) {
 	// What's read fades in as it takes the place of "Loading…"; an agent made later fades in on its own.
 	const read = useChanged(agents === undefined) && "animate-fade";
@@ -224,54 +218,45 @@ function AgentList({
 				Loading your agents…
 			</p>
 		);
-	if (agents.length === 0)
-		return (
-			<div className={cn("px-0.5 py-4", read)}>
-				<p className="m-0 text-muted-foreground">
-					No agents yet. Name one above, or connect {yourClient} and name it while you sign in.
-				</p>
-			</div>
-		);
 	const live = agents.filter((agent) => !agent.revokedAt);
 	const revoked = agents.filter((agent) => agent.revokedAt);
 	return (
-		<ul className={cn(ROWS, staggers && "stagger")}>
-			{[...live, ...revoked].map((agent) => agentRow(agent, arrived(agent.id)))}
-		</ul>
+		<>
+			{live.length ? (
+				<ul className={cn(ROWS, staggers && "stagger")}>{live.map((agent) => agentCard(agent, arrived(agent.id)))}</ul>
+			) : (
+				<p className={cn(LINE, read)}>
+					No agents yet. Name one above, or connect {yourClient} and name it while you sign in.
+				</p>
+			)}
+			{revoked.length ? (
+				<details className="disclosure border-t border-border">
+					<summary className="w-fit cursor-pointer px-0.5 py-3 text-ui font-medium text-muted-foreground">
+						Revoked ({revoked.length})
+					</summary>
+					<ul className={ROWS}>
+						{revoked.map((agent) => (
+							<RevokedAgent key={agent.id} agent={agent} fullName={`${handle}/${agent.name}`} now={now} />
+						))}
+					</ul>
+				</details>
+			) : null}
+		</>
 	);
 }
 
-interface ConnectedAppsProps extends RowShared {
-	connections: Connection[] | undefined;
+interface OtherAppsProps extends RowShared {
+	connections: Connection[];
 	errorFor: (id: string) => string | null;
 	showError: (id: string) => (text: string) => void;
 }
 
-/** The apps connected over OAuth, each to disconnect. */
-function ConnectedApps({
-	connections,
-	errorFor,
-	showError,
-	actions,
-	run,
-	busy,
-	confirming,
-	setConfirming,
-	now,
-}: ConnectedAppsProps) {
-	// What's read fades in as it takes the place of "Loading…"; an app connected later fades in on its own.
-	const read = useChanged(connections === undefined) && "animate-fade";
-	const arrived = useArrivals((connections ?? []).map((connection) => connection.id));
-	const staggers = useStagger(!!connections?.length);
-	if (connections === undefined)
-		return (
-			<p className={LINE} role="status">
-				Loading…
-			</p>
-		);
-	if (connections.length === 0) return <p className={cn(LINE, read)}>No apps connected over OAuth yet.</p>;
+/** Apps connected over OAuth that act as none of the agents listed: each to disconnect. */
+function OtherApps(props: OtherAppsProps) {
+	const { connections, errorFor, showError, actions, run, busy, confirming, setConfirming, now } = props;
+	const arrived = useArrivals(connections.map((connection) => connection.id));
 	return (
-		<ul className={cn(ROWS, staggers && "stagger")}>
+		<ul className={ROWS}>
 			{connections.map((connection) => {
 				const key = `conn:${connection.id}`;
 				const error = errorFor(connection.id);
@@ -279,14 +264,17 @@ function ConnectedApps({
 					<li
 						key={connection.id}
 						className={cn(
-							"flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-3 first:border-t-0",
+							"flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-0.5 py-3 first:border-t-0",
 							arrived(connection.id) && "animate-appear",
 						)}
 					>
 						<div className="min-w-0 wrap-anywhere">
 							<strong>{connection.client}</strong> <span className="text-muted-foreground">as</span>{" "}
-							<code>{connection.agent ?? "an agent"}</code>
-							<span className="text-meta text-muted-foreground"> · connected {timeAgo(connection.createdAt, now)}</span>
+							<code>{connection.agent ?? "no agent"}</code>
+							<span className="text-meta text-muted-foreground">
+								{" "}
+								· connected {whenWords(connection.createdAt, now)}
+							</span>
 						</div>
 						<ConfirmButton
 							id={key}
@@ -298,7 +286,7 @@ function ConnectedApps({
 							onConfirm={() => run(key, () => actions.disconnect(connection.id), showError(connection.id))}
 						/>
 						{error !== null ? (
-							<p className="m-0 animate-appear text-bad" role="alert">
+							<p className="m-0 basis-full animate-appear text-bad" role="alert">
 								{error}
 							</p>
 						) : null}
@@ -309,8 +297,8 @@ function ConnectedApps({
 	);
 }
 
-/** The Agents page: loads your agents and connected apps, and refreshes them after each action. */
-export function AgentsPage({ me, account }: { me: User; account: AccountApi }) {
+/** Your agents: loads them and the apps connected as them, and refreshes both after each action. */
+export function AgentsPage({ me, account, repos }: { me: User; account: AccountApi; repos?: string[] | undefined }) {
 	const agents = usePoll("me:agents", account.agents, 60_000);
 	const connections = usePoll("me:connections", account.connections, 60_000);
 	const refreshAfter =
@@ -335,8 +323,14 @@ export function AgentsPage({ me, account }: { me: User; account: AccountApi }) {
 			origin={window.location.origin}
 			agents={agents.data}
 			connections={connections.data}
+			repos={repos}
 			error={agents.error ?? connections.error}
 			actions={actions}
+			readConnections={account.connections}
+			onConnected={() => {
+				agents.refresh();
+				connections.refresh();
+			}}
 		/>
 	);
 }

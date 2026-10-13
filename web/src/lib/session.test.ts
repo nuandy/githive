@@ -10,9 +10,11 @@ import {
 	inviteOf,
 	signInHref,
 	signinErrorMessage,
+	signinAccountOf,
 	signinErrorOf,
 	tokenLabel,
 	withoutSigninError,
+	workPrompt,
 } from "./session";
 
 describe("signing in", () => {
@@ -92,5 +94,21 @@ describe("agent tokens", () => {
 		]);
 		for (const client of ["claude-code", "codex", "other"] as const)
 			expect(JSON.stringify(tokenSteps(client, "https://githive.app", "ghv_x"))).not.toContain("<token>");
+	});
+});
+
+describe("giving a new agent work", () => {
+	it("asks it, through GitHive, for a small piece of work in one of your repos", () => {
+		expect(workPrompt("robin/notes")).toBe("Use GitHive to improve the README in robin/notes.");
+	});
+});
+
+describe("a request to join", () => {
+	it("reads the email it's noted under from the fragment, and drops it with the error", () => {
+		expect(signinAccountOf("#signin-as=eve%40example.com")).toBe("eve@example.com");
+		expect(signinAccountOf("#/repos/acme/docs")).toBeNull();
+		expect(signinAccountOf("")).toBeNull();
+		expect(withoutSigninError("https://githive.app/?signin_error=not-invited#signin-as=eve%40example.com")).toBe("/");
+		expect(withoutSigninError("https://githive.app/?signin_error=expired#/repos/docs")).toBe("/#/repos/docs");
 	});
 });

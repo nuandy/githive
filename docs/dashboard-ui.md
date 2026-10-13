@@ -186,4 +186,8 @@ fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline befo
 - Colors, sizes and timings come from the theme. An arbitrary value (`leading-[1.45]`) only where the theme has no
   step, and never a raw color.
 - `cn()` joins classes and lets a later one win; pass a component's `className` last.
+- A server's error shown on its own goes through `messageOf` (`lib/errors.ts`): a sentence, with a capital and a full
+  stop. One set inside a sentence of your own ("couldn't be loaded: …") takes `reasonOf`, the words as they came; a
+  poll's `error` is those. `statusOf` gives a refused call's HTTP status (409 for a name that's taken), so the error
+  can go under the field it's about, with `aria-invalid` on the field and its hint in `aria-describedby`.
 - Capture the visual check before a change and compare after, and add a scene for any state you add.

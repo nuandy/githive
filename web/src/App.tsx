@@ -35,7 +35,14 @@ import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type RepoTab, type Route } from "./lib/routes";
-import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
+import {
+	type Provider,
+	inviteOf,
+	signinAccountOf,
+	signinErrorMessage,
+	signinErrorOf,
+	withoutSigninError,
+} from "./lib/session";
 import { cn } from "./lib/utils";
 // The page column's classes, for the pages not yet on utilities.
 
@@ -112,16 +119,29 @@ export function App() {
 	const [bootError, setBootError] = useState<string | null>(null);
 	const [providers, setProviders] = useState<Provider[] | undefined>(undefined);
 	const [takesInviteCode, setTakesInviteCode] = useState(false);
-	// Read once, then dropped from the address bar so a reload doesn't show it again.
-	const [signinError] = useState(() => signinErrorMessage(signinErrorOf(window.location.search)));
+	// Read once, then dropped from the address bar so a reload doesn't show it again. A sign-in turned away is a
+	// request to join, noted under the account the fragment names.
+	const [signinCode] = useState(() => signinErrorOf(window.location.search));
+	const signinError = signinCode === "not-invited" ? null : signinErrorMessage(signinCode);
+	const [request] = useState(() =>
+		signinCode === "not-invited" ? { account: signinAccountOf(window.location.hash) } : undefined,
+	);
 	useEffect(() => {
 		if (signinErrorOf(window.location.search))
 			window.history.replaceState(null, "", withoutSigninError(window.location.href));
 	}, []);
+	// A session that ends while the page is open (a call answers 401) brings the sign-in screen back, saying so; a
+	// visitor asking for a private repo gets the same answer, but had no session to end.
+	const [sessionEnded, setSessionEnded] = useState(false);
+	const signedIn = useRef(false);
+	signedIn.current = !!me;
 	useEffect(() => {
 		const failed = (err: unknown) => setBootError(messageOf(err));
 		fetchMe().then(setMe, failed);
-		const signedOut = () => setMe(null);
+		const signedOut = () => {
+			if (signedIn.current) setSessionEnded(true);
+			setMe(null);
+		};
 		window.addEventListener(SIGNED_OUT_EVENT, signedOut);
 		return () => window.removeEventListener(SIGNED_OUT_EVENT, signedOut);
 	}, []);
@@ -146,28 +166,60 @@ export function App() {
 		return (
 			<EmptyPage role="alert">
 				<h1>GitHive didn't answer</h1>
-				<p>{bootError}. Reload the page to try again.</p>
+				<p>{bootError} Reload the page to try again.</p>
 			</EmptyPage>
 		);
 	}
 	if (me === null) {
-		const signIn = { providers, error: signinError, takesInviteCode, invite: inviteOf(window.location.search) };
-		return <SignedOut signIn={signIn} />;
+		const signIn = {
+			providers,
+			error: signinError,
+			takesInviteCode,
+			invite: inviteOf(window.location.search),
+			request,
+			...(sessionEnded ? { notice: "Your session ended. Sign in again to continue." } : {}),
+		};
+		return <SignedOut signIn={signIn} sessionEnded={sessionEnded} />;
 	}
 	return <Dashboard me={me} onSignOut={signOut} />;
 }
 
-/** Someone signed out: a public repo's pages when the address names one, and the sign-in screen otherwise. */
-function SignedOut({ signIn: options }: { signIn: Omit<ComponentProps<typeof SignIn>, "hash"> }) {
+// The history entry the visitor's Sign in pushes: Back from the sign-in screen returns to what they were reading.
+const SIGNING_IN = "githive:signing-in";
+
+/**
+ * Someone signed out: a public repo's pages when the address names one, and the sign-in screen otherwise, or once
+ * they ask to sign in there (or their session ended there). Going anywhere else from it, Back included, reads on.
+ */
+function SignedOut({
+	signIn: options,
+	sessionEnded = false,
+}: {
+	signIn: Omit<ComponentProps<typeof SignIn>, "hash">;
+	sessionEnded?: boolean;
+}) {
 	const route = useHashRoute();
-	const [signingIn, setSigningIn] = useState(false);
-	const signIn = <SignIn {...options} hash={window.location.hash} />;
-	const error = options.error;
+	const place = routePlace(route);
+	// Where the sign-in screen was asked for.
+	const [askedAt, setAskedAt] = useState<string | null>(() => (sessionEnded ? place : null));
+	useEffect(() => {
+		const onPop = () => {
+			const asked = (window.history.state as Record<string, unknown> | null)?.[SIGNING_IN];
+			setAskedAt(asked ? routePlace(parseRoute(window.location.hash)) : null);
+		};
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, []);
+	// Signing in returns to the page they were on; not to the fragment a request to join came back with.
+	const hash = signinAccountOf(window.location.hash) ? "" : window.location.hash;
+	const signIn = <SignIn {...options} hash={hash} />;
 	const reading = route.page === "repo" || route.page === "change";
-	// After a failed sign-in, or once they ask to sign in, the sign-in screen.
-	const toSignIn = signingIn || !!error;
-	if (!reading || toSignIn) return signIn;
-	return <Visitor route={route} onSignIn={() => setSigningIn(true)} signIn={signIn} />;
+	if (!reading || askedAt === place) return signIn;
+	const askToSignIn = () => {
+		window.history.pushState({ [SIGNING_IN]: true }, "");
+		setAskedAt(place);
+	};
+	return <Visitor route={route} onSignIn={askToSignIn} signIn={signIn} />;
 }
 
 /** A public repo, read by someone signed out. A repo they can't read asks them to sign in. */
@@ -246,7 +298,10 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "org") {
 		page = <OrgPage slug={route.org} me={me.kind === "user" ? me : { handle: "" }} manage={manage} />;
 	} else if (route.page === "agents-settings") {
-		page = me.kind === "user" ? <AgentsPage me={me} account={account} /> : <NoAgentsHere />;
+		// Your own repos, most recently active first, to name in what to ask a new agent.
+		const yours = summaries.data ? buildRepoRows(summaries.data).filter((row) => !row.public) : undefined;
+		const repos = yours?.map((row) => row.name);
+		page = me.kind === "user" ? <AgentsPage me={me} account={account} repos={repos} /> : <NoAgentsHere />;
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
@@ -255,7 +310,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				rows={summaries.data ? buildRepoRows(summaries.data) : []}
 				loaded={summaries.loaded}
 				canCreate={me.kind === "user"}
-				{...(me.kind === "user" ? { demo } : {})}
+				{...(me.kind === "user" ? { demo, start: account } : {})}
 			/>
 		);
 	} else if (repoName !== null && view) {
@@ -425,7 +480,7 @@ function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: s
 		case "inbox":
 			return { crumbs: [{ label: "Inbox" }], title: "Inbox" };
 		case "agents-settings":
-			return { crumbs: [{ label: "Agents" }], title: "Agents" };
+			return { crumbs: [{ label: "Your agents" }], title: "Your agents" };
 		case "admin":
 			return { crumbs: [{ label: "Admin" }], title: "Admin" };
 		case "new-repo":

@@ -9,6 +9,7 @@ import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
 import { cn } from "../lib/utils";
 import { DemoCard, type DemoApi } from "./DemoRun";
+import { GetStarted, type StartApi } from "./GetStarted";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
 import { Lamp } from "./ui/badge";
@@ -24,6 +25,8 @@ export interface RepoListProps {
 	canCreate?: boolean;
 	/** Demo runs, which a person signed in can start. */
 	demo?: DemoApi;
+	/** Your agents and apps, for the Get started checklist (people signed in). */
+	start?: StartApi;
 }
 
 /** A repo's lamp: what needs a person, work being built, or work landed, as a change's lamp says each; quiet is unlit. */
@@ -216,7 +219,7 @@ const NOTE = "my-3.75 border-t border-border px-0.5 py-3 text-muted-foreground";
  * The home page: the reader's own repos (theirs, their orgs' and those shared with them), those that need a person
  * first, then those at work, then the quiet ones; then other people's public repos, apart.
  */
-export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoListProps) {
+export function RepoList({ rows: all, loaded, canCreate = false, demo, start }: RepoListProps) {
 	const [query, setQuery] = useState("");
 	const rows = all.filter((row) => !row.public);
 	const others = all.filter((row) => row.public);
@@ -264,7 +267,9 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 				) : null}
 			</div>
 
-			{demo ? <DemoCard api={demo} /> : null}
+			{start ? <GetStarted rows={rows} loaded={loaded} api={start} /> : null}
+			{/* Prominent for an account with no repositories; otherwise a line. */}
+			{demo && phase !== "loading" ? <DemoCard api={demo} compact={phase === "list"} /> : null}
 
 			{all.length > 0 ? (
 				<div className={cn("relative mb-4", searchFades && "animate-fade")}>

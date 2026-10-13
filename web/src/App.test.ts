@@ -29,3 +29,11 @@ describe("the window title", () => {
 		);
 	});
 });
+
+describe("your agents' page", () => {
+	it("is titled Your agents, in the window and the breadcrumbs, apart from a repo's Agents tab", () => {
+		const { crumbs, title } = headingOf({ page: "agents-settings" }, 0, "");
+		expect(title).toBe("Your agents · GitHive");
+		expect(crumbs).toEqual([{ label: "Your agents" }]);
+	});
+});

@@ -112,6 +112,27 @@ export const CONNECTIONS: Connection[] = [
 	},
 ];
 
+/** A token just made for robin/builder: the secret, shown once (invented, like everything here). */
+export const NEW_TOKEN = {
+	id: tokenId("builder-2"),
+	agentId: agentId("builder"),
+	prefix: "Hq7Lw2",
+	createdAt: ago(0),
+	expiresAt: daysAgo(-90),
+	lastUsedAt: null,
+	revokedAt: null,
+	token: "ghv_Hq7Lw2fixtureNotARealToken0000000000",
+};
+
+/** Claude Code, connected a moment ago as a new agent, robin/scout: what the Agents page finds after Copy. */
+export const NEW_CONNECTION: Connection = {
+	id: `gr-${sha("grant:claude-code-scout").slice(0, 10)}`,
+	client: "Claude Code",
+	agentId: agentId("scout"),
+	agent: `${ROBIN.handle}/scout`,
+	createdAt: ago(0),
+};
+
 const orgId = (slug: string) => `o-${sha(`org:${slug}`).slice(0, 10)}`;
 
 /** The orgs the admin belongs to, and their own namespace. */

@@ -6,6 +6,7 @@
 
 import type { Page } from "playwright-core";
 import type { Who } from "./fixtures.ts";
+import { AGENTS, CONNECTIONS, NEW_CONNECTION, NEW_TOKEN } from "./fixtures/account.ts";
 import { FIXED_NOW } from "./fixtures/clock.ts";
 import { DOCS_REPO } from "./fixtures/small-repos.ts";
 import { STOREFRONT as STOREFRONT_REPO } from "./fixtures/storefront.ts";
@@ -161,16 +162,16 @@ const steps =
 	};
 
 /** From here on, `method` requests to `path` get `body` (what the fixtures don't hold); then, for a GET, the page
- * loads again to ask. */
+ * loads again to ask, unless told not to (`reload: false`, for what the page asks again on its own). */
 const answering =
-	(path: string, body: unknown, { status = 200, method = "GET" } = {}) =>
+	(path: string, body: unknown, { status = 200, method = "GET", reload = true } = {}) =>
 	async (p: Page) => {
 		await p.route(`**${path}`, (route) =>
 			route.request().method() === method
 				? route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 				: route.fallback(),
 		);
-		if (method === "GET") await p.reload();
+		if (method === "GET" && reload) await p.reload();
 	};
 
 /** A demo run on acme/storefront, finished with every piece landed, so there's a game to play. */
@@ -242,6 +243,59 @@ const APP: Scene[] = [
 	page("repos-demo-running", "/", {
 		act: answering("/demo/runs", { running: { fullName: "acme/storefront" }, newest: LANDED_RUN }),
 	}),
+	// A new account: no repos, no agents. Get started leads, the demo card is prominent.
+	page("repos-get-started", "/", {
+		act: steps(answering("/me/agents", []), answering("/me/connections", []), answering("/summaries", { repos: [] })),
+	}),
+	// A first repo, an agent connected and its first claim: three steps ticked, the landing next.
+	page("repos-get-started-claimed", "/", {
+		act: steps(
+			answering("/me/agents", []),
+			answering("/summaries", {
+				repos: [
+					{
+						repo: "robin/widgets",
+						since: new Date(FIXED_NOW - 60 * 60_000).toISOString(),
+						summary: {
+							open: 1,
+							needsYou: 0,
+							merged: 0,
+							violations: 0,
+							lastActivity: new Date(FIXED_NOW).toISOString(),
+						},
+					},
+				],
+			}),
+		),
+	}),
+	// A demo run starting: how long so far, and how long it can take.
+	page("repos-demo-setting-up", "/", {
+		act: steps(
+			answering("/demo/runs", { id: "run-9", repo: "acme/storefront" }, { status: 201, method: "POST" }),
+			answering("/demo/runs", {
+				running: null,
+				recent: [],
+				newest: { ...LANDED_RUN, id: "run-9", status: "running", settingUp: true },
+			}),
+			click("Start a demo run"),
+		),
+	}),
+	// A run refused because another started first: the card offers that one to watch.
+	page("repos-demo-refused", "/", {
+		act: async (p) => {
+			let refused = false;
+			await p.route("**/demo/runs", (route) => {
+				const post = route.request().method() === "POST";
+				if (post) refused = true;
+				const body = post
+					? { error: "a demo run is going already: watch it at acme/storefront" }
+					: { running: refused ? { fullName: "acme/storefront" } : null, recent: [], newest: null };
+				return route.fulfill({ status: post ? 429 : 200, contentType: "application/json", body: JSON.stringify(body) });
+			});
+			await p.reload();
+			await click("Start a demo run")(p);
+		},
+	}),
 	page("repos-demo-error", "/", {
 		act: steps(
 			answering("/demo/runs", { error: "another demo run is going" }, { status: 409, method: "POST" }),
@@ -254,14 +308,29 @@ const APP: Scene[] = [
 	page("new-repo-fresh", "/new", { act: click(/Start fresh/, "radio") }),
 	page("new-repo-import", "/new", { act: steps(fill(/^Name/, "widgets"), click(/A Git repository/, "radio")) }),
 	page("new-repo-bad-name", "/new", { act: fill(/^Name/, "my project") }),
+	// A name that's taken: said under the name, with a link to the one there.
 	page("new-repo-error", "/new", {
 		act: steps(
-			answering("/repos", { error: "robin/widgets exists already" }, { status: 409, method: "POST" }),
+			answering("/repos", { error: "robin/widgets exists" }, { status: 409, method: "POST" }),
 			fill(/^Name/, "widgets"),
 			click(/A Git repository/, "radio"),
 			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
 			click("Make repository"),
 		),
+	}),
+	// An import that failed: said under its URL.
+	page("new-repo-import-error", "/new", {
+		act: steps(
+			answering("/repos", { error: "the repository has no branch to import" }, { status: 400, method: "POST" }),
+			fill(/^Name/, "widgets"),
+			click(/A Git repository/, "radio"),
+			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
+			click("Make repository"),
+		),
+	}),
+	// A name too long, said once the field is left.
+	page("new-repo-long-name", "/new", {
+		act: steps(fill(/^Name/, "x".repeat(104)), async (p) => p.getByLabel(/^Name/).first().blur()),
 	}),
 	page("inbox", "/inbox"),
 	page("orgs", "/orgs"),
@@ -280,7 +349,39 @@ const APP: Scene[] = [
 	page("org-fieldnotes", "/orgs/fieldnotes"),
 	page("org-robin", "/orgs/robin"),
 	page("agents", "/settings/agents"),
-	page("agents-confirm", "/settings/agents", { act: click("Revoke") }),
+	// Revoking an agent from its ⋯ menu, asked in a dialog.
+	page("agents-confirm", "/settings/agents", {
+		act: steps(click("More for robin/builder"), async (p) => p.getByRole("menuitem", { name: /Revoke agent/ }).click()),
+	}),
+	// An agent's tokens unfolded, and the revoked agents.
+	page("agents-tokens", "/settings/agents", { act: steps(openSummary("Tokens (2)"), openSummary("Revoked (1)")) }),
+	page("agents-new-token", "/settings/agents", { act: steps(openSummary("Tokens (2)"), click("New token…")) }),
+	page("agents-token-made", "/settings/agents", {
+		act: steps(
+			answering(`/me/agents/${AGENTS[0]!.id}/tokens`, NEW_TOKEN, { method: "POST" }),
+			openSummary("Tokens (2)"),
+			click("New token…"),
+			click("Make token"),
+		),
+	}),
+	// Closing the new token before copying it asks first.
+	page("agents-token-uncopied", "/settings/agents", {
+		act: steps(
+			answering(`/me/agents/${AGENTS[0]!.id}/tokens`, NEW_TOKEN, { method: "POST" }),
+			openSummary("Tokens (2)"),
+			click("New token…"),
+			click("Make token"),
+			click("Done"),
+		),
+	}),
+	// The Claude Code command copied, and a new connection found at the next look.
+	page("agents-connected", "/settings/agents", {
+		act: steps(
+			click("Copy"),
+			answering("/me/connections", [...CONNECTIONS, NEW_CONNECTION], { reload: false }),
+			async (p) => p.waitForTimeout(4_000),
+		),
+	}),
 	page("admin", "/admin", { who: "operator" }),
 	page("admin-confirm", "/admin", { who: "operator", act: click("Remove") }),
 	page("not-found", "/nope/nothing"),
@@ -381,6 +482,20 @@ const APP: Scene[] = [
 	page("visitor-private", "/repos/acme/docs", { who: "visitor" }),
 	page("visitor-sign-in", STOREFRONT, { who: "visitor", act: click("Sign in") }),
 	{ name: "visitor-sign-in-failed", url: "/?signin_error=not-invited#/", who: "visitor" },
+	// A request to join, noted under the account the server sent back in the fragment.
+	{
+		name: "visitor-sign-in-requested",
+		url: "/?signin_error=not-invited#signin-as=taylor%40mail.example",
+		who: "visitor",
+	},
+	// A session that ends while a repo is open: the next read answers 401, and the sign-in screen says so.
+	page("session-ended", STOREFRONT, {
+		act: async (p) => {
+			const ended = { status: 401, contentType: "application/json", body: JSON.stringify({ error: "signed out" }) };
+			await p.route("**/repos/**", (route) => route.fulfill(ended));
+			await p.waitForTimeout(6_000);
+		},
+	}),
 ];
 
 export const SCENES: Scene[] = [...APP, ...HIVE];

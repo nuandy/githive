@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useChanged } from "../hooks/useChanged";
+import { href } from "../lib/routes";
 import { PROVIDER_NAMES, type Provider, signInHref } from "../lib/session";
 import { cn } from "../lib/utils";
 import { HiveMark } from "./HiveMark";
 import { Button } from "./ui/button";
 import { Input, Label } from "./ui/field";
+
+/** GitHive's public demo repo, where a hive builds a game: anyone can watch it, signed in or not. */
+const DEMO_REPO = "nuandy/honeycomb";
 
 /** GitHub's and Google's marks, single-colour, for the sign-in buttons. */
 function ProviderMark({ provider }: { provider: Provider }) {
@@ -36,15 +40,17 @@ function ProviderMark({ provider }: { provider: Provider }) {
 	);
 }
 
-/** One button per provider, once they're known. */
+/** One button per provider, once they're known; the first in ink unless something else leads (`quiet`). */
 function ProviderButtons({
 	providers,
 	hash,
 	invite,
+	quiet = false,
 }: {
 	providers: Provider[] | undefined;
 	hash: string;
 	invite: string;
+	quiet?: boolean;
 }) {
 	// What takes the place of "Loading…" fades in.
 	const appear = useChanged(providers === undefined) && "animate-fade";
@@ -63,7 +69,7 @@ function ProviderButtons({
 				<Button
 					key={provider}
 					asChild
-					variant={index === 0 ? "primary" : "default"}
+					variant={index === 0 && !quiet ? "primary" : "default"}
 					className="gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal"
 				>
 					<a href={signInHref(provider, hash, invite)}>
@@ -116,10 +122,31 @@ function SignInFooter() {
 	);
 }
 
+/** Signed out and asked to join: the account it's noted under, how they'll hear, and the demo to watch meanwhile. */
+function Requested({ account }: { account: string | null }) {
+	return (
+		<>
+			<h1 className="text-title-lg tracking-[-0.01em] text-balance">Your request to join is noted</h1>
+			<p className="m-0 max-w-[36ch] text-muted-foreground">
+				{account ? (
+					<>
+						GitHive noted it for <strong className="text-foreground wrap-anywhere">{account}</strong>.{" "}
+					</>
+				) : null}
+				An admin lets people in by hand. GitHive doesn't email you when they do: sign in again later, and once you're
+				approved you're in.
+			</p>
+			<Button asChild variant="primary" className="mt-1 w-full px-4 py-2.5 whitespace-normal">
+				<a href={href.repo(DEMO_REPO)}>Watch a hive build a game</a>
+			</Button>
+		</>
+	);
+}
+
 /**
- * The page everyone who isn't signed in sees: who GitHive is for, and one
- * button per provider set up on this address. A failed sign-in comes back here
- * with its reason.
+ * The page everyone who isn't signed in sees: who GitHive is for, and one button per provider set up on this address.
+ * A failed sign-in comes back here with its reason; a request to join, with the account it's noted under; a session
+ * that ended, saying so. Anyone can watch the public demo repo instead.
  */
 export function SignIn({
 	providers,
@@ -127,6 +154,8 @@ export function SignIn({
 	hash = "",
 	takesInviteCode = false,
 	invite: linkedInvite = "",
+	request,
+	notice,
 }: {
 	providers: Provider[] | undefined;
 	error?: string | null;
@@ -135,6 +164,10 @@ export function SignIn({
 	takesInviteCode?: boolean;
 	/** The invite code the link carried, filled in. */
 	invite?: string;
+	/** Their sign-in was turned away and noted as a request to join, under this account if the server said. */
+	request?: { account: string | null } | undefined;
+	/** Why they're here again: their session ended. */
+	notice?: string | undefined;
 }) {
 	const [invite, setInvite] = useState(linkedInvite);
 	return (
@@ -153,16 +186,28 @@ export function SignIn({
 				<div className="mb-1 grid place-items-center">
 					<HiveMark size={56} />
 				</div>
-				<h1 className="text-title-lg tracking-[-0.01em] text-balance">Sign in to GitHive</h1>
-				<p className="m-0 max-w-[32ch] text-muted-foreground">
-					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
-					recorded in Git.
-				</p>
+				{request ? (
+					<Requested account={request.account} />
+				) : (
+					<>
+						<h1 className="text-title-lg tracking-[-0.01em] text-balance">Sign in to GitHive</h1>
+						<p className="m-0 max-w-[32ch] text-muted-foreground">
+							A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
+							recorded in Git.
+						</p>
+					</>
+				)}
+				{notice ? (
+					<p className="mt-1 mb-0 w-full rounded-md bg-surface-2 px-3 py-2.5 text-left" role="status">
+						{notice}
+					</p>
+				) : null}
 				{error ? (
 					<p className="mt-1 mb-0 w-full rounded-md bg-warn-soft px-3 py-2.5 text-left text-warn" role="alert">
 						{error}
 					</p>
 				) : null}
+				{request ? <p className="mt-2 mb-0 text-ui text-muted-foreground">Or sign in again:</p> : null}
 				{takesInviteCode ? (
 					<Label className="grid w-full gap-1 text-left text-ui text-muted-foreground">
 						<span>Invite code, if you have one</span>
@@ -175,10 +220,20 @@ export function SignIn({
 						/>
 					</Label>
 				) : null}
-				<ProviderButtons providers={providers} hash={hash} invite={invite} />
+				{takesInviteCode && !request ? (
+					<p className="m-0 w-full text-left text-ui text-muted-foreground">
+						No code? Continue anyway and we'll ask an admin to let you in.
+					</p>
+				) : null}
+				<ProviderButtons providers={providers} hash={hash} invite={invite} quiet={!!request} />
+				{request ? null : (
+					<a className="text-ui" href={href.repo(DEMO_REPO)}>
+						Or watch a hive build a game, no account needed
+					</a>
+				)}
 				<p className="mt-2 mb-0 max-w-[34ch] text-meta text-muted-foreground">
 					{takesInviteCode
-						? "GitHive is invite-only for now. Have an invite code? Enter it, then continue."
+						? "GitHive is invite-only for now."
 						: "GitHive is invite-only for now. If you aren't invited yet, signing in asks an admin to let you in."}
 				</p>
 			</div>

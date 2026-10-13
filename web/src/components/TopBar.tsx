@@ -140,7 +140,7 @@ function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
 	return (
 		<a className={pill} href={href.agents()} aria-current={agentsCurrent ? "page" : undefined} aria-label="Your agents">
 			<Icon name="bot" size={14} />
-			<span className="to-560:hidden">Agents</span>
+			<span className="to-560:hidden">Your agents</span>
 		</a>
 	);
 }

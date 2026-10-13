@@ -37,7 +37,7 @@ describe("the top bar, signed in", () => {
 		expect(menuAt).toBeGreaterThan(0);
 		const outsideMenu = html.slice(0, menuAt);
 		expect(outsideMenu).toContain('aria-label="Your agents"');
-		expect(visibleText(outsideMenu)).toContain("Agents");
+		expect(visibleText(outsideMenu)).toContain("Your agents");
 	});
 
 	it("shows no agents link to an admin through Access, who has no agents of their own", () => {

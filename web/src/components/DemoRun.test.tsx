@@ -38,6 +38,16 @@ describe("a demo run on the dashboard", () => {
 		expect(text).toContain("Start a demo run");
 	});
 
+	it("is a line to put away for an account that has repositories", () => {
+		const api = { start: async () => ({ id: "x", repo: "ada/x" }), runs: async () => ({ running: null }) };
+		const html = renderToStaticMarkup(<DemoCard api={api} compact />);
+		const text = visibleText(html);
+		expect(text).toContain("Watch a hive build a game.");
+		expect(text).toContain("Start a demo run");
+		expect(html).toContain('aria-label="Dismiss the demo"');
+		expect(text).not.toContain("Nothing assigns the work");
+	});
+
 	it("says how a run is going, and how it ended", () => {
 		expect(runWords(run(), NOW)).toBe(
 			"Demo run 3, started by ada 10 minutes ago: 1 building, 1 reviewing, 1 of 13 pieces finished.",
