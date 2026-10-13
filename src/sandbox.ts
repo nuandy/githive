@@ -14,7 +14,16 @@ import {
 	type AgentTool,
 	type Usage,
 } from "./agent";
-import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, run } from "./container";
+import {
+	COMMAND_TIMEOUT_S,
+	ContainerUnresponsive,
+	WORKDIR,
+	bootContainer,
+	clip,
+	gitWithToken,
+	installToolchains,
+	run,
+} from "./container";
 import { staysInRepo } from "./paths";
 
 export { WORKDIR, clip };
@@ -316,8 +325,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.ctx.container!.setInactivityTimeout(20 * 60_000);
 		const deadline = Date.now() + RUN_BUDGET_MS;
-		while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state)))
+		while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
+			// One that stopped answering was destroyed mid-turn (see replaceIfHung): a fresh one before the next turn.
+			if (!this.ctx.container?.running) await this.setUp(job, state);
 			await this.runTurn(job, state);
+		}
 		if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
@@ -396,11 +408,24 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 
 	protected exec(cmd: string[], cwd = WORKDIR, stdin?: string) {
-		return run(this.ctx.container!, cmd, cwd, stdin);
+		return this.replaceIfHung(run(this.ctx.container!, cmd, cwd, stdin));
 	}
 
 	protected async git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
-		return gitWithToken(this.ctx.container!, token, args, cwd);
+		return this.replaceIfHung(gitWithToken(this.ctx.container!, token, args, cwd));
+	}
+
+	/**
+	 * A command's result. If the container stopped answering, it's destroyed, so the next turn starts with a fresh one
+	 * instead of waiting out the command's limit; the agent hears the command failed, then that the container restarted.
+	 */
+	private async replaceIfHung<T>(command: Promise<T>) {
+		try {
+			return await command;
+		} catch (err) {
+			if (err instanceof ContainerUnresponsive) await this.ctx.container?.destroy(err.message).catch(() => undefined);
+			throw err;
+		}
 	}
 
 	protected baseTools(state: S): AgentTool[] {

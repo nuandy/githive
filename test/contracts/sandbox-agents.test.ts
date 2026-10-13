@@ -136,6 +136,23 @@ describe("pushes", () => {
 	});
 });
 
+describe("a container that stops answering", () => {
+	it("is destroyed mid-command, so the next turn starts with a fresh one, and the agent hears why", async () => {
+		vi.useFakeTimers();
+		try {
+			// Nothing it's asked to run comes back, not even the quick checks on it.
+			box.container.exec.mockImplementation(async () => ({ output: () => new Promise<never>(() => undefined) }));
+			const state = { status: "working", log: [], pushes: 0 } as unknown as BuilderState;
+			const ran = runCall(builder.getTools(state), "run_command", JSON.stringify({ command: "npm test" }));
+			await vi.advanceTimersByTimeAsync(75_000);
+			expect(await ran).toBe("run_command failed: the container stopped answering");
+			expect(box.container.destroy).toHaveBeenCalledWith("the container stopped answering");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
 describe("revising", () => {
 	it("keeps a rejection that arrives mid-turn for the builder's next turn", async () => {
 		const working = { status: "working", log: [], pushes: 1, revisions: 1, turns: 4 } as unknown as BuilderState;

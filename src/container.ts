@@ -128,6 +128,52 @@ export async function takeGitRequests(
 	return { paths, failed };
 }
 
+/** A container that stopped answering: its command will never come back, and the container needs replacing. */
+export class ContainerUnresponsive extends Error {}
+
+/** How often a running command's container is checked on, and how long it has to answer. */
+const CHECK_EVERY_MS = 20_000;
+const ANSWER_WITHIN_MS = 15_000;
+/** Checks in a row that go unanswered before the container counts as hung. */
+const CHECKS_MISSED = 2;
+/** How long past its own limit a command may take to come back, when the container still answers. */
+const PAST_LIMIT_MS = 30_000;
+
+/**
+ * A command's output, or ContainerUnresponsive once the container stops answering a quick check while it runs. A busy
+ * container still answers; one that crashed or hung doesn't, and waiting out the command's limit would cost minutes.
+ */
+async function whileAnswering<T>(container: Container, output: Promise<T>, timeoutS: number): Promise<T> {
+	let settled = false;
+	const done = output.finally(() => {
+		settled = true;
+	});
+	const giveUpAt = Date.now() + timeoutS * 1000 + PAST_LIMIT_MS;
+	const hung = (async (): Promise<never> => {
+		let missed = 0;
+		for (;;) {
+			await pause(CHECK_EVERY_MS);
+			if (settled) return new Promise<never>(() => undefined);
+			if (Date.now() >= giveUpAt)
+				throw new ContainerUnresponsive(`the command didn't come back ${PAST_LIMIT_MS / 1000}s past its limit`);
+			missed = (await answers(container)) ? 0 : missed + 1;
+			if (missed >= CHECKS_MISSED) throw new ContainerUnresponsive("the container stopped answering");
+		}
+	})();
+	return Promise.race([done, hung]);
+}
+
+/** Whether the container runs a trivial command in time. */
+async function answers(container: Container) {
+	const ran = container.exec(["true"]).then(
+		(process) => process.output().then(() => true),
+		() => false,
+	);
+	return Promise.race([ran, pause(ANSWER_WITHIN_MS).then(() => false)]);
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Run a command. `timeout` kills its whole process group, so commands like `npm test`
  * can't outlive their limit. exec() reports a missing `cwd` as "command not found".
@@ -139,13 +185,17 @@ export async function run(
 	stdin?: string | ReadableStream<Uint8Array>,
 	timeoutS = COMMAND_TIMEOUT_S,
 ) {
-	const process = await container.exec(["timeout", "-s", "KILL", String(timeoutS), ...cmd], {
+	const started = container.exec(["timeout", "-s", "KILL", String(timeoutS), ...cmd], {
 		cwd,
 		stderr: "combined",
 		stdin: typeof stdin === "string" ? new Response(stdin).body! : stdin,
 		env: { HOME: "/root", CI: "true", npm_config_update_notifier: "false", ...GIT_TRACE_ENV },
 	});
-	const result = await process.output();
+	const result = await whileAnswering(
+		container,
+		started.then((process) => process.output()),
+		timeoutS,
+	);
 	const output = new TextDecoder().decode(result.stdout);
 	return {
 		exitCode: result.exitCode,
