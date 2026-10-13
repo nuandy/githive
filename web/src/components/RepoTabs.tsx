@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { RepoAudit, RepoSnapshot } from "../api";
+import type { RepoAudit, RepoLanding, RepoSnapshot } from "../api";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
@@ -106,6 +106,7 @@ function ChangeRow({
 	claim,
 	votes,
 	policy,
+	landing,
 	repo,
 	now,
 	arrived,
@@ -113,11 +114,12 @@ function ChangeRow({
 	claim: Claim;
 	votes: Vote[];
 	policy: RepoSnapshot["policy"];
+	landing: Pick<RepoLanding, "checking"> | undefined;
 	repo: string;
 	now?: number;
 	arrived: boolean;
 }) {
-	const status = claimStatus(claim, votes, policy);
+	const status = claimStatus(claim, votes, { policy, landing, now: now ?? Date.now() });
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
@@ -192,6 +194,7 @@ function ChangeRows({
 	claims,
 	votes,
 	policy,
+	landing,
 	repo,
 	now,
 	fades,
@@ -199,6 +202,7 @@ function ChangeRows({
 	claims: Claim[];
 	votes: Vote[];
 	policy: RepoSnapshot["policy"];
+	landing: Pick<RepoLanding, "checking"> | undefined;
 	repo: string;
 	now?: number;
 	fades: boolean;
@@ -213,6 +217,7 @@ function ChangeRows({
 					claim={claim}
 					votes={votes}
 					policy={policy}
+					landing={landing}
 					repo={repo}
 					now={now}
 					arrived={arrived(claim.change)}
@@ -231,12 +236,15 @@ export function ChangeList({
 	snapshot,
 	repo,
 	shown,
+	landing,
 	now,
 }: {
 	snapshot: RepoSnapshot;
 	repo: string;
 	shown?: string;
-	/** The time leases are told against (tests fix it). */
+	/** What's being checked to land on the branch shown, so a change in the batch says it's landing. */
+	landing?: Pick<RepoLanding, "checking">;
+	/** The time leases and abandoned changes are told against (tests fix it). */
 	now?: number;
 }) {
 	const project = snapshot.branch ?? "main";
@@ -277,6 +285,7 @@ export function ChangeList({
 					claims={claims}
 					votes={snapshot.votes}
 					policy={snapshot.policy}
+					landing={landing}
 					repo={repo}
 					now={now}
 					fades={fades}

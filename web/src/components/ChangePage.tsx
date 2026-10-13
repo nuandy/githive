@@ -136,7 +136,7 @@ function statusOf(
 	votes: Vote[],
 	policy: RepoSnapshot["policy"],
 ): ChangeStatus | null {
-	if (claim) return claimStatus(claim, votes, policy);
+	if (claim) return claimStatus(claim, votes, { policy });
 	if (history) return historyStatus(history);
 	return null;
 }
@@ -350,7 +350,7 @@ function ClaimMergeBox({
 	answerable: boolean;
 }) {
 	const { approval } = claim;
-	const status = claimStatus(claim, votes, policy);
+	const status = claimStatus(claim, votes, { policy });
 	const approvalLabel = claimApprovalLabel(claim);
 	const waitingNote = !approval.approved && approvalLabel.startsWith("Waiting") ? ` · ${approvalLabel}` : "";
 	return (

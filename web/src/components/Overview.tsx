@@ -15,13 +15,9 @@ import { Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, Label, NativeSelect } from "./ui/field";
 
-/**
- * What the overview reads: the repo's files and, when the server reports it, what's landing. People who can
- * write can also make a branch.
- */
+/** What the overview reads: the repo's files. People who can write can also make a branch. */
 export interface OverviewApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
-	landing?(repo: string, branch: string): Promise<RepoLanding>;
 	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
@@ -37,6 +33,8 @@ export interface OverviewProps {
 	canWrite?: boolean;
 	/** After a branch is made: read the snapshot again. */
 	onBranchMade?: () => void;
+	/** What's landing on the branch shown, when the server reports it (the Changes tab reads it for the list too). */
+	landing?: RepoLanding;
 }
 
 /** Which branch the overview shows, and making another (for people who can write). */
@@ -229,12 +227,20 @@ function Summary({ repo, snapshot, landing }: { repo: string; snapshot: RepoSnap
  * A repo at a glance, on one of its branches: the claims on it in a sentence and
  * its territory. What's landing and who works where are on the Hive tab.
  */
-export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
+export function Overview({
+	repo,
+	branch,
+	shown: asked,
+	snapshot,
+	api,
+	canWrite = false,
+	onBranchMade,
+	landing,
+}: OverviewProps) {
 	const known =
 		asked === undefined || asked === branch || (snapshot.branches ?? []).some((other) => other.name === asked);
 	const shown = asked && known ? asked : branch;
 	const otherBranch = shown === branch ? undefined : shown;
-	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, otherBranch), 60_000);
 	// Only the claims on this branch, since each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === shown) };
@@ -258,15 +264,8 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 					There's no branch {asked} taking changes here: showing {branch}.
 				</Callout>
 			) : null}
-			<Summary repo={repo} snapshot={onBranch} landing={landing.data} />
-			<Territory
-				repo={repo}
-				branch={shown}
-				snapshot={onBranch}
-				tree={tree.data}
-				error={tree.error}
-				landing={landing.data}
-			/>
+			<Summary repo={repo} snapshot={onBranch} landing={landing} />
+			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing} />
 		</div>
 	);
 }

@@ -15,6 +15,7 @@ import type {
 	SettingsInput,
 } from "../api";
 import { useChanged } from "../hooks/useChanged";
+import { usePoll } from "../hooks/usePoll";
 import { canVote, canWrite } from "../lib/permissions";
 import { BranchRules } from "./BranchRules";
 import { GitHubLink } from "./GitHubLink";
@@ -292,20 +293,57 @@ function RepoTabContent({
 			return <SettingsTab snapshot={snapshot} access={admin} editor={editor} />;
 		}
 	}
-	// The branch asked for in the address, when the repo has it.
-	const asked = view.branch && (snapshot.branches ?? []).some((known) => known.name === view.branch);
+	return (
+		<ChangesTab
+			repo={repo}
+			branch={branch}
+			asked={view.branch || undefined}
+			snapshot={snapshot}
+			api={api}
+			canWrite={canWrite(access?.level)}
+			onBranchMade={onSettingsChanged}
+		/>
+	);
+}
+
+/**
+ * The Changes tab: a branch's overview, then its open changes. Both read one landing, so a change being checked to
+ * land says so in each.
+ */
+function ChangesTab({
+	repo,
+	branch,
+	asked,
+	snapshot,
+	api,
+	canWrite,
+	onBranchMade,
+}: {
+	repo: string;
+	branch: string;
+	/** The branch the address asks for. */
+	asked: string | undefined;
+	snapshot: RepoSnapshot;
+	api: RepoPageProps["api"];
+	canWrite: boolean;
+	onBranchMade?: () => void;
+}) {
+	// The branch asked for, when the repo has it; else the project's.
+	const shown = asked && (snapshot.branches ?? []).some((known) => known.name === asked) ? asked : branch;
+	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	return (
 		<>
 			<Overview
 				repo={repo}
 				branch={branch}
-				shown={view.branch || undefined}
+				shown={asked}
 				snapshot={snapshot}
 				api={api}
-				canWrite={canWrite(access?.level)}
-				onBranchMade={onSettingsChanged}
+				canWrite={canWrite}
+				onBranchMade={onBranchMade}
+				{...(landing.data ? { landing: landing.data } : {})}
 			/>
-			<ChangeList snapshot={snapshot} repo={repo} shown={asked ? view.branch : branch} />
+			<ChangeList snapshot={snapshot} repo={repo} shown={shown} {...(landing.data ? { landing: landing.data } : {})} />
 		</>
 	);
 }

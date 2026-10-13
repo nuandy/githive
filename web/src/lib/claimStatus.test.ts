@@ -57,7 +57,7 @@ describe("changes", () => {
 		});
 		// A role only people may vote as needs a person.
 		const people = { required: 2, vetoes: ["security"], grants: { security: ["person:*"] } };
-		expect(claimStatus(waiting, [], people)).toMatchObject({
+		expect(claimStatus(waiting, [], { policy: people })).toMatchObject({
 			kind: "needs-person",
 			description: "Waiting for a security vote, which only a person can give.",
 		});
@@ -117,6 +117,11 @@ describe("rejections on the change's head", () => {
 
 	it("reads as before without votes", () => {
 		expect(claimStatus(approved).kind).toBe("approved");
+	});
+
+	it("says it's landing while its head is checked to land", () => {
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
+		expect(claimStatus(approved, [], { landing })).toMatchObject({ kind: "landing", label: "Landing", tone: "warn" });
 	});
 });
 

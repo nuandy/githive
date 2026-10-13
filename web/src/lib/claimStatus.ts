@@ -1,7 +1,7 @@
 import type { RepoSnapshot } from "../api";
 import type { ChangeStatus } from "./changeStatus";
 import { identityName } from "./agent";
-import { type ChangeState, changeState, STATES, waitingOn } from "./status";
+import { type ChangeState, changeState, type StateContext, STATES, waitingOn } from "./status";
 
 // Repos keep no change records. A change is a claim in force, with its pushed head,
 // the approvals on that head, and any hosted agents on it.
@@ -10,13 +10,13 @@ export type Claim = RepoSnapshot["claims"][number];
 export type Vote = RepoSnapshot["votes"][number];
 
 /**
- * How a change stands, from its claim, the votes cast and who may vote as each role (see status.ts): its state's
- * noun and tone, and a sentence on what is happening and who acts next.
+ * How a change stands, from its claim, the votes cast and what else status.ts reads (who may vote as each role, the
+ * batch being checked, the time): its state's noun and tone, and a sentence on what is happening and who acts next.
  */
-export function claimStatus(claim: Claim, votes: Vote[] = [], policy?: RepoSnapshot["policy"]): ChangeStatus {
-	const kind = changeState(claim, { votes, policy });
+export function claimStatus(claim: Claim, votes: Vote[] = [], context: Omit<StateContext, "votes"> = {}): ChangeStatus {
+	const kind = changeState(claim, { ...context, votes });
 	const { label, tone } = STATES[kind];
-	return { kind, label, tone, description: describeState(kind, claim, votes, policy) };
+	return { kind, label, tone, description: describeState(kind, claim, votes, context.policy) };
 }
 
 function describeState(state: ChangeState, claim: Claim, votes: Vote[], policy?: RepoSnapshot["policy"]): string {
