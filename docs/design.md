@@ -1816,7 +1816,7 @@ registered GitHive agent with its own key, and does the work for real: looks at
 `status`, `reviews` and `backlog`, claims, change the code, run the tests, push, review others' changes and vote,
 merge. Run `swarm.mjs --setup-only` first.
 
-    node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
+    node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-opus-5-5] [--minutes 45] [--only agent-7]
 
 An agent in the plan may have a `brief`, told after the rest: a part to play
 in a test. Runs on Express, 9 Oct:

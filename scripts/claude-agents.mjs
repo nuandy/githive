@@ -6,7 +6,7 @@
 // with the same plan:
 //
 //   node scripts/swarm.mjs <plan.json> --setup-only
-//   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
+//   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-opus-5-5] [--minutes 45] [--only agent-7]
 //
 // An agent in the plan may have a "brief", which is appended to its prompt, and the plan a "project", which says
 // what the repo is (a copy of Express by default). An agent whose key file holds a GitHive agent token (ghv_…)
@@ -26,7 +26,7 @@ const args = process.argv.slice(2);
 const planPath = resolve(args[0] ?? "");
 const flags = parseFlags(args);
 const BASE = flags.base ?? BENCH_BASE;
-const model = flags.model ?? "claude-sonnet-5-5";
+const model = flags.model ?? "claude-opus-5-5";
 const minutes = Number(flags.minutes ?? 45);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 const here = dirname(planPath);
