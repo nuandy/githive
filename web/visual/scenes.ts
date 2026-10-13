@@ -442,7 +442,11 @@ const APP: Scene[] = [
 	page("admin", "/admin", { who: "operator" }),
 	page("admin-confirm", "/admin", { who: "operator", act: click("Remove") }),
 	page("not-found", "/nope/nothing"),
-	page("theme-menu", "/", { act: async (p) => p.getByRole("button", { name: /^Theme:/ }).click() }),
+	// Light and dark: their own menu, or on a phone (560px and under), the user menu, where they move.
+	page("theme-menu", "/", {
+		act: async (p) =>
+			(p.viewportSize()?.width ?? 1280) <= 560 ? openUserMenu(p) : p.getByRole("button", { name: /^Theme:/ }).click(),
+	}),
 	// On a phone, light and dark are in the user menu.
 	page("repos-menu-narrow", "/", { widths: [390], act: openUserMenu }),
 	// The keyboard: the ⌘K palette, typed into, and the list of shortcuts.
