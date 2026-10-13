@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ago } from "../test/fixtures";
-import { buildRepoRows, filterRepos, groupRepos, repoCounts, repoState, type Summaries } from "./repos";
+import { buildRepoRows, filterRepos, groupRepos, repoCounts, repoState, type Summaries, waitingIn } from "./repos";
 
 describe("the repositories list", () => {
 	const summaries: Summaries = {
@@ -33,6 +33,21 @@ describe("the repositories list", () => {
 			open: 0,
 			lastActivity: ago(10),
 		});
+	});
+
+	it("counts what waits on a person as the Inbox does: changes and the audit's open violations", () => {
+		const waiting = [
+			{ kind: "vote" as const, role: "payments", change: "refunds", title: "Refunds", reason: "" },
+			{ change: "cache", title: "Cache", reason: "Which TTL?" },
+		];
+		const [row] = buildRepoRows({
+			repos: [{ repo: "acme/shop", since: ago(10), summary: { open: 3, needsYou: 2, violations: 1, waiting } }],
+		});
+		expect(row).toMatchObject({ needsYou: 2, violations: 1 });
+		expect(waitingIn({ needsYou: 2, violations: 1, waiting })).toEqual({ changes: 2, violations: 1 });
+		// A summary whose list is longer than its count (an older server's) counts its list.
+		expect(waitingIn({ waiting })).toEqual({ changes: 2, violations: 0 });
+		expect(waitingIn(null)).toEqual({ changes: 0, violations: 0 });
 	});
 
 	it("filters by name", () => {

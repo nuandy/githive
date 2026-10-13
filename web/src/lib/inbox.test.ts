@@ -26,7 +26,10 @@ describe("the inbox", () => {
 		});
 		expect(count).toBe(2);
 		expect(groups.map((g) => g.repo)).toEqual(["acme/docs site", "acme/my-app"]);
+		// Summaries kept before `kind` are questions.
 		expect(groups[0]!.items[0]).toEqual({
+			kind: "question",
+			key: "c-1",
 			change: "c-1",
 			title: "c-1",
 			reason: "GitHive's builder failed",
@@ -34,6 +37,8 @@ describe("the inbox", () => {
 		});
 		expect(groups[1]!.items).toEqual([
 			{
+				kind: "question",
+				key: "rate-limit",
 				change: "rate-limit",
 				title: "Rate limiter",
 				reason: "Reviewers disagree",
@@ -56,6 +61,38 @@ describe("the inbox", () => {
 			["c-1", true],
 			["c-0", false],
 		]);
+	});
+
+	it("counts votes only people may give and the audit's open violations, as the Hive and the repo list do", () => {
+		const { groups, count } = buildInbox({
+			repos: [
+				{
+					repo: "acme/shop",
+					since: "",
+					summary: {
+						lastActivity: "2026-10-02T00:00:00Z",
+						needsYou: 2,
+						violations: 2,
+						waiting: [
+							{ kind: "vote", role: "payments", change: "refunds", title: "Handle Stripe refund webhooks", reason: "" },
+							{ kind: "question", change: "cache", title: "Cache the cart", reason: "Which TTL?" },
+						],
+					},
+				},
+				{ repo: "acme/audited", since: "", summary: { violations: 1 } },
+			],
+		});
+		expect(count).toBe(5);
+		expect(groups.map((group) => [group.repo, group.count])).toEqual([
+			["acme/shop", 4],
+			["acme/audited", 1],
+		]);
+		expect(groups[0]!.items.map((item) => [item.kind, item.title, item.href])).toEqual([
+			["vote", "Handle Stripe refund webhooks", "#/repos/acme/shop/changes/refunds"],
+			["question", "Cache the cart", "#/repos/acme/shop/changes/cache"],
+			["audit", "2 merges for the audit to look at", "#/repos/acme/shop/audit"],
+		]);
+		expect(groups[0]!.items[0]).toMatchObject({ role: "payments" });
 	});
 
 	it("is empty before the summaries arrive, or when nothing waits", () => {
