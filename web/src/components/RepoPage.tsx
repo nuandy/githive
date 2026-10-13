@@ -19,7 +19,7 @@ import { canVote, canWrite } from "../lib/permissions";
 import { GitHubLink } from "./GitHubLink";
 import { RepoAccessBox, type RepoManageApi } from "./RepoAdmin";
 import { RepoSettings } from "./RepoSettings";
-import { holdersFromSnapshot } from "../lib/claimsMap";
+import { openOn, parseFilter } from "../lib/changeList";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab, type SettingsSection } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
@@ -60,6 +60,7 @@ export type RepoView =
 			ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 			/** Settings tab: the section shown. */ section?: SettingsSection;
+			/** Changes tab: the list's filter (see changeList.ts), when not all. */ filter?: string;
 	  }
 	| { kind: "change"; change: string; tab: ChangeTab; /** Opened at its decision. */ decide?: true };
 
@@ -226,6 +227,7 @@ function RepoTabContent({
 				refParam={view.kind === "repo" ? view.ref : undefined}
 				branch={branch}
 				api={api}
+				snapshot={snapshot}
 			/>
 		);
 	}
@@ -251,13 +253,22 @@ function RepoTabContent({
 	}
 	switch (current) {
 		case "audit":
-			return <AuditTab snapshot={snapshot} error={auditError} onRetry={onAuditRetry} />;
+			return (
+				<AuditWithHistory
+					repo={repo}
+					branch={branch}
+					snapshot={snapshot}
+					api={api}
+					error={auditError}
+					onRetry={onAuditRetry}
+				/>
+			);
 		case "hive":
 			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "history":
 			return <HistoryTab repo={repo} branch={branch} api={api} />;
 		case "claims":
-			return <ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />;
+			return <ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "agents":
 			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
 	}
@@ -266,6 +277,7 @@ function RepoTabContent({
 			repo={repo}
 			branch={branch}
 			asked={view.branch || undefined}
+			filter={view.kind === "repo" ? view.filter : undefined}
 			snapshot={snapshot}
 			api={api}
 			canWrite={canWrite(access?.level)}
@@ -275,13 +287,14 @@ function RepoTabContent({
 }
 
 /**
- * The Changes tab: a branch's overview, then its open changes. Both read one landing, so a change being checked to
- * land says so in each.
+ * The Changes tab: which branch it shows, then that branch's open changes, read with what's landing on it, so a
+ * change being checked to land says so.
  */
 function ChangesTab({
 	repo,
 	branch,
 	asked,
+	filter,
 	snapshot,
 	api,
 	canWrite,
@@ -291,13 +304,14 @@ function ChangesTab({
 	branch: string;
 	/** The branch the address asks for. */
 	asked: string | undefined;
+	/** The list's filter the address asks for. */
+	filter: string | undefined;
 	snapshot: RepoSnapshot;
 	api: RepoPageProps["api"];
 	canWrite: boolean;
 	onBranchMade?: () => void;
 }) {
-	// The branch asked for, when the repo has it; else the project's.
-	const shown = asked && (snapshot.branches ?? []).some((known) => known.name === asked) ? asked : branch;
+	const shown = shownBranch(snapshot, { kind: "repo", tab: "changes", ...(asked ? { branch: asked } : {}) }, branch);
 	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	return (
 		<>
@@ -309,11 +323,27 @@ function ChangesTab({
 				api={api}
 				canWrite={canWrite}
 				onBranchMade={onBranchMade}
+			/>
+			<ChangeList
+				snapshot={snapshot}
+				repo={repo}
+				shown={shown}
+				filter={parseFilter(filter)}
 				{...(landing.data ? { landing: landing.data } : {})}
 			/>
-			<ChangeList snapshot={snapshot} repo={repo} shown={shown} {...(landing.data ? { landing: landing.data } : {})} />
 		</>
 	);
+}
+
+/** The Audit tab, with what's landed on the project's branch, so a review of a landed change names it. */
+function AuditWithHistory({
+	repo,
+	branch,
+	api,
+	...props
+}: Omit<Parameters<typeof AuditTab>[0], "landed"> & { branch: string; api: RepoPageApi }) {
+	const history = usePoll(api.history ? `history:${repo}:${branch}` : null, () => api.history!(repo, branch), 60_000);
+	return <AuditTab repo={repo} landed={history.data?.changes} {...props} />;
 }
 
 /** By the repo's name once a stretch of work has landed and nothing's open: that it's done, and how much. */
@@ -335,7 +365,12 @@ export const NOT_STARTED_TAB = "Shows once GitHive starts on this repo";
  * A repo's tabs, in order (the keys 1 to 8 choose them). Before GitHive starts on it, those that show what agents do
  * are dimmed; while its snapshot loads, they show without counts.
  */
-export function repoTabs(repo: string, snapshot: RepoSnapshot | null | undefined): TabItem[] {
+export function repoTabs(
+	repo: string,
+	snapshot: RepoSnapshot | null | undefined,
+	/** The Changes tab's count: the open changes on the branch it shows (all claims when not given). */
+	openChanges?: number,
+): TabItem[] {
 	const notStarted = snapshot === null;
 	const unavailable = notStarted ? { unavailable: NOT_STARTED_TAB } : {};
 	return [
@@ -345,7 +380,7 @@ export function repoTabs(repo: string, snapshot: RepoSnapshot | null | undefined
 			label: "Changes",
 			icon: "pull",
 			href: href.repo(repo, "changes"),
-			count: snapshot?.claims.length,
+			count: openChanges ?? snapshot?.claims.length,
 			...unavailable,
 		},
 		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
@@ -386,6 +421,12 @@ function headerLinks(repo: string, snapshot: RepoSnapshot | null, access: RepoAc
 // Under the repo's tabs, which stick under the top bar, what sticks in a tab starts below them.
 const UNDER_TABS = "[--topbar-height:calc(var(--bar-height)+var(--repo-tabs-height))]";
 
+/** The branch the Changes tab shows: the one the address asks for, when the repo has it; else the project's. */
+function shownBranch(snapshot: RepoSnapshot, view: RepoView, branch: string): string {
+	const asked = view.kind === "repo" && view.tab === "changes" ? view.branch : undefined;
+	return asked && (snapshot.branches ?? []).some((known) => known.name === asked) ? asked : branch;
+}
+
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
 export function RepoPage({
 	repo,
@@ -408,7 +449,11 @@ export function RepoPage({
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
-	const tabs = repoTabs(repo, loading ? undefined : snapshot);
+	const tabs = repoTabs(
+		repo,
+		loading ? undefined : snapshot,
+		snapshot ? openOn(snapshot, shownBranch(snapshot, view, branch)).length : undefined,
+	);
 	const current = view.kind === "change" ? "changes" : view.tab;
 	// A tab's content fades in as you switch to it, or as it takes the place of "Loading…"; the first one comes in with
 	// the page.

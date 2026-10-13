@@ -1,23 +1,15 @@
 import { messageOf } from "../lib/errors";
 import { useState } from "react";
-import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import type { RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
-import { usePoll } from "../hooks/usePoll";
-import { Territory } from "./Territory";
-import { needsYou } from "../lib/needsYou";
-import { lampCounts, LAMPS } from "../lib/overview";
-import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
-import { STATES } from "../lib/status";
 import { cn } from "../lib/utils";
-import { Lamp } from "./ui/badge";
 import { Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, Label, NativeSelect } from "./ui/field";
 
-/** What the overview reads: the repo's files. People who can write can also make a branch. */
+/** People who can write can make a branch. */
 export interface OverviewApi {
-	tree(repo: string, ref?: string): Promise<RepoTree>;
 	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
@@ -33,8 +25,6 @@ export interface OverviewProps {
 	canWrite?: boolean;
 	/** After a branch is made: read the snapshot again. */
 	onBranchMade?: () => void;
-	/** What's landing on the branch shown, when the server reports it (the Changes tab reads it for the list too). */
-	landing?: RepoLanding;
 }
 
 /** Which branch the overview shows, and making another (for people who can write). */
@@ -181,72 +171,19 @@ function NewBranchForm(props: {
 	);
 }
 
-// A summary in a line: a bold count, then lamp-marked counts beside it.
-const SUMMARY = "m-0 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-lead";
-
 /**
- * The claims in force, in a sentence: how many, what needs a person (see needsYou.ts: questions, votes only people
- * give, and merges the audit flags), and where the rest are.
+ * Which branch the Changes tab shows, and making another, for a repo with more than its project's branch (or people
+ * who may make one); and a word when the address names a branch the repo hasn't. Who holds what is on the Claims tab,
+ * what's landing and who works where on the Hive's.
  */
-function Summary({ repo, snapshot, landing }: { repo: string; snapshot: RepoSnapshot; landing?: RepoLanding }) {
-	const total = snapshot.claims.length;
-	const needs = needsYou(snapshot, snapshot.audit);
-	const audit = needs.violations ? (
-		<a href={href.repo(repo, "audit")} className="inline-flex items-center gap-1.75">
-			<Lamp state="needs-person" />
-			{counted(needs.violations, "merge")} for the audit to look at
-		</a>
-	) : null;
-	if (!total)
-		return (
-			<p className={SUMMARY}>
-				No claims in force. When an agent claims part of the tree, it lights up below.
-				{audit}
-			</p>
-		);
-	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes, policy: snapshot.policy });
-	const count = (lamp: (typeof LAMPS)[number]) => (lamp === "needs-person" ? needs.changes.length : counts[lamp]);
-	const parts = LAMPS.filter((lamp) => count(lamp)).map((lamp) => (
-		<span key={lamp} className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp state={lamp} />
-			{count(lamp)} {lamp === "needs-person" && count(lamp) > 1 ? "need a person" : STATES[lamp].short}
-		</span>
-	));
-	return (
-		<p className={SUMMARY}>
-			<strong>
-				{total} {total === 1 ? "claim" : "claims"} in force
-			</strong>
-			{parts}
-			{audit}
-		</p>
-	);
-}
-
-/**
- * A repo at a glance, on one of its branches: the claims on it in a sentence and
- * its territory. What's landing and who works where are on the Hive tab.
- */
-export function Overview({
-	repo,
-	branch,
-	shown: asked,
-	snapshot,
-	api,
-	canWrite = false,
-	onBranchMade,
-	landing,
-}: OverviewProps) {
+export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
 	const known =
 		asked === undefined || asked === branch || (snapshot.branches ?? []).some((other) => other.name === asked);
 	const shown = asked && known ? asked : branch;
-	const otherBranch = shown === branch ? undefined : shown;
-	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, otherBranch), 60_000);
-	// Only the claims on this branch, since each change lands on one branch.
-	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === shown) };
 	const manyBranches = (snapshot.branches ?? []).length > 0 || canWrite;
+	if (!manyBranches && known) return null;
 	return (
-		<div className="mb-11 grid gap-9">
+		<div className="mb-6 grid gap-4">
 			{manyBranches ? (
 				<BranchBar
 					repo={repo}
@@ -258,14 +195,11 @@ export function Overview({
 					onBranchMade={onBranchMade}
 				/>
 			) : null}
-			{/* Set apart by a paragraph's margins, as the browser gives one. */}
 			{!known ? (
-				<Callout tone="warn" className="my-3.75">
+				<Callout tone="warn">
 					There's no branch {asked} taking changes here: showing {branch}.
 				</Callout>
 			) : null}
-			<Summary repo={repo} snapshot={onBranch} landing={landing} />
-			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing} />
 		</div>
 	);
 }

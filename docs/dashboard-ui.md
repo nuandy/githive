@@ -38,21 +38,22 @@ markup, drawn from the theme.
   `text-white`: dark mode's lamps are bright, and take dark text.
 - The Hive's stages, `stage-building`, `stage-review`, `stage-landing`, `stage-landed` and `stage-asking`, name the
   lamps a change's state takes (below).
-- Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
-  `mark-line`, `mark-dot`).
+- Diffs (`diff-add`, `diff-del` and their `-strong`), the mark (`mark-tile`, `mark-line`, `mark-dot`).
+- Code's syntax colors, in the Code tab (`code-keyword`, `code-string`, `code-literal`, `code-comment`, `code-title`,
+  `code-type`, `code-attr`): `lib/highlight.ts` maps highlight.js's scopes onto them.
 
 Use them as `bg-card`, `text-muted-foreground`, `border-border-strong`, `bg-bad/45`. In SVG or inline styles use the
 variable: `fill="var(--good)"`.
 
 **Contrast** is measured, in light and dark, by `web/src/lib/theme.test.ts` (it reads `theme.css`): text at 4.5:1
 (a lamp's color on its `-soft`, on `surface-2` and `surface-3`; muted text, placeholders among it; text on a solid
-lamp), and what marks a control or focus at 3:1 (`input` and `border-strong` on the card and the page, `ring` on every
+lamp; code's syntax colors on the card and `surface-2`), and what marks a control or focus at 3:1 (`input` and `border-strong` on the card and the page, `ring` on every
 surface). A new color, or a new pair that sets text on a color, goes into that test. Content that's out of play
 (a revoked agent, a resolved violation) says so in a badge at full contrast; it never fades with `opacity`. The amber
 lamp, pale on light paper, carries a ring of `warn`.
 
 **A change's state** has one noun, one color, one icon and one mark everywhere it shows: pills, lamps, the Hive's cells,
-strip and goal rows, Territory's squares and every legend. They're one table, `STATES` in `web/src/lib/status.ts`, and
+strip and goal rows, the Claims map's rows and every legend. They're one table, `STATES` in `web/src/lib/status.ts`, and
 one derivation, `changeState()`; read them, never a tone map of your own. Color never says it alone (WCAG 1.4.1): each
 mark has a glyph or a pattern too.
 
@@ -131,6 +132,12 @@ Reach for `components/ui` before writing a control by hand:
 - `Icon` comes in three sizes: 14 beside small text (13px and under), 16 (the default) beside body text and alone in a
   button, 28 over an empty state's heading.
 - Native `<details>` take the `disclosure` class to unfold instead of jumping open.
+- `Markdown` (`components/Markdown.tsx`, read by `lib/markdown.ts`): a Markdown file as formatted text, drawn as React
+  elements. Raw HTML stays text, never markup, and a link goes only over http or https, or to a path in the repo
+  (`linkTarget`); anything else shows as its words. No `dangerouslySetInnerHTML` anywhere.
+- `useHighlighted` and `TokenLine` (`components/Highlighted.tsx`): code in its syntax colors. highlight.js's core and
+  each language load only when a file in it shows (`lib/highlight.ts`); its spans are read back into tokens, never set
+  as HTML.
 
 To add a shadcn component, run from the repository root: `npx shadcn@latest add <name>` (`components.json` points it
 at `web/src/components/ui`). Then point its `cn` import at `@/lib/utils` (ours knows the theme's names), swap

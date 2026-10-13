@@ -1,35 +1,46 @@
-import type { ReactNode } from "react";
-import type { RepoAudit, RepoLanding, RepoSnapshot } from "../api";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { LandedChange, RepoAudit, RepoLanding, RepoSnapshot } from "../api";
+import { useAnnouncer } from "../hooks/useAnnouncer";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { identityName } from "../lib/agent";
+import { changeAt, violationWords } from "../lib/auditWords";
+import {
+	activeWords,
+	arrivalWords,
+	CHANGE_FILTERS,
+	type ChangeFilter,
+	changeList,
+	FILTER_WORDS,
+	openOn,
+} from "../lib/changeList";
 import type { Tone } from "../lib/changeStatus";
 import {
 	claimAgent,
 	claimApprovalLabel,
 	claimTitle,
-	blockingRoles,
 	claimStatus,
 	isFromGitHub,
-	shardingSummary,
-	votesShardingSummary,
 	type Claim,
 	type Vote,
 } from "../lib/claimStatus";
 import { leaseWords } from "../lib/lease";
-import { shortSha, briefPaths } from "../lib/model";
+import { briefPaths, shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
-import { shortAge, timeAgo } from "../lib/relativeTime";
+import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
 import { LoadError } from "./LoadError";
 import { StatusIcon, StatusPill, TONE_TEXT } from "./StatusPill";
-import { Badge, Counter } from "./ui/badge";
+import { Announcer } from "./ui/announcer";
+import { Badge, Counter, Lamp } from "./ui/badge";
 import { MergePolicyTerms, RecordsTerms } from "./PolicyTerms";
 import { Box, BoxBody, BoxHeader, BoxTitle, Callout } from "./ui/box";
+import { Button } from "./ui/button";
 import { Empty } from "./ui/empty";
+import { Input } from "./ui/field";
 import { TERMS } from "./ui/manage";
 
 export { ChangePage, type ChangePageProps } from "./ChangePage";
@@ -170,11 +181,11 @@ function ChangeRow({
 				<Approvals claim={claim} />
 				{claim.head ? <code className="text-muted-foreground">{shortSha(claim.head)}</code> : null}
 				<time
-					className="min-w-7 text-right text-muted-foreground to-720:text-left"
+					className="text-right whitespace-nowrap text-muted-foreground to-720:text-left"
 					dateTime={claim.active}
 					title={`Last active ${new Date(claim.active).toLocaleString()}`}
 				>
-					{shortAge(claim.active)}
+					{activeWords(claim.active, now)}
 				</time>
 			</div>
 		</li>
@@ -229,10 +240,65 @@ function ChangeRows({
 	);
 }
 
+/** One filter of the list: a pill with its count, ink-filled while it's the one shown. A link, so the address keeps it. */
+function FilterChip({
+	filter,
+	count,
+	current,
+	link,
+}: {
+	filter: ChangeFilter;
+	count: number;
+	current: boolean;
+	link: string;
+}) {
+	return (
+		<a
+			href={link}
+			aria-current={current ? "true" : undefined}
+			className={cn(
+				"touch-target inline-flex items-center gap-1.5 rounded-full border border-input px-2.75 py-0.5",
+				"text-ui font-semibold whitespace-nowrap text-muted-foreground no-underline",
+				"transition-colors duration-fast hover:bg-surface-2 hover:text-foreground hover:no-underline",
+				current && "border-primary bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+			)}
+		>
+			{FILTER_WORDS[filter]}
+			<span
+				className={cn(
+					"font-normal tabular-nums",
+					// What needs you, while anything does, in the color that asks for a person.
+					filter === "needs-you" && count > 0 && !current && "font-semibold text-bad",
+				)}
+			>
+				{count}
+			</span>
+		</a>
+	);
+}
+
+/** What a filter shows when nothing on the branch is in it, or nothing it holds matches the search. */
+function noneWords(filter: ChangeFilter, query: string, branch: string): string {
+	if (query.trim()) {
+		const among = filter === "all" ? "" : ` under ${FILTER_WORDS[filter]}`;
+		return `No change on ${branch} matches “${query.trim()}”${among}.`;
+	}
+	const none: Record<ChangeFilter, string> = {
+		"needs-you": "Nothing needs you",
+		"in-review": "No change is in review",
+		approved: "No change is approved",
+		building: "No change is being built",
+		landing: "Nothing is landing",
+		all: "No open changes",
+	};
+	return `${none[filter]} on ${branch}.`;
+}
+
 /**
- * The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). Another branch's
- * list, or the list in place of "No open changes" (or that in place of the list), fades in; so does a change opened
- * while it shows.
+ * The open changes on `shown` (the branch the tab shows; without it, every branch's), what needs action first, then
+ * the one active last (changeList.ts): narrowed by a filter, a chip each with its count, and a search. Another
+ * branch's list, another filter's, or the list in place of "No open changes" (or that in place of the list), fades
+ * in; so does a change opened while it shows, which a screen reader hears of too.
  */
 export function ChangeList({
 	snapshot,
@@ -240,6 +306,8 @@ export function ChangeList({
 	shown,
 	landing,
 	now,
+	filter = "all",
+	search = "",
 }: {
 	snapshot: RepoSnapshot;
 	repo: string;
@@ -248,14 +316,30 @@ export function ChangeList({
 	landing?: Pick<RepoLanding, "checking">;
 	/** The time leases and abandoned changes are told against (tests fix it). */
 	now?: number;
+	/** The filter the address asks for. */
+	filter?: ChangeFilter;
+	/** What the search starts with (tests set it). */
+	search?: string;
 }) {
 	const project = snapshot.branch ?? "main";
-	const claims = [...snapshot.claims]
-		.filter((claim) => !shown || (claim.into ?? project) === shown)
-		.sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+	const branch = shown ?? project;
+	const open = shown ? openOn(snapshot, shown) : snapshot.claims;
+	const [query, setQuery] = useState(search);
+	const context = { votes: snapshot.votes, policy: snapshot.policy, landing, now: now ?? Date.now() };
+	const { shown: listed, counts } = changeList(open, context, { filter, query });
+	const claims = listed.map((each) => each.claim);
 	const branchChanged = useChanged(shown);
-	const emptied = useChanged(claims.length === 0);
-	const fades = branchChanged || emptied;
+	const filterChanged = useChanged(filter);
+	const emptied = useChanged(open.length === 0);
+	const fades = branchChanged || filterChanged || emptied;
+	const { said, say } = useAnnouncer();
+	useArrivalsSaid(open, branch, say);
+	const linkTo = (to: ChangeFilter) =>
+		href.changes(repo, {
+			...(shown && shown !== project ? { branch: shown } : {}),
+			...(to === "all" ? {} : { filter: to }),
+		});
+	const audit = branch === project ? (snapshot.audit?.open ?? 0) : 0;
 	return (
 		<Box aria-labelledby="changes-title">
 			<BoxHeader>
@@ -265,24 +349,85 @@ export function ChangeList({
 					aria-current="page"
 				>
 					<Icon name="pull" />
-					<Bumping count={claims.length} /> Open
+					<Bumping count={open.length} /> Open
 				</h2>
 				{snapshot.audit ? (
-					<span className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground">
+					<a
+						href={href.repo(repo, "history")}
+						className="inline-flex items-center gap-1.5 py-0.5 font-medium text-muted-foreground transition-colors duration-fast hover:text-foreground"
+					>
 						<Icon name="merge" />
-						<Bumping count={snapshot.audit.merges} /> landed on {snapshot.branch ?? "main"}
-					</span>
+						<Bumping count={snapshot.audit.merges} /> landed on {project}
+					</a>
 				) : null}
 			</BoxHeader>
-			{claims.length === 0 ? (
+			{open.length > 0 ? (
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 border-b border-border px-0.5 py-3">
+					<nav aria-label="Show changes" className="min-w-0">
+						<ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+							{CHANGE_FILTERS.map((each) => (
+								<li key={each}>
+									<FilterChip filter={each} count={counts[each]} current={each === filter} link={linkTo(each)} />
+								</li>
+							))}
+						</ul>
+					</nav>
+					<div className="relative ml-auto w-64 to-720:ml-0 to-720:w-full">
+						<Icon
+							name="search"
+							size={14}
+							className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
+						/>
+						<label className="sr-only" htmlFor="change-search">
+							Find a change
+						</label>
+						<Input
+							id="change-search"
+							type="search"
+							className="h-8.5 w-full pl-8 text-ui"
+							placeholder="Title, id, agent or path…"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+						/>
+					</div>
+				</div>
+			) : null}
+			{audit ? (
+				<p className="m-0 flex flex-wrap items-center gap-1.75 border-b border-border px-4 py-2.5 text-ui">
+					<Lamp state="needs-person" />
+					<a href={href.repo(repo, "audit")}>{counted(audit, "merge")} for the audit to look at</a>
+				</p>
+			) : null}
+			{open.length === 0 ? (
 				<Empty className={cn(fades && "animate-fade")}>
 					<Icon name="pull" size={28} />
 					<h2>No open changes</h2>
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
 				</Empty>
+			) : claims.length === 0 ? (
+				<p
+					key={`${filter}:none`}
+					className={cn("m-0 px-4 py-8 text-center text-muted-foreground", fades && "animate-fade")}
+				>
+					{noneWords(filter, query, branch)}
+					{filter !== "all" && counts.all > 0 ? (
+						<>
+							{" "}
+							<a href={linkTo("all")}>Show all {counts.all}</a>
+						</>
+					) : null}
+					{query.trim() ? (
+						<>
+							{" "}
+							<Button variant="link" className="align-baseline" onClick={() => setQuery("")}>
+								Clear the search
+							</Button>
+						</>
+					) : null}
+				</p>
 			) : (
 				<ChangeRows
-					key={shown}
+					key={`${shown}:${filter}`}
 					claims={claims}
 					votes={snapshot.votes}
 					policy={snapshot.policy}
@@ -292,8 +437,30 @@ export function ChangeList({
 					fades={fades}
 				/>
 			)}
+			<Announcer said={said} />
 		</Box>
 	);
+}
+
+/**
+ * Says what changes opened on the branch since the list first showed it, as they come: at most once every few
+ * seconds (useAnnouncer). Another branch starts over, unsaid.
+ */
+function useArrivalsSaid(open: Claim[], branch: string, say: (words: string) => void) {
+	const seen = useRef<{ branch: string; changes: Set<string> } | null>(null);
+	const ids = open.map((claim) => claim.change).join("\n");
+	useEffect(() => {
+		const before = seen.current;
+		seen.current = { branch, changes: new Set(open.map((claim) => claim.change)) };
+		if (!before || before.branch !== branch) return;
+		say(
+			arrivalWords(
+				open.filter((claim) => !before.changes.has(claim.change)),
+				branch,
+			),
+		);
+		// Keyed by the list's changes: a poll that brings the same ones says nothing.
+	}, [ids, branch, say]);
 }
 
 // The audit's rows: an icon a little down the first line, then what it says; ruled off from the one above, the first
@@ -301,7 +468,16 @@ export function ChangeList({
 const AUDIT_ROW = "flex items-start gap-2.5 border-t border-border px-0.5 py-3 wrap-anywhere";
 const AUDIT_ICON = "mt-0.5 inline-flex shrink-0";
 
-function Violations({ title, violations }: { title: string; violations: RepoAudit["violations"] }) {
+/** A commit's short hash, linked to the code at it. */
+function CommitLink({ repo, commit }: { repo: string; commit: string }) {
+	return (
+		<a href={href.code(repo, "", commit)}>
+			<code>{shortSha(commit)}</code>
+		</a>
+	);
+}
+
+function Violations({ repo, title, violations }: { repo: string; title: string; violations: RepoAudit["violations"] }) {
 	const changed = useChanged(violations.length);
 	const staggers = useStagger(violations.length > 0);
 	return (
@@ -314,26 +490,28 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 			</BoxHeader>
 			<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
 				{violations.map((violation, index) => (
-					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} violation={violation} />
+					<ViolationRow key={`${violation.commit}-${violation.rule}-${index}`} repo={repo} violation={violation} />
 				))}
 			</ul>
 		</Box>
 	);
 }
 
-/** A rule broken: by whom, in which commit, what was wrong, and the commit that resolved it, if one has. */
-function ViolationRow({ violation }: { violation: RepoAudit["violations"][number] }) {
+/**
+ * A rule broken, in words (auditWords.ts): by whom, in which commit, what was wrong, and, while it's open, what
+ * someone can do about it; once resolved, the commit that resolved it. Each commit links to the code at it.
+ */
+function ViolationRow({ repo, violation }: { repo: string; violation: RepoAudit["violations"][number] }) {
 	const by = violation.by ? identityName(violation.by) : "unverified";
+	const { words, remedy } = violationWords(violation.rule);
 	return (
 		<li className={AUDIT_ROW}>
 			<span className={cn(AUDIT_ICON, violation.resolvedBy ? "text-neutral" : "text-bad")}>
 				<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
 			</span>
-			<div>
+			<div className="min-w-0">
 				<p className="m-0">
-					<strong>{violation.rule}</strong> by {violation.author}
-					<span className="text-muted-foreground"> ({by})</span>
-					{" in"} <code>{shortSha(violation.commit)}</code>
+					<strong>{words}</strong>
 					{violation.resolvedBy ? (
 						<>
 							{" "}
@@ -341,53 +519,93 @@ function ViolationRow({ violation }: { violation: RepoAudit["violations"][number
 						</>
 					) : null}
 				</p>
-				<p className="mt-0.5 mb-0 text-muted-foreground">{violation.detail}</p>
+				<p className="mt-0.5 mb-0 text-ui text-muted-foreground">
+					{violation.author} <span>({by})</span> in <CommitLink repo={repo} commit={violation.commit} />
+					{" · "}
+					<code className="text-caption">{violation.rule}</code>
+				</p>
+				<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{violation.detail}</p>
 				{violation.resolvedBy ? (
-					<p className="mt-0.5 mb-0 text-muted-foreground">resolved by {shortSha(violation.resolvedBy)}</p>
-				) : null}
+					<p className="mt-0.5 mb-0 text-ui text-muted-foreground">
+						Resolved by <CommitLink repo={repo} commit={violation.resolvedBy} />
+					</p>
+				) : (
+					<p className="mt-1.5 mb-0 max-w-measure text-ui">
+						<strong className="font-semibold">What to do:</strong> {remedy}
+					</p>
+				)}
 			</div>
 		</li>
 	);
 }
 
-/** The reviews recorded, newest as the snapshot lists them; one recorded since they first showed fades in. */
-function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
+/**
+ * The reviews recorded, newest as the snapshot lists them, each naming the change it reviewed where its commit is a
+ * change's head (open, or landed as History has it); one recorded since they first showed fades in.
+ */
+function RecentReviews({
+	repo,
+	votes,
+	claims,
+	landed,
+}: {
+	repo: string;
+	votes: RepoSnapshot["votes"];
+	claims: RepoSnapshot["claims"];
+	landed: Pick<LandedChange, "change" | "title" | "head">[];
+}) {
 	const key = (vote: RepoSnapshot["votes"][number]) => `${vote.reviewer}-${vote.commit}-${vote.at}`;
 	const arrived = useArrivals(votes.map(key));
 	const staggers = useStagger(votes.length > 0);
 	if (votes.length === 0) return <p className="my-3.75 px-0.5 py-3 text-muted-foreground">No reviews yet.</p>;
 	return (
 		<ul className={cn("m-0 list-none p-0", staggers && "stagger")}>
-			{votes.map((vote) => (
-				<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
-					<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>
-						<Icon name={vote.verdict === "approve" ? "check" : "x"} />
-					</span>
-					<div>
-						<p className="m-0">
-							<strong>{vote.reviewer}</strong> <span className="text-muted-foreground">({vote.role})</span>{" "}
-							{vote.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(vote.commit)}</code>
-							{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
-							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
-							{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
-						</p>
-						{vote.evidence ? (
-							<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
-						) : null}
-					</div>
-				</li>
-			))}
+			{votes.map((vote) => {
+				const change = changeAt(vote.commit, claims, landed);
+				return (
+					<li key={key(vote)} className={cn(AUDIT_ROW, arrived(key(vote)) && "animate-appear")}>
+						<span className={cn(AUDIT_ICON, vote.verdict === "approve" ? "text-good" : "text-bad")}>
+							<Icon name={vote.verdict === "approve" ? "check" : "x"} />
+						</span>
+						<div className="min-w-0">
+							<p className="m-0">
+								<strong>{vote.reviewer}</strong> <span className="text-muted-foreground">({vote.role})</span>{" "}
+								{vote.verdict === "approve" ? "approved" : "rejected"}{" "}
+								{change ? (
+									<>
+										<a href={href.change(repo, change.change)}>{shortTitle(change.title)}</a> at{" "}
+									</>
+								) : null}
+								<CommitLink repo={repo} commit={vote.commit} />
+								{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
+								<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
+								{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
+							</p>
+							{vote.evidence ? (
+								<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
+							) : null}
+						</div>
+					</li>
+				);
+			})}
 		</ul>
 	);
 }
 
-/** The Audit tab: rules broken on the project's branch, read from Git, and the reviews recorded. */
+/**
+ * The Audit tab: rules broken on the project's branch, read from Git, each in words with what to do, and the reviews
+ * recorded, each naming its change. `landed` (History's) names the changes reviews of landed heads were for.
+ */
 export function AuditTab({
+	repo,
 	snapshot,
+	landed = [],
 	error,
 	onRetry,
 }: {
+	repo: string;
 	snapshot: RepoSnapshot;
+	landed?: Pick<LandedChange, "change" | "title" | "head">[];
 	/** Why the audit couldn't be read, while there's none to show. */
 	error?: string;
 	onRetry?: () => void;
@@ -423,13 +641,13 @@ export function AuditTab({
 					</p>
 				</div>
 			</Callout>
-			{open.length > 0 ? <Violations title="Open" violations={open} /> : null}
-			{resolved.length > 0 ? <Violations title="Resolved" violations={resolved} /> : null}
+			{open.length > 0 ? <Violations repo={repo} title="Open" violations={open} /> : null}
+			{resolved.length > 0 ? <Violations repo={repo} title="Resolved" violations={resolved} /> : null}
 			<Box>
 				<BoxHeader>
 					<h3 className="text-body-sm">Recent reviews</h3>
 				</BoxHeader>
-				<RecentReviews votes={votes} />
+				<RecentReviews repo={repo} votes={votes} claims={snapshot.claims} landed={landed} />
 			</Box>
 		</div>
 	);

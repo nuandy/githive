@@ -112,15 +112,14 @@
 	--diff-del: #fbe9e6;
 	--diff-del-strong: #f3cdc6;
 
-	/* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
-	--claim-0: #3b82f6;
-	--claim-1: #f59e0b;
-	--claim-2: #14b8a6;
-	--claim-3: #ec4899;
-	--claim-4: #8b5cf6;
-	--claim-5: #22c55e;
-	--claim-6: #ef4444;
-	--claim-7: #06b6d4;
+	/* Code's syntax colors, in the Code tab: each reads at 4.5:1 or more on the card and surface-2. */
+	--code-keyword: #8a2f8f;
+	--code-string: #2a6630;
+	--code-literal: #9a4a00;
+	--code-comment: #5b676e;
+	--code-title: #1c5a93;
+	--code-type: #00676b;
+	--code-attr: #7a5300;
 
 	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
@@ -189,6 +188,14 @@
 	--diff-add-strong: #1b3a29;
 	--diff-del: #2c1618;
 	--diff-del-strong: #48201f;
+
+	--code-keyword: #d39be8;
+	--code-string: #9ccc8a;
+	--code-literal: #f0a76a;
+	--code-comment: #8b9a99;
+	--code-title: #8cc4f0;
+	--code-type: #6fcfc5;
+	--code-attr: #e8c17a;
 
 	--mark-tile: #f5f6f4;
 	--mark-line: #1e2b33;
@@ -266,14 +273,13 @@
 	--color-diff-add-strong: var(--diff-add-strong);
 	--color-diff-del: var(--diff-del);
 	--color-diff-del-strong: var(--diff-del-strong);
-	--color-claim-0: var(--claim-0);
-	--color-claim-1: var(--claim-1);
-	--color-claim-2: var(--claim-2);
-	--color-claim-3: var(--claim-3);
-	--color-claim-4: var(--claim-4);
-	--color-claim-5: var(--claim-5);
-	--color-claim-6: var(--claim-6);
-	--color-claim-7: var(--claim-7);
+	--color-code-keyword: var(--code-keyword);
+	--color-code-string: var(--code-string);
+	--color-code-literal: var(--code-literal);
+	--color-code-comment: var(--code-comment);
+	--color-code-title: var(--code-title);
+	--color-code-type: var(--code-type);
+	--color-code-attr: var(--code-attr);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
 	--color-mark-dot: var(--mark-dot);

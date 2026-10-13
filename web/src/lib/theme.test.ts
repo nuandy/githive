@@ -167,6 +167,12 @@ describe("status text", () => {
 	reads("link", ["link-soft", "surface-2", "surface-3", "card", "background"], 4.5);
 });
 
+// Code's syntax colors read on the code's paper (the card), on a hovered line (surface-2), and on the page.
+describe("code's syntax colors", () => {
+	for (const token of ["keyword", "string", "literal", "comment", "title", "type", "attr"])
+		reads(`code-${token}`, ["card", "surface-2", "background"], 4.5);
+});
+
 // Muted words, placeholders among them, read wherever they're set.
 describe("muted text", () => {
 	reads("muted-foreground", ["card", "background", "surface-2", "surface-3"], 4.5);

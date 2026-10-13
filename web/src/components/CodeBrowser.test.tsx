@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { visibleText } from "../test/fixtures";
 import { CodeView } from "./CodeBrowser";
 
 const tree = {
@@ -87,5 +88,73 @@ describe("the Code tab", () => {
 		expect(renderToStaticMarkup(<CodeView {...base} path="" tree={undefined} treeError="no repo my-app" />)).toContain(
 			"no repo my-app",
 		);
+	});
+
+	it("formats a Markdown file, with its source a click away", () => {
+		const readme = {
+			ref: "master",
+			commit: "abc",
+			path: "README.md",
+			size: 60,
+			text: "# My app\n\nSee [the stats](src/stats/page.tsx).\n",
+		};
+		const html = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} />);
+		expect(html).toMatch(/<h1 class="[^"]*">My app<\/h1>/);
+		expect(html).toContain('<a href="#/repos/acme/my-app/code/src/stats/page.tsx">the stats</a>');
+		expect(html).toMatch(
+			/<button[^>]*aria-pressed="true"[^>]*>Formatted<\/button><button[^>]*aria-pressed="false"[^>]*>Source/,
+		);
+		expect(html).not.toContain("<table");
+		const source = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} source />);
+		expect(source).toMatch(/aria-hidden="true">1<\/td><td class="[^"]*"># My app<\/td>/);
+		expect(source).not.toContain("<h1");
+	});
+
+	it("says who holds a file, and the last change to touch it", () => {
+		const html = renderToStaticMarkup(
+			<CodeView
+				{...base}
+				path="src/index.ts"
+				holder={{
+					change: "coupons",
+					title: "Let shoppers apply a coupon code in the cart drawer, and keep it across reloads.",
+					agent: "mara/claude",
+					paths: ["src/"],
+					href: "#/repos/acme/my-app/changes/coupons",
+					state: "in-review",
+					conflicts: [],
+				}}
+				lastChange={{
+					commit: "c0ffee1234",
+					change: "prices",
+					agent: "devon/codex",
+					head: "h",
+					title: "Format prices",
+					files: ["src/index.ts"],
+					reviews: [],
+				}}
+			/>,
+		);
+		const text = visibleText(html);
+		expect(text).toContain(
+			"src/index.ts is claimed by mara/claude for “ Let shoppers apply a coupon code in the cart drawer, and… ”, in review.",
+		);
+		expect(html).toContain('<a href="#/repos/acme/my-app/changes/coupons">');
+		expect(html).toMatch(/<span data-state="in-review"/);
+		expect(text).toContain("Last changed by Format prices · c0ffee1");
+		expect(html).toContain('<a href="#/repos/acme/my-app/changes/prices">Format prices</a>');
+	});
+
+	it("switches branches from a menu where there's more than one", () => {
+		const one = renderToStaticMarkup(<CodeView {...base} path="" />);
+		expect(one).not.toContain('aria-label="Branch: master"');
+		const many = renderToStaticMarkup(<CodeView {...base} path="src" branches={["release/2.4"]} />);
+		expect(many).toMatch(
+			/<button[^>]*aria-label="Branch: master"[^>]*aria-haspopup="menu"|<button[^>]*aria-haspopup="menu"[^>]*aria-label="Branch: master"/,
+		);
+		const atCommit = renderToStaticMarkup(
+			<CodeView {...base} path="src" refParam="ffee00112233" branches={["release/2.4"]} />,
+		);
+		expect(atCommit).toContain('aria-label="Branch: ffee001"');
 	});
 });

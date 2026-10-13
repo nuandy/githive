@@ -7,6 +7,7 @@
 //   #/repos/:owner/:name[/changes|/history|/claims|/agents|/audit|/settings][?branch=<branch>]
 //                                             (the Hive tab without one)
 //   #/repos/:owner/:name/settings/:section    a part of Settings (General without one)
+//   #/repos/:owner/:name/changes?filter=<needs-you|in-review|…>   the Changes list narrowed
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:owner/:name/changes/:id[/commits][?decide]
 //                                             (?decide: opened at its decision, to vote or answer)
@@ -48,6 +49,7 @@ export type Route =
 			/** Code tab: a branch or commit other than the project's branch. */ ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 			/** Settings tab: the part shown. */ section?: SettingsSection;
+			/** Changes tab: the list's filter, when not all of them. */ filter?: string;
 	  }
 	| {
 			page: "change";
@@ -131,7 +133,7 @@ export function parseRoute(hash: string): Route {
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
 			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
-			return { page: "repo", repo, tab, ...set({ branch: params.text("branch") }) };
+			return { page: "repo", repo, tab, ...set({ branch: params.text("branch"), filter: params.text("filter") }) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
@@ -152,6 +154,11 @@ function repoHref(repo: string, tab: RepoTab = "hive", branch?: string): string 
 /** A part of a repo's Settings; General is Settings itself. */
 function settingsHref(repo: string, section: SettingsSection = "general"): string {
 	return `#/repos/${repoPath(repo)}/settings${section === "general" ? "" : `/${section}`}`;
+}
+
+/** The Changes list on a branch (the project's by default), narrowed by a filter (all by default). */
+function changesHref(repo: string, { branch, filter }: { branch?: string; filter?: string }): string {
+	return withQuery(`#/repos/${repoPath(repo)}/changes`, { branch, filter });
 }
 
 function changeHref(
@@ -175,6 +182,7 @@ export const href = {
 	repos: (q?: string) => withQuery("#/", { q }),
 	repo: repoHref,
 	settings: settingsHref,
+	changes: changesHref,
 	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,

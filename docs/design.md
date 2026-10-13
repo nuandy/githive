@@ -494,8 +494,11 @@ the other direction: merge the target into the source, then claim again.
 
 On the dashboard, a repo opens on its Hive tab (see Endpoint and dashboard).
 Its Changes tab shows one branch at a time, picked from the
-project's and those changes land on (`?branch=` in the address): its claims,
-what's landing, its territory and its open changes. A change shows where it lands
+project's and those changes land on (`?branch=` in the address): its open
+changes, what needs action first, narrowed by a filter (`?filter=needs-you`,
+`in-review`, `approved`, `building`, `landing`) and a search. Who holds what is
+the Claims tab's map of the project's branch, each claim in its change's state;
+a claim holds its paths on the branch it lands on alone. A change shows where it lands
 (into), the branch it merges (merges) and what it waits on. People who can
 write make a branch from another there (recorded with their name, as a claim
 with `from` would), and merge an approved change that waits on nothing: the

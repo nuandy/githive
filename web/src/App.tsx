@@ -424,6 +424,7 @@ function repoViewOf(route: Route): RepoView | null {
 		...(route.ref ? { ref: route.ref } : {}),
 		...(route.branch ? { branch: route.branch } : {}),
 		...(route.section ? { section: route.section } : {}),
+		...(route.filter ? { filter: route.filter } : {}),
 	};
 }
 
