@@ -342,22 +342,31 @@ export class HostedAgent extends DurableObject<Env> {
 		}
 	}
 
-	/** Its own change: done once it's out of the claims; merged once approved (merge waits for its batch). */
+	/** Its own change: done once it's landed or out of the claims; merged once approved (merge waits for its batch). */
 	private async ownChange(state: HostedAgentState, call: Call, now: number) {
 		const change = state.change!;
-		const status = (await call("status", { change })) as { claim?: unknown; approval?: { approved?: boolean } };
+		const status = (await call("status", { change })) as {
+			claim?: unknown;
+			landed?: unknown;
+			approval?: { approved?: boolean };
+		};
+		if (status.landed) {
+			// It's in. Its claim is released as the landing hands on its lease, which rings no one; merging again
+			// releases it now (see releaseLanded), so the agent moves on without waiting to be rung.
+			await call("merge", { change }).catch(() => undefined);
+			finish(state, change, now);
+			return;
+		}
 		if (!status.claim) {
 			// A read of claims spread over records can briefly miss one: a builder still at it says it's still this
 			// agent's change.
 			if ((await this.buildersAtWork(state.repo, [change])).has(change)) return;
-			state.finished.push({ piece: change, at: now });
-			delete state.change;
+			finish(state, change, now);
 			return;
 		}
 		if (status.approval?.approved) await call("merge", { change });
 	}
 
-	/** A review is over once its reviewer has voted or failed, or once it has taken too long. */
 	/**
 	 * A review is over once its reviewer has voted or failed, or once the agent no longer holds it: a reviewer that
 	 * fails gives it back, and a hold its agent never votes on runs out, as anyone's does.
@@ -435,6 +444,12 @@ async function giveBack(call: Call, change: string, reason: string) {
 	await call("release", { change, reason }).catch((err) =>
 		console.error(`giving ${change} back failed`, statusOf(err).message),
 	);
+}
+
+/** The agent's change has left the claims, landed or given up. */
+function finish(state: HostedAgentState, change: string, at: number) {
+	state.finished.push({ piece: change, at });
+	delete state.change;
 }
 
 /** Remembers a change the agent's reviewer rejected, the latest few and once each. */

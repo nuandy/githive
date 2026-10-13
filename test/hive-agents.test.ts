@@ -33,6 +33,8 @@ interface HiveOptions {
 	statusMisses?: string[];
 	/** Changes GitHive's builder is still at. */
 	building?: string[];
+	/** Changes whose claim outlasts their landing, as it does until the landing hands on its lease. */
+	releasedLate?: string[];
 }
 
 function hive(pieces: Piece[], options: HiveOptions = {}) {
@@ -66,13 +68,18 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 							claim: { agent: claimed.get(change) },
 							head: heads.get(change) ?? null,
 							approval: { approved: approved(change) },
+							...(merged.has(change) ? { landed: { commit: `${change}-merged` } } : {}),
 						}
 					: {};
 			case "claims":
 				return [...claimed].map(([held, holder]) => ({ change: held, agent: holder }));
 			case "merge":
+				if (merged.has(change)) {
+					claimed.delete(change);
+					return { ok: true };
+				}
 				if (!approved(change)) return { ok: false };
-				claimed.delete(change);
+				if (!options.releasedLate?.includes(change)) claimed.delete(change);
 				merged.add(change);
 				log.push(`${agent} merged ${change}`);
 				return { ok: true };
@@ -232,6 +239,19 @@ describe("a repo's hosted agents", () => {
 		expect(log).not.toContain("builder on b");
 		await rounds(5);
 		expect(merged.has("a")).toBe(true);
+	});
+
+	it("finish a change in the turn that sees it landed, though its claim isn't released yet", async () => {
+		const { repoHive, agents, rounds, claimed, merged } = hive(pieces("a"), { releasedLate: ["a"] });
+		await start(repoHive);
+		for (let round = 0; round < 6 && !merged.has("a"); round++) await rounds(1);
+		// It landed, and its claim is still held, as until the landing hands on its lease.
+		expect(claimed.has("a")).toBe(true);
+		const accounts = (await Promise.all(agents().map((agent) => agent.account()))) as HostedAgentState[];
+		const builder = agents()[accounts.findIndex((account) => account.change === "a")]!;
+		await builder.alarm();
+		expect((await builder.account())?.change).toBeUndefined();
+		expect(claimed.has("a")).toBe(false);
 	});
 
 	it("keep their change when a read briefly misses its claim while its builder is at it", async () => {

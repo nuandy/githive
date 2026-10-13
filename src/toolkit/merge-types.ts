@@ -168,6 +168,11 @@ export interface MergeInput {
 	maxBatch?: number;
 	/** Runs after a batch lands and its claims are released, such as pushing main to GitHub. Failures are logged. */
 	afterLanding?: (commit: string) => Promise<void>;
+	/**
+	 * Says a landed batch's claims are released. The landing rang before they were, and agents that looked then saw
+	 * the pieces still claimed. Failures are ignored.
+	 */
+	releasedLanded?: () => Promise<void>;
 	/** Notes a line on a change's attempt to land (a conflict, failed checks) for its merge commit. Never fails. */
 	noteAttempt?: (change: string, line: string) => Promise<void>;
 	/** Clef, asked about a batch's failed checks for hints (see failure-hints.ts). It never changes what lands. */

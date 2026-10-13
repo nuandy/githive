@@ -202,6 +202,7 @@ async function releaseLanded(input: MergeInput, batch: Ready[], commits: string[
 		`released the claims of ${batch.length} change${plural} landed on ${input.branch}, after the lease ` +
 			`was handed on: ${Date.now() - startedAt} ms`,
 	);
+	await input.releasedLanded?.().catch(() => undefined);
 	if (!input.afterLanding) return;
 	const afterFrom = Date.now();
 	await input

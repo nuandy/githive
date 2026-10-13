@@ -138,12 +138,14 @@ async function reviewWithinLimit(call: ToolCall, key: string, reviewer: string) 
  * forever. Asking to merge a change that has landed finishes the job instead.
  */
 async function releaseLanded(call: ToolCall, change: string, commit: string) {
-	const { store, stamper } = call;
+	const { ctx, repo, store, stamper } = call;
 	const held = (await store.readChange(change).catch(() => null))?.claim;
 	if (!held) return;
-	await store
+	const released = await store
 		.release({ change, agent: held.agent, reason: "merged", mergedAs: commit }, stamper)
 		.catch((err) => console.error(`releasing ${change} after it landed failed`, String(err)));
+	// Rings as a release does: the merge call's own write rings no one (see ring-concerns.ts).
+	if (released?.ok) await ctx.ping?.(repo, undefined, "release", { opens: true }).catch(() => undefined);
 }
 
 /** The caller's latest rejection of an earlier commit of the change it's about to review, if any. */
@@ -199,6 +201,8 @@ function optionalMergeInput(
 	if (ctx.noteAttempt) optional.noteAttempt = (change, line) => ctx.noteAttempt!(repo, change, line);
 	if (ctx.clef) optional.clef = ctx.clef;
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
+	// Rings as a release does, offering what the landed pieces held to anyone with room.
+	if (ctx.ping) optional.releasedLanded = () => ctx.ping!(repo, undefined, "release", { opens: true });
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
 	// Push the landed branch to GitHub as a fast-forward (its main, or githive/main for the pull request), refused if
