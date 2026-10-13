@@ -159,6 +159,7 @@ export function Hive(props: HiveProps) {
 						repo={repo}
 						branch={branch}
 						{...(cells ? { cells } : {})}
+						goals={goals}
 						{...(props.tree?.truncated ? { truncated: true } : {})}
 						{...(props.treeError ? { error: props.treeError } : {})}
 						lit={litCells}
