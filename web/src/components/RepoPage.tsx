@@ -131,6 +131,8 @@ export interface RepoPageProps {
 	onStarted?: () => void;
 	/** After its admins change how changes merge. */
 	onSettingsChanged?: () => void;
+	/** After a person lands or releases a change from its page: read the repo and the change afresh. */
+	onChangeActed?: () => void;
 }
 
 /** Above a repo GitHive hasn't started on: what that means, and for its admins, starting it. */
@@ -210,6 +212,7 @@ interface RepoTabContentProps extends Pick<
 	settings: ReactNode;
 	voting: boolean;
 	onSettingsChanged?: () => void;
+	onChangeActed?: (() => void) | undefined;
 }
 
 /** The current tab's content: before GitHive starts, only Code and Settings have any. */
@@ -227,6 +230,7 @@ function RepoTabContent({
 	settings,
 	voting,
 	onSettingsChanged,
+	onChangeActed,
 }: RepoTabContentProps) {
 	if (current === "code") {
 		return (
@@ -252,6 +256,7 @@ function RepoTabContent({
 				api={api}
 				access={access}
 				voting={voting}
+				onActed={onChangeActed}
 			/>
 		);
 	}
@@ -302,6 +307,7 @@ function ChangeView({
 	api,
 	access,
 	voting,
+	onActed,
 }: {
 	repo: string;
 	view: Extract<RepoView, { kind: "change" }>;
@@ -310,6 +316,8 @@ function ChangeView({
 	api: RepoPageProps["api"];
 	access: RepoAccess | undefined;
 	voting: boolean;
+	/** After a person lands or releases it here. */
+	onActed?: (() => void) | undefined;
 }) {
 	const claim = snapshot.claims.find((each) => each.change === view.change);
 	const branch = claim?.into ?? changeHistory?.branch ?? snapshot.branch ?? "main";
@@ -346,6 +354,10 @@ function ChangeView({
 			merge={writes ? api.merge : undefined}
 			release={writes ? api.release : undefined}
 			decide={!!view.decide}
+			onActed={() => {
+				landing.refresh();
+				onActed?.();
+			}}
 			previewable={access?.visibility === "public"}
 		/>
 	);
@@ -510,6 +522,7 @@ export function RepoPage({
 	onDeleted,
 	onStarted,
 	onSettingsChanged,
+	onChangeActed,
 }: RepoPageProps) {
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
@@ -614,6 +627,7 @@ export function RepoPage({
 							settings={settings}
 							voting={voting}
 							onSettingsChanged={onSettingsChanged}
+							onChangeActed={onChangeActed}
 						/>
 					)}
 				</div>

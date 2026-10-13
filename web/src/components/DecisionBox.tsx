@@ -1,4 +1,5 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
+import { useReturnFocus } from "../hooks/useReturnFocus";
 import type { ReleaseAnswer } from "../api";
 import type { ChangeStatus } from "../lib/changeStatus";
 import type { changeEnding } from "../lib/changeTimeline";
@@ -61,6 +62,8 @@ export interface DecisionBoxProps {
 	/** GitHub's change: releasing it gives it up until GitHub's branch moves. */
 	github?: boolean;
 	onGo: (target: PageTarget) => void;
+	/** After it's landed or released: the page reads the change afresh. */
+	onActed?: (() => void) | undefined;
 	className?: string;
 }
 
@@ -203,10 +206,21 @@ function Ended({
 export function DecisionBox(props: DecisionBoxProps) {
 	const { repo, changeId, status, inForce, ending, branch, reader, action, release, onGo, className } = props;
 	const [releasing, setReleasing] = useState(false);
+	const [released, setReleased] = useState(false);
 	const [outcome, setOutcome] = useState<Outcome | null>(null);
+	const box = useRef<HTMLElement>(null);
+	// What it did goes away once the page reads the change again (Land now, the ⋯ menu): focus comes to the box first.
+	const focusBox = () => box.current?.focus({ preventScroll: true });
+	// The release opens from a menu's item: closed, focus goes back to the ⋯ button, or to the box once it's released.
+	const returnFocus = useReturnFocus(releasing, () => box.current);
+	const said = (next: Outcome) => {
+		setOutcome(next);
+		if (next.ok) props.onActed?.();
+	};
 	const menu = inForce && release;
 	return (
 		<section
+			ref={box}
 			id="decide"
 			tabIndex={-1}
 			aria-labelledby="decide-title"
@@ -229,7 +243,7 @@ export function DecisionBox(props: DecisionBoxProps) {
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
-								<DropdownMenuItem onSelect={() => setReleasing(true)}>
+								<DropdownMenuItem disabled={released} onSelect={() => setReleasing(true)}>
 									<Icon name="ban" size={14} />
 									Release claim…
 								</DropdownMenuItem>
@@ -241,7 +255,15 @@ export function DecisionBox(props: DecisionBoxProps) {
 							open={releasing}
 							onOpenChange={setReleasing}
 							release={release}
-							onOutcome={setOutcome}
+							onOutcome={(next) => {
+								if (next.ok) setReleased(true);
+								said(next);
+							}}
+							onCloseAutoFocus={(event, gone) => {
+								if (!gone) return returnFocus(event);
+								event.preventDefault();
+								focusBox();
+							}}
 						/>
 					</>
 				) : null}
@@ -280,7 +302,8 @@ export function DecisionBox(props: DecisionBoxProps) {
 								batch={props.batch}
 								checks={props.checks}
 								land={props.land}
-								onOutcome={setOutcome}
+								onOutcome={said}
+								onSettled={focusBox}
 							/>
 						) : null}
 						{action === "vote" ? (

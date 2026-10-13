@@ -385,6 +385,10 @@ function RepoRoute(props: {
 					refreshSummaries();
 				}}
 				onSettingsChanged={() => snapshot.refresh()}
+				onChangeActed={() => {
+					snapshot.refresh();
+					change.refresh();
+				}}
 				changeHistory={change.data ?? (change.error ? null : undefined)}
 				auditError={audit.error}
 				onAuditRetry={audit.refresh}

@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { ReleaseAnswer } from "../api";
 import { messageOf } from "../lib/errors";
 import { type Batch, batchWords } from "../lib/decision";
@@ -46,7 +46,7 @@ export type MergeAnswer = { ok: boolean; commit?: string; reasons?: string[]; co
 /**
  * Land now, for a person who can write, once the change can land: a confirm names the changes that land with it and
  * the checks that run first, then it lands as its agent would (the same batch, checked first), stamped with their
- * name.
+ * name. Once it has landed it can't be pressed again, and the page reads the change afresh.
  */
 export function LandNow({
 	change,
@@ -54,6 +54,7 @@ export function LandNow({
 	checks,
 	land,
 	onOutcome,
+	onSettled,
 }: {
 	change: string;
 	/** The other ready changes that land with it. */
@@ -62,17 +63,36 @@ export function LandNow({
 	checks: string[];
 	land: () => Promise<MergeAnswer>;
 	onOutcome: (outcome: Outcome) => void;
+	/**
+	 * Once it has landed, the button goes with the change's claim: focus on it, or in its confirm, goes where this puts
+	 * it first.
+	 */
+	onSettled?: () => void;
 }) {
 	const [busy, setBusy] = useState(false);
+	const [done, setDone] = useState(false);
+	const landedNow = useRef(false);
+	const button = useRef<HTMLButtonElement>(null);
+	// Nothing is disabled while it lands, so focus stays on the button: it's busy, and a press does nothing.
+	const idle = !busy && !done;
+	const settle = () => {
+		const active = document.activeElement;
+		if (!active || active === document.body || active === button.current) onSettled?.();
+	};
 	const go = async () => {
 		setBusy(true);
 		try {
 			const landed = await land();
+			if (landed.ok) {
+				landedNow.current = true;
+				setDone(true);
+			}
 			onOutcome(
 				landed.ok
 					? { ok: true, text: `Landed as ${shortSha(landed.commit)}.` }
 					: { ok: false, text: `It couldn't land: ${(landed.reasons ?? ["no reason was given"]).join(" ")}` },
 			);
+			if (landed.ok) settle();
 		} catch (err) {
 			onOutcome({ ok: false, text: `It couldn't land: ${messageOf(err)}` });
 		} finally {
@@ -82,12 +102,26 @@ export function LandNow({
 	return (
 		<AlertDialog>
 			<AlertDialogTrigger asChild>
-				<Button variant="go" className="w-full" disabled={busy}>
-					{busy ? <Icon name="loader" /> : <Icon name="merge" />}
-					{busy ? "Landing… its checks run first" : "Land now"}
+				<Button
+					ref={button}
+					variant="go"
+					className="w-full"
+					aria-disabled={idle ? undefined : true}
+					onClick={(event) => {
+						if (!idle) event.preventDefault();
+					}}
+				>
+					{busy ? <Icon name="loader" /> : <Icon name={done ? "check" : "merge"} />}
+					{busy ? "Landing… its checks run first" : done ? "Landed" : "Land now"}
 				</Button>
 			</AlertDialogTrigger>
-			<AlertDialogContent>
+			<AlertDialogContent
+				onCloseAutoFocus={(event) => {
+					if (!landedNow.current) return;
+					event.preventDefault();
+					onSettled?.();
+				}}
+			>
 				<AlertDialogHeader>
 					<AlertDialogTitle>Land {change} now?</AlertDialogTitle>
 					<AlertDialogDescription>
@@ -142,6 +176,7 @@ export function ReleaseDialog({
 	onOpenChange,
 	release,
 	onOutcome,
+	onCloseAutoFocus,
 	children,
 }: {
 	change: string;
@@ -151,9 +186,12 @@ export function ReleaseDialog({
 	onOpenChange?: (open: boolean) => void;
 	release: (reason: string) => Promise<ReleaseAnswer>;
 	onOutcome: (outcome: Outcome) => void;
+	/** Where focus goes as it closes, and whether the claim was released (what opened it may be going with it). */
+	onCloseAutoFocus?: (event: Event, released: boolean) => void;
 	/** Its trigger, when it opens from a button of its own. */
 	children?: ReactNode;
 }) {
+	const released = useRef(false);
 	const [own, setOwn] = useState(false);
 	const shown = open ?? own;
 	const show = onOpenChange ?? setOwn;
@@ -171,6 +209,7 @@ export function ReleaseDialog({
 				setError(answer.refused ?? "It couldn't be released.");
 				return;
 			}
+			released.current = true;
 			show(false);
 			setReason("");
 			onOutcome({ ok: true, text: `Released. ${answer.note ?? consequence}` });
@@ -183,7 +222,7 @@ export function ReleaseDialog({
 	return (
 		<AlertDialog open={shown} onOpenChange={show}>
 			{children ? <AlertDialogTrigger asChild>{children}</AlertDialogTrigger> : null}
-			<AlertDialogContent>
+			<AlertDialogContent onCloseAutoFocus={(event) => onCloseAutoFocus?.(event, released.current)}>
 				<form
 					className="grid gap-4"
 					// While it's sent, nothing is disabled, so focus stays where it was: the reason is read-only, and a second

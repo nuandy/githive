@@ -74,6 +74,8 @@ export interface ChangePageProps {
 	release?: (repo: string, change: string, reason: string) => Promise<ReleaseAnswer>;
 	/** Scroll to the decision box and focus it, once the change is read (the address asks the reader to decide). */
 	decide?: boolean;
+	/** After a person lands or releases it here: read the change afresh. */
+	onActed?: () => void;
 	/** The time leases are told against (tests fix it). */
 	now?: number;
 }
@@ -143,6 +145,7 @@ function AttentionCallout({
 	repo,
 	change,
 	release,
+	onActed,
 }: {
 	attention: NonNullable<Claim["attention"]>;
 	answerable: boolean;
@@ -150,6 +153,7 @@ function AttentionCallout({
 	repo: string;
 	change: string;
 	release?: ((reason: string) => Promise<ReleaseAnswer>) | undefined;
+	onActed?: (() => void) | undefined;
 }) {
 	const [outcome, setOutcome] = useState<Outcome | null>(null);
 	const outsideVote = !pushed || attention.agent === "githive-builder";
@@ -174,8 +178,21 @@ function AttentionCallout({
 							A vote can't give it what it asks for. Releasing its claim frees its paths, so another agent can take the
 							work on with what it needs.
 						</p>
-						<ReleaseDialog change={change} release={release} onOutcome={setOutcome}>
-							<Button size="sm">
+						<ReleaseDialog
+							change={change}
+							release={release}
+							onOutcome={(next) => {
+								setOutcome(next);
+								if (next.ok) onActed?.();
+							}}
+							// Released, this callout goes with the claim: focus goes to the decision box, which says so.
+							onCloseAutoFocus={(event, released) => {
+								if (!released) return;
+								event.preventDefault();
+								document.getElementById("decide")?.focus({ preventScroll: true });
+							}}
+						>
+							<Button size="sm" disabled={outcome?.ok}>
 								<Icon name="ban" size={14} />
 								Release claim…
 							</Button>
@@ -307,6 +324,7 @@ export function ChangePage({
 	merge,
 	release,
 	decide = false,
+	onActed,
 	now,
 	previewable = false,
 }: ChangePageProps) {
@@ -408,6 +426,7 @@ export function ChangePage({
 					repo={repo}
 					change={changeId}
 					release={releaseIt}
+					onActed={onActed}
 				/>
 			) : null}
 			<OpeningComment agent={agent} record={record} />
@@ -491,6 +510,7 @@ export function ChangePage({
 						release={releaseIt}
 						github={!!claim && isGitHubClaim(claim)}
 						onGo={goTo}
+						onActed={onActed}
 					/>
 					{details("mt-5 to-900:hidden")}
 				</div>
