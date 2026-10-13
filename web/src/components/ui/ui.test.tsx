@@ -6,6 +6,7 @@ import { Box, BoxHeader, BoxRow, Callout } from "./box";
 import { Button } from "./button";
 import { Collapse } from "./collapse";
 import { Input, NativeSelect, Textarea } from "./field";
+import { Segmented } from "./segmented";
 
 describe("the building blocks", () => {
 	it("draws a plain button that doesn't submit forms", () => {
@@ -97,6 +98,23 @@ describe("the building blocks", () => {
 			),
 		])
 			expect(html).toContain("border-border-strong");
+	});
+
+	it("doesn't clip a focused choice's ring", () => {
+		const html = renderToStaticMarkup(
+			<Segmented
+				label="Window"
+				options={[
+					{ value: 1, words: "1 h" },
+					{ value: 6, words: "6 h" },
+				]}
+				value={1}
+				onPick={() => undefined}
+			/>,
+		);
+		expect(html).not.toMatch(/data-slot="segmented"[^>]*overflow-hidden/);
+		expect(html).toContain("focus-visible:outline-2");
+		expect(html).not.toContain("focus-visible:outline-none");
 	});
 });
 
