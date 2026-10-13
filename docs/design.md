@@ -478,7 +478,8 @@ merge, so the project's branch never holds half a feature.
 Within a branch, `after` orders dependent changes: a claim (or a backlog item)
 names the changes it depends on, and `merge` refuses it, saying what it waits
 on, until each has merged into the same branch. A release records the branch a
-change merged into, so a dependency that landed elsewhere doesn't count.
+change merged into, or was to, so a dependency that landed elsewhere doesn't
+count, and a change released unmerged still shows its files against its branch.
 `backlog` lists an item as free only once its pieces have merged, and `merge`
 refuses a change still waiting. A backlog item can instead name pieces it
 lands after (`lands_after`): `backlog` offers it at once, to claim with them

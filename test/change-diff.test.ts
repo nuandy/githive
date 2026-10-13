@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { diffFiles } from "../src/change-diff";
-import { changeDiff, type ToolContext } from "../src/toolkit/mcp";
-import { agentClone } from "./helpers/agents";
+import { changeDiff, changeHistory, type ToolContext } from "../src/toolkit/mcp";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
@@ -169,6 +169,33 @@ describe("a change's files, from Git", { timeout: 120_000 }, () => {
 			total: 0,
 		});
 		await expect(changeDiff(ctx(), "p", "nope")).rejects.toThrow(/\[404\] no change nope/);
+	});
+
+	it("diffs a change released from another branch against that branch, not the project's", async () => {
+		await call("settings", { required: 1 });
+		const seed = await seedMain();
+		await register("a");
+		const claim = {
+			change: "c-1",
+			agent: "a",
+			paths: ["src/a/"],
+			intent: "work on a",
+			into: "feature/x",
+			from: "main",
+		};
+		await call("claim", claim, "a");
+		// The branch gains a commit of its own, which isn't the change's.
+		seed.write("src/f.js", "f\n");
+		await seed.run("add", "-A");
+		await seed.run("commit", "-q", "-m", "on the feature");
+		await seed.run("push", "-q", "origin", "HEAD:feature/x");
+		const head = await pushChange(server.url, work, "a", "c-1", { "src/a/x.js": "x\n" }, "origin/feature/x");
+		await call("release", { change: "c-1", agent: "a", reason: "stopping here" }, "a");
+
+		const diff = await changeDiff(ctx(), "p", "c-1");
+		expect(diff).toMatchObject({ of: "head", base: server.git("rev-parse", "feature/x").trim(), head });
+		expect(diff.files.map((file) => file.path)).toEqual(["src/a/x.js"]);
+		expect((await changeHistory(ctx(), "p", "c-1")).branch).toBe("feature/x");
 	});
 
 	/** The tools' context, with the project's branch unreadable: its read remote names a repo that isn't there. */

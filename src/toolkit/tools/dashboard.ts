@@ -100,7 +100,7 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	);
 	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
 	// The change's own commits are those since it left the branch it lands on.
-	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+	const branch = landsOn(registry, record, released);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
 	const mergedAs = released.find((release) => release.mergedAs)?.mergedAs;
 	const hints = cachedHints(ctx, repo, change, !!claim);
@@ -114,6 +114,11 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	const ids = new Set(commits.map((commit) => commit.commit));
 	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((vote) => ids.has(vote.commit));
 	return { change, branch, claim: claim ?? null, released, commits, votes, ...(await hints) };
+}
+
+/** The branch a change lands on: its claim's, or once released, the one its release names (see ReleaseRecord.into). */
+function landsOn(registry: Registry, record: ClaimRecord | null | undefined, released: ReleaseRecord[]) {
+	return record ? claimInto(record, projectBranch(registry)) : (released.at(-1)?.into ?? projectBranch(registry));
 }
 
 /** A merge check as status kept it (see mergeCheck in work-tools.ts), with the change head it was worked out on. */
@@ -204,7 +209,7 @@ export async function changeDiff(ctx: ToolContext, repo: string, change: string)
 	try {
 		if (mergedAs) return { change, of, ...(await landedDiff(ctx, repo, change, mergedAs, timing)) };
 		const agent = record?.agent ?? released.at(-1)!.agent;
-		const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+		const branch = landsOn(registry, record, released);
 		const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
 		const workspace = await timing
 			.time("clone", async () =>
