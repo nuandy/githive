@@ -25,10 +25,16 @@ interface HiveOptions {
 	failAfterWrite?: string[];
 	/** Claims of these are refused once each, leaving the claim behind, as a claim refused partway in shards can. */
 	refusedPartway?: string[];
+	/** Claims already in an agent's name, by change, that the agent doesn't know it holds. */
+	strays?: Record<string, string>;
+	/** Changes whose status misses their claim once, as a read of claims spread over records briefly can. */
+	statusMisses?: string[];
+	/** Changes GitHive's builder is still at. */
+	building?: string[];
 }
 
 function hive(pieces: Piece[], options: HiveOptions = {}) {
-	const claimed = new Map<string, string>();
+	const claimed = new Map<string, string>(Object.entries(options.strays ?? {}));
 	const heads = new Map<string, string>();
 	const holds = new Map<string, string>();
 	const votes = new Map<string, { reviewer: string; verdict: string }[]>();
@@ -40,10 +46,11 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 	const approved = (change: string) =>
 		(votes.get(change) ?? []).some((vote) => vote.verdict === "approve" && vote.reviewer !== claimed.get(change));
 	const happened = new Set<string>();
-	const once = (list: string[] | undefined, change: string) => {
+	const once = (list: string[] | undefined, key: string) => {
+		const change = key.replace(/^status:/, "");
 		if (!list?.includes(change)) return false;
-		if (happened.has(change)) return false;
-		happened.add(change);
+		if (happened.has(key)) return false;
+		happened.add(key);
 		return true;
 	};
 	const tools = (name: string, args: Record<string, unknown>): unknown => {
@@ -51,9 +58,16 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 		const change = String(args.change ?? "");
 		switch (name) {
 			case "status":
+				if (once(options.statusMisses, `status:${change}`)) return {};
 				return claimed.has(change)
-					? { claim: { agent: claimed.get(change) }, approval: { approved: approved(change) } }
+					? {
+							claim: { agent: claimed.get(change) },
+							head: heads.get(change) ?? null,
+							approval: { approved: approved(change) },
+						}
 					: {};
+			case "claims":
+				return [...claimed].map(([held, holder]) => ({ change: held, agent: holder }));
 			case "merge":
 				if (!approved(change)) return { ok: false };
 				claimed.delete(change);
@@ -95,6 +109,9 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 	class TestAgent extends HostedAgent {
 		protected override async callTool(name: string, args: Record<string, unknown>) {
 			return tools(name, args);
+		}
+		protected override async buildersAtWork(_repo: string, changes: string[]) {
+			return new Set(changes.filter((change) => options.building?.includes(change)));
 		}
 		protected override async startBuilder(_repo: string, change: string) {
 			heads.set(change, `${change}-1`);
@@ -190,6 +207,26 @@ describe("a repo's hosted agents", () => {
 		await rounds(6);
 		expect(log).toEqual(expect.arrayContaining(["builder on a", "builder on b"]));
 		expect(merged).toEqual(new Set(["a", "b"]));
+	});
+
+	it("give back a claim in their name they don't know they hold, unless a builder is at it", async () => {
+		const strays = { a: "githive-forager", b: "githive-scout" };
+		const { repoHive, rounds, log, merged } = hive(pieces("a", "b"), { strays, building: ["b"] });
+		await start(repoHive);
+		await rounds(1);
+		// a, with nothing pushed and no builder, is free again and built; b's builder is still at it, so it stays.
+		expect(log).toContain("builder on a");
+		expect(log).not.toContain("builder on b");
+		await rounds(5);
+		expect(merged.has("a")).toBe(true);
+	});
+
+	it("keep their change when a read briefly misses its claim while its builder is at it", async () => {
+		const { repoHive, rounds, log, merged } = hive(pieces("a"), { statusMisses: ["a"], building: ["a"] });
+		await start(repoHive);
+		await rounds(6);
+		expect(log.filter((line) => line === "builder on a")).toHaveLength(1);
+		expect(merged.has("a")).toBe(true);
 	});
 
 	it("claim a piece that lands after others with them as after, so it's built alongside them", async () => {

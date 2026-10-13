@@ -3,7 +3,13 @@ import { reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import type { Conversation } from "./sandbox";
 import { callTool } from "./toolkit/mcp";
-import { changeRepoName, startHostedBuilder, startHostedReviewers, toolContextFor } from "./toolkit/env";
+import {
+	buildersAtWork,
+	changeRepoName,
+	startHostedBuilder,
+	startHostedReviewers,
+	toolContextFor,
+} from "./toolkit/env";
 import { hiveAgentNames, hiveIdentity } from "./toolkit/hive-agents";
 import { type BacklogView, type ReviewOption, holdKey } from "./toolkit/work";
 
@@ -195,6 +201,11 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** Starts GitHive's hosted builder on the agent's claimed change, which the hive reviews (tests note it instead). */
+	/** Which of `changes` GitHive's builder is still at (tests answer it instead). */
+	protected buildersAtWork(repo: string, changes: string[]): Promise<Set<string>> {
+		return buildersAtWork(this.env, repo, changes);
+	}
+
 	protected startBuilder(repo: string, change: string): Promise<unknown> {
 		return startHostedBuilder(this.env, { repo, change, hiveReviews: true });
 	}
@@ -269,6 +280,7 @@ export class HostedAgent extends DurableObject<Env> {
 		const call: Call = (name, args = {}) =>
 			this.callTool(name, { repo: state.repo, agent: state.name, ...args }, state.name);
 		const now = Date.now();
+		await this.giveBackStrays(state, call);
 		if (state.change) await this.ownChange(state, call, now);
 		if (state.reviewing && (await this.reviewOver(state))) delete state.reviewing;
 		const takesWork = now < state.until;
@@ -280,11 +292,38 @@ export class HostedAgent extends DurableObject<Env> {
 		if (idle && (nothingLeft || !takesWork)) state.done = true;
 	}
 
+	/**
+	 * Gives back claims in this agent's name that it doesn't know it holds: one that failed partway, or one it dropped
+	 * on a read that briefly missed it. With nothing pushed and no builder at it, nobody would build it, and the piece
+	 * would sit claimed until it counted as abandoned. One a builder is still at, or with work pushed (its reviewers
+	 * merge it once approved), it leaves alone.
+	 */
+	private async giveBackStrays(state: HostedAgentState, call: Call) {
+		const claims = (await call("claims")) as { change: string; agent: string }[];
+		const strays = claims
+			.filter((claim) => claim.agent === state.name)
+			.filter((claim) => claim.change !== state.change);
+		if (!strays.length) return;
+		const atWork = await this.buildersAtWork(
+			state.repo,
+			strays.map((claim) => claim.change),
+		);
+		for (const stray of strays) {
+			if (atWork.has(stray.change)) continue;
+			const status = (await call("status", { change: stray.change })) as { head?: string | null };
+			if (status.head) continue;
+			await giveBack(call, stray.change, "its agent didn't know it held it");
+		}
+	}
+
 	/** Its own change: done once it's out of the claims; merged once approved (merge waits for its batch). */
 	private async ownChange(state: HostedAgentState, call: Call, now: number) {
 		const change = state.change!;
 		const status = (await call("status", { change })) as { claim?: unknown; approval?: { approved?: boolean } };
 		if (!status.claim) {
+			// A read of claims spread over records can briefly miss one: a builder still at it says it's still this
+			// agent's change.
+			if ((await this.buildersAtWork(state.repo, [change])).has(change)) return;
 			state.finished.push({ piece: change, at: now });
 			delete state.change;
 			return;

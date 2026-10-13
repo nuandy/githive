@@ -879,7 +879,7 @@ export async function builderCredentials(env: Env, repo: string, change: string)
 }
 
 /** Which of `changes` GitHive's hosted builder is still at, queued or working: their pushes aren't final yet. */
-async function buildersAtWork(env: Env, repo: string, changes: string[]) {
+export async function buildersAtWork(env: Env, repo: string, changes: string[]) {
 	const states = await Promise.all(
 		changes.map((change) => rpc(env.BUILDER.getByName(changeRepoName(repo, change)).state()).catch(() => null)),
 	);

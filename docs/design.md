@@ -1367,6 +1367,13 @@ it:
   and each reads the backlog in its own order, so a claim another agent took
   first costs a turn. An agent takes no new work once its time is up; it
   finishes what it started, then stops, and it stops early when nothing is left.
+  Each turn starts by giving back claims in the agent's name that it doesn't
+  know it holds, with nothing pushed and no builder at them: a claim that failed
+  partway, or a change it dropped on a read of spread-out claims that briefly
+  missed it. In demo runs 15 and 16 such claims kept pieces from being built
+  for 30 minutes, until they counted as abandoned. For the same reason an agent
+  keeps its change while its builder is still at it, even if a read says the
+  claim is gone.
   The repo's own instance, `hive:<repo>`, only starts and stops its agents and
   reports what each is on. Deleting a repo stops them. The `githive` grant
   counts their votes, so a repo's veto roles accept them as they accept
