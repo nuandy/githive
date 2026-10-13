@@ -9,7 +9,7 @@ import { RepoPage } from "./RepoPage";
 
 describe("a repo", () => {
 	it("shows claims in force as open changes, with head and approvals", () => {
-		const html = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="acme/docs-site" />);
+		const html = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="acme/docs-site" landed={3} />);
 		expect(html).toContain("Rewrite the C section");
 		expect(html).toContain('href="#/repos/acme/docs-site/changes/c-1"');
 		expect(html).toContain("src/c/");
@@ -44,7 +44,7 @@ describe("a repo", () => {
 			renderToStaticMarkup(
 				<AuditTab repo="acme/docs-site" snapshot={{ ...snapshot, audit: { merges: 1, open: 0, violations: [] } }} />,
 			),
-		).toMatch(/No violations/);
+		).toMatch(/1 commit checked since GitHive started\. No violations\./);
 	});
 
 	it("names the change a review was for, open or landed, and links its commit", () => {
@@ -250,19 +250,23 @@ describe("the Changes list", () => {
 	const repo = { ...snapshot, branch: "main", claims, votes: [] };
 
 	it("leads with filter chips that count, and lists what needs action first", () => {
-		const html = renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" />);
+		const html = renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" landed={3} />);
 		const chips = visibleText(/<nav aria-label="Show changes"[^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "");
-		expect(chips).toBe(" Needs you 1 In review 1 Approved 1 Building 0 Landing 0 All 3 ");
+		expect(chips).toBe(" Needs you 1 Needs work 0 In review 1 Approved 1 Building 0 Landing 0 All 3 ");
 		expect(html).toContain('href="#/repos/acme/web/changes?filter=needs-you"');
 		// All is the list as it is, and the one shown.
 		expect(html).toMatch(/<a href="#\/repos\/acme\/web\/changes" aria-current="true"[^>]*>All/);
 		const titles = [...html.matchAll(/text-body font-semibold[^>]*>([^<]+)</g)].map((match) => match[1]);
 		expect(titles).toEqual(["Do asks", "Do ready", "Do review"]);
 		expect(visibleText(html)).toContain("active 3m ago");
-		// What's landed links to the History tab.
+		// What's landed, as History counts it, links to the History tab; until History has said, there's no count.
 		expect(html).toMatch(/<a href="#\/repos\/acme\/web\/history"[^>]*>.*3<\/span> landed on main<\/a>/);
+		expect(renderToStaticMarkup(<ChangeList snapshot={repo} repo="acme/web" shown="main" />)).not.toContain(
+			"landed on main",
+		);
 		// The audit's open violations, as needsYou counts them, lead to the Audit tab.
-		expect(visibleText(html)).toContain("1 merge for the audit to look at");
+		expect(visibleText(html)).toContain("1 open audit violation");
+		expect(visibleText(html)).not.toContain("merge");
 		expect(html).toContain('<p data-slot="announcer"');
 	});
 
