@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { LandingStretch, RepoAudit, RepoLanding, RepoSnapshot } from "../api";
+import { useBumps } from "../hooks/useBumps";
 import { displayName } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
 import { counted } from "../lib/plural";
@@ -7,13 +8,24 @@ import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
+import { cn } from "../lib/utils";
+import { Lamp } from "./ui/badge";
 
-const STAGES: { stage: Stage; words: string }[] = [
-	{ stage: "next", words: "up next" },
-	{ stage: "building", words: "building" },
-	{ stage: "review", words: "in review" },
-	{ stage: "landing", words: "landing" },
-	{ stage: "landed", words: "landed" },
+/**
+ * Each stage's words, its swatch (as tall as the count's digits, and level with them) and its count's color. Up next
+ * is a dashed outline, in review a dashed tint; the rest are tinted in their stage's color.
+ */
+const STAGES: { stage: Stage; words: string; swatch: string; count?: string }[] = [
+	{ stage: "next", words: "up next", swatch: "border-dashed border-border-strong" },
+	{ stage: "building", words: "building", swatch: "border-stage-building bg-stage-building/25" },
+	{ stage: "review", words: "in review", swatch: "border-dashed border-stage-review bg-stage-review/8" },
+	{
+		stage: "landing",
+		words: "landing",
+		swatch: "border-stage-landing bg-stage-landing/25",
+		count: "text-stage-landing",
+	},
+	{ stage: "landed", words: "landed", swatch: "border-stage-landed bg-stage-landed/25", count: "text-stage-landed" },
 ];
 
 /**
@@ -52,25 +64,47 @@ export function HiveStrip({
 	const stretch = landing?.stretch;
 	const stages = STAGES.filter(({ stage }) => stage !== "next" || upNext !== undefined);
 	return (
-		<header className="hive-strip">
+		<header>
 			<NeedsYou repo={repo} goals={goals} landing={landing} audit={audit} policy={policy} range={range} now={now} />
 			{!goals.length && !justFinished(stretch, now) ? (
 				<EmptyHive stretch={stretch} now={now} />
 			) : (
-				<ol className="hive-strip__stages" aria-label="Goals by stage">
-					{stages.map(({ stage, words }) => (
-						<li key={stage} className={`hive-strip__stage hive-strip__stage--${stage}`}>
-							<span className="hive-strip__swatch" aria-hidden="true" />
+				<ol
+					className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2 p-0"
+					aria-label="Goals by stage"
+				>
+					{stages.map(({ stage, words, swatch, count }) => (
+						<li
+							key={stage}
+							data-stage={stage}
+							className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 transition-[border-color,background-color] duration-300 ease-[ease]"
+						>
+							<span
+								className={cn(
+									"size-[1cap] flex-none rounded-sm border-[1.5px] text-title-lg",
+									"supports-[not_(text-box:trim-both_cap_alphabetic)]:relative supports-[not_(text-box:trim-both_cap_alphabetic)]:-top-0.5",
+									swatch,
+								)}
+								aria-hidden="true"
+							/>
+							{/* The box is the digits' height, so centring it centres the digits, not the line with its descender room. */}
 							<b
 								key={counts[stage]}
-								className={bumped.has(stage) ? "hive-strip__count hive-strip__count--bump" : "hive-strip__count"}
+								className={cn(
+									"inline-block text-title-lg leading-none font-extrabold tabular-nums [text-box:trim-both_cap_alphabetic]",
+									count,
+									bumped.has(stage) && "animate-bump",
+								)}
 							>
 								{counts[stage]}
 							</b>
-							<span className="hive-strip__words">
+							<span className="text-ui text-muted-foreground">
 								{words}
 								{stage === "landed" ? (
-									<span className="muted"> · {folded ? `since ${hhmm(since)}` : RANGE_WORDS[range]}</span>
+									<span className="text-muted-foreground">
+										{" "}
+										· {folded ? `since ${hhmm(since)}` : RANGE_WORDS[range]}
+									</span>
 								) : null}
 							</span>
 						</li>
@@ -82,20 +116,6 @@ export function HiveStrip({
 			) : null}
 		</header>
 	);
-}
-
-/**
- * The counts that have changed since the strip was first drawn. A count is keyed by its value, so a new value is a
- * new element; with the bump class it plays the bump as it appears, and only then. The first draw doesn't bump.
- */
-function useBumps(counts: Record<Stage, number>): Set<Stage> {
-	const last = useRef<Record<Stage, number> | null>(null);
-	const moved = useRef(new Set<Stage>());
-	const before = last.current;
-	if (before)
-		for (const stage of Object.keys(counts) as Stage[]) if (counts[stage] !== before[stage]) moved.current.add(stage);
-	last.current = counts;
-	return moved.current;
 }
 
 /** What waits on a person: an agent's question, a change its checks put out, merges the audit flags. */
@@ -134,9 +154,14 @@ function NeedsYou({
 	const flagged = audit?.open ?? 0;
 	const needed = asking.length || voting.length || failed.size || flagged;
 	const line = needed ? (
-		<p className="hive-needs">
-			<span className="hive-needs__lead">
-				<span className="lamp lamp--red" aria-hidden="true" />
+		<p
+			className={cn(
+				"m-0 mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-md border border-bad/45 bg-bad-soft px-3 py-2 text-body-sm",
+				"[&_a+a]:before:mr-3.5 [&_a+a]:before:text-muted-foreground [&_a+a]:before:content-['·']",
+			)}
+		>
+			<span className="inline-flex items-center gap-2 font-bold text-bad">
+				<Lamp color="red" />
 				Needs a person:
 			</span>
 			{asking.map((goal) => {
@@ -166,7 +191,13 @@ function NeedsYou({
 	const last = useRef(line);
 	if (line) last.current = line;
 	return (
-		<div className={`hive-needs-wrap${line ? " hive-needs-wrap--on" : ""}`} inert={!line}>
+		<div
+			className={cn(
+				"grid [transition:grid-template-rows_0.4s_ease,opacity_0.3s_ease] *:min-h-0 *:overflow-hidden",
+				line ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0",
+			)}
+			inert={!line}
+		>
 			<div>{line ?? last.current}</div>
 		</div>
 	);
@@ -197,8 +228,8 @@ function AllLanded({
 	now: number;
 }) {
 	return (
-		<p className="hive-strip__recap hive-strip__appear">
-			<span className="tone-good">✓ All landed.</span> {stretchWords(stretch)}, finished {timeAgo(stretch.to, now)}.{" "}
+		<p className="m-0 mt-2.5 animate-hive-appear border-l-3 border-good pl-3">
+			<span className="text-good">✓ All landed.</span> {stretchWords(stretch)}, finished {timeAgo(stretch.to, now)}.{" "}
 			{audit && !audit.open ? "The audit is clean. " : null}
 			<a href={href.repo(repo, "history")}>See what landed</a>
 		</p>
@@ -208,9 +239,9 @@ function AllLanded({
 /** No goals at all: how to bring an agent in, or when the last work finished. */
 function EmptyHive({ stretch, now }: { stretch: LandingStretch | undefined; now: number }) {
 	return (
-		<div className="hive-strip__empty hive-strip__appear">
-			<h2>No agents in the hive {stretch ? "now" : "yet"}</h2>
-			<p className="muted">
+		<div className="animate-hive-appear">
+			<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
+			<p className="m-0 mt-1 text-muted-foreground">
 				{stretch ? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. ` : ""}
 				Connect an agent from the Agents page: it claims work here, and shows up as it does.
 			</p>

@@ -143,12 +143,12 @@ describe("the goals panel", () => {
 
 	it("folds finished goals into a summary in Story, and draws them as rows in Timeline", () => {
 		const story = panel("story");
-		expect(story).toContain('class="goals goals--story"');
+		expect(story).toContain('data-view="story"');
 		expect(story).toContain('aria-expanded="false"');
 		const timeline = panel("timeline");
-		expect(timeline).toContain('class="goals goals--timeline"');
+		expect(timeline).toContain('data-view="timeline"');
 		// The same rows either way; CSS morphs one into the other.
-		expect(timeline.match(/<li class="goal /g)).toHaveLength(story.match(/<li class="goal /g)!.length);
+		expect(timeline.match(/<li [^>]*data-key=/g)).toHaveLength(story.match(/<li [^>]*data-key=/g)!.length);
 	});
 
 	it("puts the steps in words, an interface change and a heads-up as the goal's own", () => {

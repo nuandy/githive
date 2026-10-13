@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { Hive } from "../components/HiveTab";
 import { Page, Shell } from "../components/Page";
+import { ThemeMenu } from "../components/ThemeMenu";
+import { Button } from "../components/ui/button";
+import { Input, NativeSelect } from "../components/ui/field";
+import { cn } from "../lib/utils";
 import { NarrowFrame } from "./NarrowFrame";
 import { createSim, SCENARIOS, type ScenarioName, type Sim, type SimState } from "./sim";
-import "./playground.css";
 
 // The Hive playground: the real Hive tab, drawn from a simulated hive on a virtual clock, with a slim bar to play,
-// pause, speed up, step, reset, switch scenario or seed, answer what waits on a person, and see the Hive in a window
-// 720 px wide.
+// pause, speed up, step, reset, switch scenario or seed, answer what waits on a person, see the Hive in a window
+// 720 px wide, and switch between light and dark.
 // The scenario, seed, speed and width live in the address, so a reload or a shared link plays the same run.
 
 const SPEEDS = [1, 5, 20, 60];
@@ -81,6 +84,42 @@ const clock = (ms: number) => {
 	const at = new Date(ms);
 	return `${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
 };
+
+// The bar is small and quiet, so the Hive under it is what you look at: its controls are a size smaller than the
+// dashboard's, and a pressed one is shaded.
+const SMALL = "px-2 py-0.5 text-ui font-medium";
+/** The same for a field, whose font and line height otherwise come from around it. */
+const SMALL_FIELD = "px-2 py-0.5 text-ui [font-weight:500] [line-height:18px]";
+const ROW = "mx-auto flex max-w-(--page-width) flex-wrap items-center gap-x-3.5 gap-y-1.5 px-6 py-[7px]";
+const GROUP = "inline-flex items-center gap-1.5 font-normal";
+/** A button answering for a person, edged in the needs color. */
+const PERSON = "border-[color-mix(in_srgb,var(--needs)_45%,var(--border-strong))]";
+
+/** One of the bar's buttons. */
+function BarButton({ className, ...props }: ComponentProps<typeof Button>) {
+	return (
+		<Button
+			className={cn(SMALL, "leading-[18px] aria-pressed:bg-surface-3 aria-pressed:text-foreground", className)}
+			{...props}
+		/>
+	);
+}
+
+/** Buttons joined into one strip, the pressed one shaded: the speed, the width. */
+function Segments({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+	return (
+		<span
+			className={cn(
+				"inline-flex *:rounded-none *:first:rounded-l-md *:last:rounded-r-md *:not-first:-ml-px",
+				className,
+			)}
+			role="group"
+			aria-label={label}
+		>
+			{children}
+		</span>
+	);
+}
 
 /** How long until the next action, in words for the Step button's hint. */
 function untilWords(ms: number) {
@@ -161,25 +200,34 @@ export function Playground() {
 	) : null;
 
 	return (
-		<Shell ref={page} className={`playground playground--${width}`}>
-			<div ref={bar} className="playground__bar" role="toolbar" aria-label="Playground">
-				<div className="playground__row">
-					<strong className="playground__name">Hive playground</strong>
-					<label className="playground__field" title={description}>
+		<Shell ref={page}>
+			<div
+				ref={bar}
+				className="sticky top-0 z-10 border-b border-border bg-card text-ui text-muted-foreground"
+				role="toolbar"
+				aria-label="Playground"
+			>
+				<div className={ROW}>
+					<strong className="font-bold text-foreground">Hive playground</strong>
+					<label className={GROUP} title={description}>
 						<span className="sr-only">Scenario</span>
-						<select value={scenario} onChange={(event) => update({ scenario: event.target.value as ScenarioName })}>
+						<NativeSelect
+							className={SMALL_FIELD}
+							value={scenario}
+							onChange={(event) => update({ scenario: event.target.value as ScenarioName })}
+						>
 							{SCENARIOS.map((each) => (
 								<option key={each.name} value={each.name}>
 									{each.title}
 								</option>
 							))}
-						</select>
+						</NativeSelect>
 					</label>
-					<label className="playground__field">
-						<span className="muted">seed</span>
-						<input
+					<label className={GROUP}>
+						<span className="text-muted-foreground">seed</span>
+						<Input
 							type="number"
-							className="playground__seed"
+							className={cn(SMALL_FIELD, "w-16 font-mono")}
 							value={seed}
 							onChange={(event) => {
 								const next = Number.parseInt(event.target.value, 10);
@@ -187,67 +235,67 @@ export function Playground() {
 							}}
 						/>
 					</label>
-					<span className="playground__group">
-						<button type="button" onClick={() => setPlaying((was) => !was)} aria-pressed={playing}>
+					<span className={GROUP}>
+						<BarButton onClick={() => setPlaying((was) => !was)} aria-pressed={playing}>
 							{playing ? "Pause" : "Play"}
-						</button>
-						<span className="playground__segments" role="group" aria-label="Speed">
+						</BarButton>
+						<Segments label="Speed">
 							{SPEEDS.map((each) => (
-								<button key={each} type="button" aria-pressed={speed === each} onClick={() => update({ speed: each })}>
+								<BarButton key={each} aria-pressed={speed === each} onClick={() => update({ speed: each })}>
 									{each}×
-								</button>
+								</BarButton>
 							))}
-						</span>
+						</Segments>
 					</span>
-					<span className="playground__group">
-						<button
-							type="button"
+					<span className={GROUP}>
+						<BarButton
 							onClick={() => act((current) => current.step())}
 							disabled={view?.next == null}
 							title={view?.next != null ? `Jump to the next event, ${untilWords(view.next - now)} away` : undefined}
 						>
 							Step
-						</button>
-						<button type="button" onClick={() => act((current) => current.advance(10 * MINUTE))}>
-							Skip 10 min
-						</button>
-						<button type="button" onClick={() => setRun((count) => count + 1)}>
-							Reset
-						</button>
+						</BarButton>
+						<BarButton onClick={() => act((current) => current.advance(10 * MINUTE))}>Skip 10 min</BarButton>
+						<BarButton onClick={() => setRun((count) => count + 1)}>Reset</BarButton>
 					</span>
-					<span className="playground__clock" title="The virtual clock">
+					<span className="font-mono text-foreground" title="The virtual clock">
 						{clock(now)}
 					</span>
-					<span className="muted">
+					<span className="text-muted-foreground">
 						{view?.events ?? 0} events
 						{view?.done ? " · run over" : view?.next == null && view?.waiting.length ? " · waiting on a person" : ""}
 					</span>
-					<span className="playground__segments playground__width" role="group" aria-label="Width">
+					<Segments label="Width" className="ml-auto">
 						{(["wide", "narrow"] as const).map((each) => (
-							<button key={each} type="button" aria-pressed={width === each} onClick={() => update({ width: each })}>
+							<BarButton key={each} aria-pressed={width === each} onClick={() => update({ width: each })}>
 								{each === "wide" ? "Wide" : "Narrow"}
-							</button>
+							</BarButton>
 						))}
+					</Segments>
+					{/* As tall as the bar's row without its padding: the round button reaches into it rather than widen the bar. */}
+					<span className="-my-[3px] inline-flex">
+						<ThemeMenu />
 					</span>
 				</div>
 				{view?.waiting.length ? (
-					<div className="playground__row playground__person">
+					<div className={cn(ROW, "border-t border-border text-needs")}>
 						<span>A person is needed:</span>
 						{view.waiting.map((change) => (
-							<span key={change} className="playground__group">
-								<button type="button" onClick={() => act((current) => current.personVotes(change, "approve"))}>
+							<span key={change} className={GROUP}>
+								<BarButton className={PERSON} onClick={() => act((current) => current.personVotes(change, "approve"))}>
 									Approve {change}
-								</button>
-								<button type="button" onClick={() => act((current) => current.personVotes(change, "reject"))}>
+								</BarButton>
+								<BarButton className={PERSON} onClick={() => act((current) => current.personVotes(change, "reject"))}>
 									Reject {change}
-								</button>
+								</BarButton>
 							</span>
 						))}
 					</div>
 				) : null}
 			</div>
 			{width === "narrow" ? (
-				<div className="playground__narrow">
+				// The Hive in a window of its own, so its narrow layout shows.
+				<div className="py-6">
 					<NarrowFrame width={NARROW_PX}>
 						<Page>{hive}</Page>
 					</NarrowFrame>
