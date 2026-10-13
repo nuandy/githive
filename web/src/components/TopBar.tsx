@@ -145,8 +145,10 @@ function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
 	);
 }
 
-/** Where you are: each place on the way a link, the last one not. Only the last one shortens, so the others never
- *  print under it; on a phone, only the last one: the repo header and the page say the rest. */
+/**
+ * Where you are: each place on the way a link, the last one not. Only the last one shortens, so the others never
+ * print under it; on a phone, only the last one: the repo header and the page say the rest.
+ */
 function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
 	return (
 		<nav className="min-w-0 overflow-hidden" aria-label="Breadcrumb">

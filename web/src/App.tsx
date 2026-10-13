@@ -34,7 +34,7 @@ import { usePoll } from "./hooks/usePoll";
 import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
-import { href, parseRoute, type Route } from "./lib/routes";
+import { href, parseRoute, type RepoTab, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import { cn } from "./lib/utils";
 // The page column's classes, for the pages not yet on utilities.
@@ -145,7 +145,7 @@ export function App() {
 		if (!bootError) return null;
 		return (
 			<EmptyPage role="alert">
-				<h2>GitHive didn't answer</h2>
+				<h1>GitHive didn't answer</h1>
 				<p>{bootError}. Reload the page to try again.</p>
 			</EmptyPage>
 		);
@@ -397,8 +397,17 @@ function changeTitle(changeId: string, snapshot: RepoSnapshot | undefined, histo
 	return ended || changeId;
 }
 
-/** The breadcrumbs and the window title for a route. */
-function headingOf(route: Route, inboxCount: number, changeLabel: string): { crumbs: Crumb[]; title: string } {
+/**
+ * The breadcrumbs and the window title for a route. The title names the page, the most particular first, after how
+ * many changes wait on the reader.
+ */
+export function headingOf(route: Route, inboxCount: number, changeLabel: string): { crumbs: Crumb[]; title: string } {
+	const { crumbs, title } = placeOf(route, changeLabel);
+	const waiting = inboxCount > 0 ? `(${inboxCount}) ` : "";
+	return { crumbs, title: `${waiting}${title} · GitHive` };
+}
+
+function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: string } {
 	switch (route.page) {
 		case "repo":
 		case "change": {
@@ -407,42 +416,62 @@ function headingOf(route: Route, inboxCount: number, changeLabel: string): { cru
 				{ label: "Repositories", href: href.repos() },
 				{ label: repoName, href: href.repo(repoName) },
 			];
-			if (route.page !== "change") return { crumbs, title: `${repoName} · GitHive` };
+			if (route.page !== "change") return { crumbs, title: [...tabTitle(route), repoName].join(" · ") };
 			crumbs.push({ label: changeLabel });
-			return { crumbs, title: `${changeLabel} · ${repoName} · GitHive` };
+			return { crumbs, title: `${changeLabel} · ${repoName}` };
 		}
 		case "repos":
-			return { crumbs: [], title: "Repositories · GitHive" };
-		case "inbox": {
-			const count = inboxCount ? ` (${inboxCount})` : "";
-			return { crumbs: [{ label: "Inbox" }], title: `Inbox${count} · GitHive` };
-		}
+			return { crumbs: [], title: "Repositories" };
+		case "inbox":
+			return { crumbs: [{ label: "Inbox" }], title: "Inbox" };
 		case "agents-settings":
-			return { crumbs: [{ label: "Agents" }], title: "Agents · GitHive" };
+			return { crumbs: [{ label: "Agents" }], title: "Agents" };
 		case "admin":
-			return { crumbs: [{ label: "Admin" }], title: "Admin · GitHive" };
+			return { crumbs: [{ label: "Admin" }], title: "Admin" };
 		case "new-repo":
 			return {
 				crumbs: [{ label: "Repositories", href: href.repos() }, { label: "New repository" }],
-				title: "New repository · GitHive",
+				title: "New repository",
 			};
 		case "orgs":
-			return { crumbs: [{ label: "Your organizations" }], title: "Your organizations · GitHive" };
+			return { crumbs: [{ label: "Your organizations" }], title: "Your organizations" };
 		case "org":
 			return {
 				crumbs: [{ label: "Your organizations", href: href.orgs() }, { label: route.org }],
-				title: `${route.org} · GitHive`,
+				title: route.org,
 			};
-		default:
-			return { crumbs: [], title: "GitHive" };
+		case "not-found":
+			return { crumbs: [], title: "Page not found" };
 	}
+}
+
+const TAB_TITLES: Record<Exclude<RepoTab, "hive">, string> = {
+	changes: "Changes",
+	history: "History",
+	claims: "Claims",
+	code: "Code",
+	agents: "Agents",
+	audit: "Audit",
+	settings: "Settings",
+};
+
+/**
+ * What a repo tab puts before the repo's name in the title: in Code, the file and its folder; on the Hive, the repo's
+ * own page, nothing.
+ */
+function tabTitle(route: Extract<Route, { page: "repo" }>): string[] {
+	if (route.tab === "hive") return [];
+	const parts = route.tab === "code" ? (route.path ?? "").split("/").filter(Boolean) : [];
+	const name = parts.pop();
+	if (!name) return [TAB_TITLES[route.tab]];
+	return parts.length ? [name, parts.join("/")] : [name];
 }
 
 /** For pages that belong to a person signed in to GitHive, not an Access caller. */
 function ForPeople({ what }: { what: string }) {
 	return (
 		<EmptyPage>
-			<h2>{what} belong to people signed in to GitHive</h2>
+			<h1>{what} belong to people signed in to GitHive</h1>
 			<p>
 				Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -454,7 +483,7 @@ function ForPeople({ what }: { what: string }) {
 function NotAnOperator() {
 	return (
 		<EmptyPage>
-			<h2>Admin is for GitHive's operators</h2>
+			<h1>Admin is for GitHive's operators</h1>
 			<p>
 				It's reached through Cloudflare Access, on GitHive's admin address.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -466,7 +495,7 @@ function NotAnOperator() {
 function NoAgentsHere() {
 	return (
 		<EmptyPage>
-			<h2>Agents belong to people signed in to GitHive</h2>
+			<h1>Agents belong to people signed in to GitHive</h1>
 			<p>
 				Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make some.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -482,7 +511,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 	const reason = hidden ? "It doesn't exist, or you aren't one of the people who can see it." : error;
 	return (
 		<EmptyPage>
-			<h2>{heading}</h2>
+			<h1>{heading}</h1>
 			<p>
 				{reason} <a href={href.repos()}>Back to Repositories</a>.
 			</p>
@@ -493,7 +522,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 function PageNotFound() {
 	return (
 		<EmptyPage>
-			<h2>Page not found</h2>
+			<h1>Page not found</h1>
 			<p>
 				<a href={href.repos()}>Go to Repositories</a>.
 			</p>
