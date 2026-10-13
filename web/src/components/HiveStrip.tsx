@@ -5,14 +5,16 @@ import { displayName } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
 import { needsYou } from "../lib/needsYou";
 import { counted } from "../lib/plural";
-import { timeAgo } from "../lib/relativeTime";
+import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { type ChangeState, STATES } from "../lib/status";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
 import { cn } from "../lib/utils";
+import { Icon, type IconName } from "./Icon";
 import { StateMark } from "./StateMark";
 import { Lamp } from "./ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 /**
  * Each stage, by the state its swatch shows (as tall as the count's digits, and level with them), and its count's
@@ -70,7 +72,7 @@ export function HiveStrip({
 	const stages = STAGES.filter(({ stage }) => stage !== "next" || upNext !== undefined);
 	return (
 		<header>
-			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} />
+			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} now={now} />
 			{!goals.length && !justFinished(stretch, now) ? (
 				<EmptyHive stretch={stretch} now={now} />
 			) : (
@@ -120,73 +122,153 @@ export function HiveStrip({
 	);
 }
 
+/** How many of what needs a person the banner lists; the rest are counted, and in the Inbox. */
+const NEEDS_ROWS = 3;
+
+/** One thing that needs a person, as a row of the banner: what kind, who and when, what about, and what to do. */
+interface NeedsRow {
+	key: string;
+	icon: IconName;
+	/** Who asks or waits, and how long ago: "mara/claude asks · 38m". */
+	lead: string;
+	/** The question, or what the vote or audit is about, on one line. */
+	text: string;
+	/** Quoted: an agent's own words. */
+	quoted?: boolean;
+	verb: string;
+	href: string;
+}
+
 /**
- * What waits on a person (see needsYou.ts): an agent's question, a vote only people may give, merges the audit flags.
- * Failed checks aren't here: the goal's row says its agent is fixing them.
+ * What needs a person, as the banner's rows (see needsYou.ts): agents' questions first, then votes only people may
+ * give, then the audit's open violations. Failed checks aren't here: the goal's row says its agent is fixing them.
  */
+export function needsRows(
+	repo: string,
+	goals: Goal[],
+	audit: RepoAudit | undefined,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">,
+	now: number,
+): NeedsRow[] {
+	const { changes, violations } = needsYou(snapshot, audit);
+	const titleOf = new Map(goals.map((goal) => [goal.change, goal.title]));
+	const activeOf = new Map(snapshot.claims.map((claim) => [claim.change, claim.active]));
+	// Where a person decides. A change's page; its decision once the page can be linked to it.
+	const decide = (change: string) => href.change(repo, change);
+	const rows: NeedsRow[] = changes.map((waiting) => {
+		if (waiting.kind === "question") {
+			const who = waiting.agent.startsWith("githive") ? "GitHive" : (displayName(waiting.agent) ?? waiting.agent);
+			return {
+				key: `ask:${waiting.change}`,
+				icon: "comment",
+				lead: `${who} ${who === "GitHive" ? "says" : "asks"} · ${shortAge(waiting.at, now)}`,
+				text: waiting.reason,
+				quoted: who !== "GitHive",
+				verb: "Answer",
+				href: decide(waiting.change),
+			};
+		}
+		const since = activeOf.get(waiting.change);
+		return {
+			key: `vote:${waiting.change}`,
+			icon: "user",
+			lead: `${titleOf.get(waiting.change) ?? waiting.change}${since ? ` · ${shortAge(since, now)}` : ""}`,
+			text: `waits for a ${waiting.role} vote, which only people may give`,
+			verb: `Vote as ${waiting.role}`,
+			href: decide(waiting.change),
+		};
+	});
+	if (violations)
+		rows.push({
+			key: "audit",
+			icon: "shield",
+			lead: "The audit",
+			text: `flags ${counted(violations, "merge")} to look at`,
+			verb: "See the audit",
+			href: href.repo(repo, "audit"),
+		});
+	return rows;
+}
+
+/** What needs a person: up to three rows, then how many more the Inbox has. It slides open and shut. */
 function NeedsYou({
 	repo,
 	goals,
 	audit,
 	snapshot,
+	now,
 }: {
 	repo: string;
 	goals: Goal[];
 	audit: RepoAudit | undefined;
 	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
+	now: number;
 }) {
-	const { changes, violations } = needsYou(snapshot, audit);
-	const titleOf = new Map(goals.map((goal) => [goal.change, goal.title]));
-	const line =
-		changes.length || violations ? (
-			<p
-				className={cn(
-					"m-0 mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-md border border-bad/45 bg-bad-soft px-3 py-2 text-body-sm",
-					"[&_a+a]:before:mr-3.5 [&_a+a]:before:text-muted-foreground [&_a+a]:before:content-['·']",
-				)}
-			>
-				<span className="inline-flex items-center gap-2 font-bold text-bad">
-					<Lamp state="needs-person" />
-					{STATES["needs-person"].label}:
-				</span>
-				{changes.map((waiting) =>
-					waiting.kind === "question" ? (
-						<a key={waiting.change} href={href.change(repo, waiting.change)} title={waiting.reason}>
-							{waiting.agent === "githive" ? "GitHive" : (displayName(waiting.agent) ?? waiting.agent)}
-							{waiting.agent === "githive" ? ": " : " asks "}“{brief(waiting.reason)}”
+	const rows = needsRows(repo, goals, audit, snapshot, now);
+	const shown = rows.slice(0, NEEDS_ROWS);
+	const more = rows.length - shown.length;
+	const box = rows.length ? (
+		<section
+			className="mb-3 rounded-md border border-bad/45 bg-bad-soft px-3 pt-2 pb-2.5"
+			aria-labelledby="needs-person-title"
+		>
+			<h2 id="needs-person-title" className="m-0 mb-1.5 inline-flex items-center gap-2 text-body-sm font-bold text-bad">
+				<Lamp state="needs-person" />
+				{STATES["needs-person"].label}
+			</h2>
+			<ul className="m-0 grid list-none gap-1.5 p-0">
+				{shown.map((row) => (
+					// One line on a wide screen; on a narrow one who and the verb, then the question under them.
+					<li
+						key={row.key}
+						className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2.5 gap-y-0.5 text-body-sm"
+					>
+						<Icon name={row.icon} size={14} className="relative top-0.5 row-start-1 self-start text-bad" />
+						<span className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-baseline gap-x-2 to-640:contents">
+							<span className="max-w-full truncate font-semibold to-640:col-start-2 to-640:row-start-1">
+								{row.lead}
+							</span>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span
+										tabIndex={0}
+										className="min-w-0 flex-[1_1_14rem] truncate text-foreground to-640:col-span-2 to-640:col-start-2 to-640:row-start-2"
+									>
+										{row.quoted ? `“${row.text}”` : row.text}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent align="start">{row.text}</TooltipContent>
+							</Tooltip>
+						</span>
+						<a className="col-start-3 row-start-1 font-semibold whitespace-nowrap" href={row.href}>
+							{row.verb} <span aria-hidden="true">→</span>
 						</a>
-					) : (
-						<a key={waiting.change} href={href.change(repo, waiting.change)}>
-							{titleOf.get(waiting.change) ?? waiting.change} needs a {waiting.role} vote from a person
-						</a>
-					),
-				)}
-				{violations ? (
-					<a href={href.repo(repo, "audit")}>{counted(violations, "merge")} for the audit to look at</a>
-				) : null}
-			</p>
-		) : null;
-	// The line slides open when something needs a person and shut when nothing does, showing what it last said
-	// while it closes.
-	const last = useRef(line);
-	if (line) last.current = line;
+					</li>
+				))}
+			</ul>
+			{more ? (
+				<p className="m-0 mt-1.5 pl-6 text-ui">
+					<a href={href.inbox()}>+{more} more in the Inbox</a>
+				</p>
+			) : null}
+		</section>
+	) : null;
+	// The box slides open when something needs a person and shut when nothing does, showing what it last said while
+	// it closes.
+	const last = useRef(box);
+	if (box) last.current = box;
 	return (
 		<div
 			className={cn(
 				"grid [transition:grid-template-rows_0.4s_ease,opacity_0.3s_ease] *:min-h-0 *:overflow-hidden",
-				line ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0",
+				box ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0",
 			)}
-			inert={!line}
+			inert={!box}
 		>
-			<div>{line ?? last.current}</div>
+			<div>{box ?? last.current}</div>
 		</div>
 	);
 }
-
-/** How much of a question the line quotes; the rest is in its tooltip and on the change's page. */
-const QUOTED = 90;
-
-const brief = (text: string) => (text.length > QUOTED ? `${text.slice(0, text.lastIndexOf(" ", QUOTED - 1))}…` : text);
 
 /** The recap once a stretch of work has landed and nothing's in flight. */
 function AllLanded({

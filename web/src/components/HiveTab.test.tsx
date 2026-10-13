@@ -70,10 +70,24 @@ describe("the Hive tab", () => {
 		const text = visibleText(
 			render({ snapshot: { ...repoSnapshot, claims: [claim("ask", { attention })], votes: [] } }),
 		);
-		expect(text).toContain("Needs a person:");
-		expect(text).toContain("agent-12 asks “should sendFile follow symlinks?”");
+		// A row each: who asks and how long ago, the question on one line, and what to do about it.
+		expect(text).toContain("Needs a person agent-12 asks · 1m “should sendFile follow symlinks?” Answer →");
 		// The fixture's audit flags a merge.
-		expect(text).toContain("1 merge for the audit to look at");
+		expect(text).toContain("The audit flags 1 merge to look at See the audit →");
+	});
+
+	it("lists three things that need a person, and says how many more the Inbox has", () => {
+		const asks = ["a", "b", "c", "d"].map((change, index) =>
+			claim(change, { attention: { reason: `question ${change}?`, agent: "agent-12", at: ago(index + 1) } }),
+		);
+		const html = render({ snapshot: { ...repoSnapshot, claims: asks, votes: [] } });
+		const banner = /aria-labelledby="needs-person-title".*?<\/section>/.exec(html)![0];
+		const text = visibleText(banner);
+		expect(text).toContain("question c?");
+		expect(text).not.toContain("question d?");
+		// The fourth question and the audit's flag.
+		expect(text).toContain("+2 more in the Inbox");
+		expect(banner).toContain('href="#/inbox"');
 	});
 
 	it("asks a person for a vote only people may give, and leaves failed checks to the goal's own row", () => {
@@ -99,8 +113,9 @@ describe("the Hive tab", () => {
 		const text = visibleText(
 			render({ snapshot: { ...repoSnapshot, policy, claims, votes: [checks], audit: undefined }, landing }),
 		);
-		expect(text).toContain("Needs a person:");
-		expect(text).toContain("Bump the router needs a security vote from a person");
+		expect(text).toContain(
+			"Bump the router · 1m waits for a security vote, which only people may give Vote as security →",
+		);
 		expect(text).not.toContain("its checks failed");
 		expect(text).toContain("checks failed, fixing");
 	});
