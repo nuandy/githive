@@ -368,6 +368,7 @@ export function RepoPage({
 		<>
 			<RepoHeader
 				name={repo}
+				heading={view.kind !== "change"}
 				badges={
 					snapshot ? (
 						<>

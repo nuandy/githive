@@ -50,6 +50,7 @@ export function RepoHeader({
 	current,
 	homeHref,
 	live = "off",
+	heading = true,
 	badges,
 	aside,
 }: {
@@ -58,22 +59,28 @@ export function RepoHeader({
 	current: string;
 	homeHref: string;
 	live?: LiveStatus;
+	/** The name is the page's heading, unless the page has one of its own (a change's title). */
+	heading?: boolean;
 	/** Badges after the name, e.g. how claims are kept. */
 	badges?: ReactNode;
 	/** Beside the name: the GitHub repo it's connected to, say. */
 	aside?: ReactNode;
 }) {
+	const Name = heading ? "h1" : "p";
 	return (
 		<div className="border-b border-border bg-card">
 			<div className="mx-auto max-w-(--page-width) px-6 pt-4.5 to-560:px-4 to-560:pt-3.5">
 				<div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-					<h1 className="flex flex-wrap items-center gap-2 text-title font-normal tracking-[-0.01em]">
-						<Icon name="repo" className="text-muted-foreground" />
-						<a className="font-semibold wrap-anywhere" href={homeHref}>
-							{name}
-						</a>
+					{/* The heading is the name alone; the badges sit beside it in the same type. */}
+					<div className="flex flex-wrap items-center gap-2 text-title leading-[1.2] tracking-[-0.01em]">
+						<Name className="flex flex-wrap items-center gap-2 font-normal">
+							<Icon name="repo" className="text-muted-foreground" />
+							<a className="font-semibold wrap-anywhere" href={homeHref}>
+								{name}
+							</a>
+						</Name>
 						{badges}
-					</h1>
+					</div>
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 						{aside}
 						<LiveDot status={live} />
