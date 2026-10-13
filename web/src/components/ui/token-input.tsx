@@ -1,11 +1,11 @@
 import { type KeyboardEvent, useId, useRef, useState } from "react";
-import { addTyped, suggest, type TokenOption } from "../../lib/tokens";
+import { addTyped, enterChoice, suggest, type TokenOption } from "../../lib/tokens";
 import { cn } from "../../lib/utils";
 import { Icon } from "../Icon";
 
 // A list chosen as tokens, in a field's box: each chosen value a chip with a ×, then a text field that offers what
-// matches as you type (a combobox and its listbox). Enter or a comma adds what's typed, or the option lit; Backspace in
-// an empty field takes the last chip back; Escape closes the list. What's chosen is a list of strings: the token input
+// matches as you type (a combobox and its listbox). Enter or a comma adds what's typed; the arrow keys light an option
+// for Enter to add instead; Backspace in an empty field takes the last chip back; Escape closes the list. What's chosen is a list of strings: the token input
 // only chooses them, so the form saves the very strings it would have had typed.
 
 export function TokenInput({
@@ -42,7 +42,8 @@ export function TokenInput({
 }) {
 	const [typed, setTyped] = useState("");
 	const [open, setOpen] = useState(false);
-	// The option lit by typing or the arrows: none until then, so Enter in an untouched field still submits the form.
+	// The option the arrow keys lit: none until then, so Enter adds what's typed ("pay" stays "pay", though payments is
+	// offered), or in an untouched field submits the form.
 	const [active, setActive] = useState(-1);
 	const input = useRef<HTMLInputElement>(null);
 	const listId = `${useId()}-options`;
@@ -61,7 +62,7 @@ export function TokenInput({
 	};
 	const type = (text: string) => {
 		setOpen(true);
-		setActive(text.trim() ? 0 : -1);
+		setActive(-1);
 		// A comma ends what came before it.
 		const cut = text.lastIndexOf(",");
 		if (cut === -1) return setTyped(text);
@@ -81,12 +82,10 @@ export function TokenInput({
 			});
 		} else if (event.key === "Enter") {
 			// With nothing typed or lit, Enter submits the form as in any field.
-			if (open && lit) {
+			const chosen = enterChoice(typed, options, open ? lit : undefined);
+			if (chosen !== null) {
 				event.preventDefault();
-				add(lit.value);
-			} else if (typed.trim()) {
-				event.preventDefault();
-				add(typed);
+				add(chosen);
 			}
 		} else if (event.key === "Escape" && open && shown.length) {
 			event.stopPropagation();
@@ -185,15 +184,15 @@ export function TokenInput({
 						role="option"
 						aria-selected={option === lit}
 						className={cn(
-							"grid cursor-pointer gap-px rounded-sm px-2 py-1.5",
-							option === lit && "bg-link-soft text-link",
+							"grid cursor-pointer gap-px rounded-sm px-2 py-1.5 transition-colors duration-fast",
+							option === lit ? "bg-link-soft text-link" : "hover:bg-accent",
 						)}
-						// Chosen before the field loses focus, so the blur doesn't take what's typed instead.
+						// Chosen before the field loses focus, so the blur doesn't take what's typed instead. The pointer
+						// only shades an option: Enter adds what the arrows lit, or what's typed.
 						onMouseDown={(event) => {
 							event.preventDefault();
 							add(option.value);
 						}}
-						onMouseEnter={() => setActive(index)}
 					>
 						<span className="font-semibold">{option.label}</span>
 						{option.detail ? (

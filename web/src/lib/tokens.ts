@@ -103,6 +103,18 @@ export function suggest(options: TokenOption[], typed: string, chosen: string[])
 	return [...starts, ...within];
 }
 
+/**
+ * What Enter adds in a token input: the option the arrow keys lit, else the option whose words or value are what's
+ * typed, else what's typed as it is; null with nothing typed or lit, so Enter submits the form.
+ */
+export function enterChoice(typed: string, options: TokenOption[], lit: TokenOption | undefined): string | null {
+	if (lit) return lit.value;
+	const text = typed.trim().toLowerCase();
+	if (!text) return null;
+	const exact = options.find((option) => [option.value, option.label].some((words) => words.toLowerCase() === text));
+	return exact ? exact.value : typed;
+}
+
 /** What's wrong with a role's name, saying how to fix it; null for a good one. */
 export function roleProblem(role: string): string | null {
 	return ROLE.test(role)
