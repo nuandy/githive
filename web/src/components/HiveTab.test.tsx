@@ -57,9 +57,10 @@ describe("the Hive tab", () => {
 		const text = visibleText(html);
 		expect(text).toContain("✓ 1 landed");
 		expect(text).toContain("Wire up the game src/main.js");
-		// The brief is one click away, not in the row.
+		// The brief is one click away, not in the row; the title goes to the change, and the chevron opens the row.
 		expect(text).not.toContain("put the game together");
-		expect(html).toContain(`title="${BRIEF.replace(/'/g, "&#x27;")}"`);
+		expect(html).toMatch(/<a [^>]*href="#\/repos\/acme\/web\/changes\/app"[^>]*>Wire up the game src\/main.js<\/a>/);
+		expect(html).toMatch(/<button [^>]*aria-expanded="false" aria-controls="steps-app" aria-label="Steps of Wire up/);
 		expect(text).not.toContain("an agent");
 		expect(text).not.toContain("bfa0f510");
 	});
@@ -69,10 +70,24 @@ describe("the Hive tab", () => {
 		const text = visibleText(
 			render({ snapshot: { ...repoSnapshot, claims: [claim("ask", { attention })], votes: [] } }),
 		);
-		expect(text).toContain("Needs a person:");
-		expect(text).toContain("agent-12 asks “should sendFile follow symlinks?”");
+		// A row each: who asks and how long ago, the question on one line, and what to do about it.
+		expect(text).toContain("Needs a person agent-12 asks · 1m “should sendFile follow symlinks?” Answer →");
 		// The fixture's audit flags a merge.
-		expect(text).toContain("1 merge for the audit to look at");
+		expect(text).toContain("The audit flags 1 merge to look at See the audit →");
+	});
+
+	it("lists three things that need a person, and says how many more the Inbox has", () => {
+		const asks = ["a", "b", "c", "d"].map((change, index) =>
+			claim(change, { attention: { reason: `question ${change}?`, agent: "agent-12", at: ago(index + 1) } }),
+		);
+		const html = render({ snapshot: { ...repoSnapshot, claims: asks, votes: [] } });
+		const banner = /aria-labelledby="needs-person-title".*?<\/section>/.exec(html)![0];
+		const text = visibleText(banner);
+		expect(text).toContain("question c?");
+		expect(text).not.toContain("question d?");
+		// The fourth question and the audit's flag.
+		expect(text).toContain("+2 more in the Inbox");
+		expect(banner).toContain('href="#/inbox"');
 	});
 
 	it("asks a person for a vote only people may give, and leaves failed checks to the goal's own row", () => {
@@ -98,8 +113,9 @@ describe("the Hive tab", () => {
 		const text = visibleText(
 			render({ snapshot: { ...repoSnapshot, policy, claims, votes: [checks], audit: undefined }, landing }),
 		);
-		expect(text).toContain("Needs a person:");
-		expect(text).toContain("Bump the router needs a security vote from a person");
+		expect(text).toContain(
+			"Bump the router · 1m waits for a security vote, which only people may give Vote as security →",
+		);
 		expect(text).not.toContain("its checks failed");
 		expect(text).toContain("checks failed, fixing");
 	});
@@ -144,6 +160,43 @@ describe("the Hive tab", () => {
 		const text = visibleText(render({ snapshot: empty, landing }));
 		expect(text).toContain("No agents in the hive now");
 		expect(text).toContain("Its last stretch of work finished");
+	});
+
+	it("opens as its address says: the window, the view, the agent shown and the row open", () => {
+		const claims = [claim("ipv6", { head: "a1" }), claim("brotli", { agent: "carol-claude", intent: "Add brotli" })];
+		const html = render({
+			snapshot: { ...repoSnapshot, claims, votes: [] },
+			query: { window: 6 * 60 * 60_000, view: "timeline", agent: "agent-12", row: "ipv6" },
+		});
+		expect(html).toContain('data-view="timeline"');
+		expect(html).toMatch(/aria-pressed="true"[^>]*>6 h</);
+		expect(visibleText(html)).toContain("only agent-12 ×");
+		expect(html).toMatch(/aria-expanded="true" aria-controls="steps-ipv6"/);
+	});
+
+	it("asks for an answer on a change's page only when it needs a person, never while it's building", () => {
+		const awaiting = { approved: false, approvals: 0, required: 1, vetoedBy: [], awaiting: ["security"] };
+		const attention = { reason: "may I bump the router?", agent: "agent-12", at: ago(1) };
+		const open = (extra: Partial<Claim>) =>
+			visibleText(
+				render({ snapshot: { ...repoSnapshot, claims: [claim("x", extra)], votes: [] }, query: { row: "x" } }),
+			);
+		// Still building, though a role waits to vote on it once it's pushed.
+		expect(open({ approval: awaiting })).toContain("Open the change →");
+		expect(open({ approval: awaiting })).not.toContain("Answer it on its page");
+		expect(open({ attention })).toContain("Answer it on its page →");
+	});
+
+	it("gets someone who can write started: the command that connects an agent, a prompt naming the repo", () => {
+		const empty = { ...repoSnapshot, claims: [], votes: [] };
+		const html = render({ snapshot: empty, writes: true, origin: "https://githive.app" });
+		const text = visibleText(html);
+		expect(text).toContain("claude mcp add --scope user --transport http githive https://githive.app/mcp");
+		expect(text).toContain("Use GitHive to find one small improvement and land it in acme/web.");
+		expect(text).toContain("Waiting for the first claim…");
+		// A visitor is told where agents come from, as before.
+		expect(visibleText(render({ snapshot: empty }))).toContain("Connect an agent from the Agents page");
+		expect(visibleText(render({ snapshot: empty }))).not.toContain("claude mcp add");
 	});
 
 	it("shows up next only when it knows the backlog", () => {

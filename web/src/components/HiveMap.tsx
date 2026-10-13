@@ -1,60 +1,90 @@
-import { type CSSProperties, type KeyboardEvent, useEffect, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useFresh } from "../hooks/useFresh";
 import { useLeaving } from "../hooks/useLeaving";
-import { hexGrid, hexPoints } from "../lib/hexGeometry";
-import { agentChip, type Cell, type CellState, type HiveCells, LANDED_LATELY_MS } from "../lib/hiveCells";
+import { displayName } from "../lib/agent";
+import { type Goal, goalStatus } from "../lib/goals";
+import { type Direction, hexGrid, hexPoints, hexWidthAt, nearestInDirection } from "../lib/hexGeometry";
+import {
+	agentChip,
+	agentHue,
+	type Cell,
+	type CellState,
+	fitLines,
+	type HiveCells,
+	HUE_STROKE,
+	cellNames,
+	LANDED_LATELY_MS,
+	sansWidth,
+} from "../lib/hiveCells";
 import type { GoalMotion, Motion } from "../lib/hiveMotion";
 import { timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
+import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { type ChangeState, STATES } from "../lib/status";
 import { cn } from "../lib/utils";
 import type { HiveFilter } from "./HiveTab";
 import { StateMark } from "./StateMark";
+import { Button } from "./ui/button";
+import { Popover, PopoverAnchor, PopoverContent } from "./ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-/** A cell's corner-to-center size, in px. */
-const RADIUS = 34;
+/** A cell's corner-to-center size, in px: eleven letters of a name fit across it at 10px, and four cells a phone. */
+const RADIUS = 45.75;
 const GAP = 2.5;
-/** Room above a cluster's first row for the chips that sit on its cells' tops. */
-const TOP = 8;
+/** The hexagon as drawn, inside its gap. */
+const DRAWN = RADIUS - GAP;
 /** How many columns the map draws before it has measured its box. */
-const COLUMNS = 7;
-/** Chips a cell shows before "+n". */
+const COLUMNS = 5;
+/** Chips a cell shows; past that, one fewer and "+n". */
 const CHIPS = 3;
+
+/** The map's type: nothing smaller than 10px, a name in the mono face and a state's words in the sans. */
+const TYPE = 10;
+/** Overpass Mono's letters are 0.616 of their size wide. */
+const MONO = 0.616;
+/** Room kept clear inside a cell's edge, either side. */
+const INSET = 3;
+/** A line of words, baseline to baseline. */
+const LEADING = 11;
+
+/** The room a name has across a cell's middle. */
+const NAME_ROOM = hexWidthAt(DRAWN, 0) - 2 * INSET;
+/** How many letters of a name a cell shows: what fits, and one more drawn a little closer together. */
+const NAME_FITS = Math.floor(NAME_ROOM / (TYPE * MONO)) + 1;
+
+/** Chips sit in a row inside the cell's top, overlapping a little, clear of its edges. */
+const CHIP_R = 10;
+const CHIP_Y = -22;
+const CHIP_STEP = 15.5;
 
 /** A cell's state in words, the same on the cell as in its name: its goal's state's (see status.ts). */
 const stateWords = (state: CellState) => (state === "next" ? "up next" : state === "free" ? "" : STATES[state].short);
 
-/** How many characters of a name fit in a cell. */
-const NAME_FITS = 10;
-
-/** A name cut to fit a cell: its extension goes first ("res.sendFile.js" → "res.sendF…"). */
-function fitName(name: string): string {
-	if (name.length <= NAME_FITS) return name;
-	const bare = name.replace(/\.[A-Za-z0-9]{1,5}$/, "");
-	return bare.length <= NAME_FITS ? bare : `${bare.slice(0, NAME_FITS - 1)}…`;
+/**
+ * Where a cell's words go: its name, then its state on up to two lines under it. Under a row of chips the words sit
+ * below them; with none they're centered.
+ */
+function layout(lines: number, chips: boolean): { name: number; words: number[] } {
+	const top = chips ? -7.5 : -(TYPE + LEADING * lines) / 2;
+	const name = top + 7.5;
+	return { name, words: Array.from({ length: lines }, (_, index) => name + 12 + LEADING * index) };
 }
 
-/** A deep cell's folder, above its name, cut from the front: "…uth/src/". */
-function fitParent(parent: string): string {
-	const shown = `${parent}/`;
-	return shown.length <= NAME_FITS + 1 ? shown : `…${shown.slice(-NAME_FITS)}`;
-}
+/** The room a line of words has at its baseline: the cell's width at the bottom of its letters, less the inset. */
+const roomAt = (baseline: number) => hexWidthAt(DRAWN, baseline + 3) - 2 * INSET;
 
-/** Past this many letters a state's words take two lines under the name, split where they're most even. */
-const WORDS_FIT = 12;
-
-function wordLines(words: string): string[] {
-	if (words.length <= WORDS_FIT) return [words];
-	let best = -1;
-	for (let at = words.indexOf(" "); at >= 0; at = words.indexOf(" ", at + 1))
-		if (best < 0 || Math.abs(words.length / 2 - at) < Math.abs(words.length / 2 - best)) best = at;
-	return best < 0 ? [words] : [words.slice(0, best), words.slice(best + 1)];
+/** A cell's state words on as many lines as they need (two at most), each fitting the cell where it sits. */
+function wordLines(words: string, chips: boolean): string[] {
+	if (!words) return [];
+	const width = (text: string) => sansWidth(text, TYPE);
+	return fitLines(words, layout(2, chips).words.map(roomAt), width);
 }
 
 /**
  * A cell in each state: its outline and tint, its name's color and its state's. Free cells are dim; the rest take
- * their stage's color. Tints are fill opacities, not mixed colors: Chrome animates a color-mix() through garbage
+ * their stage's color, and their words the text color made for it: amber's words in --warn, and a cell that needs a
+ * person, filled, in ink. Tints are fill opacities, not mixed colors: Chrome animates a color-mix() through garbage
  * colors. A cell landed lately fades as the landing gets older (--fade from 1 to 0).
  */
 const LOOK: Record<CellState, { shape: string; name: string; sub: string }> = {
@@ -63,39 +93,39 @@ const LOOK: Record<CellState, { shape: string; name: string; sub: string }> = {
 	building: {
 		shape: "fill-stage-building [fill-opacity:0.24] stroke-stage-building",
 		name: "fill-foreground",
-		sub: "fill-stage-building",
+		sub: "fill-link",
 	},
 	"in-review": {
 		shape: "fill-stage-review [fill-opacity:0.09] stroke-stage-review [stroke-dasharray:5_3]",
 		name: "fill-foreground",
-		sub: "fill-stage-review",
+		sub: "fill-link",
 	},
 	approved: { shape: "fill-good [fill-opacity:0.1] stroke-good", name: "fill-foreground", sub: "fill-good" },
 	landing: {
 		shape: "fill-stage-landing [fill-opacity:0.18] stroke-stage-landing",
 		name: "fill-foreground",
-		sub: "fill-stage-landing",
+		sub: "fill-warn",
 	},
 	"changes-requested": {
 		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
 		name: "fill-foreground",
-		sub: "fill-stage-asking",
+		sub: "fill-bad",
 	},
 	"checks-failed": {
 		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
 		name: "fill-foreground",
-		sub: "fill-stage-asking",
+		sub: "fill-bad",
 	},
 	"needs-person": {
-		shape: "fill-stage-asking [fill-opacity:0.3] stroke-stage-asking",
+		shape: "fill-stage-asking [fill-opacity:0.3] stroke-stage-asking stroke-2",
 		name: "fill-foreground",
-		sub: "fill-stage-asking",
+		sub: "fill-foreground font-bold",
 	},
 	landed: {
 		shape:
-			"fill-stage-landed [fill-opacity:calc(0.06+0.18*var(--fade,1))] stroke-stage-landed [stroke-opacity:calc(0.3+0.45*var(--fade,1))]",
+			"fill-stage-landed [fill-opacity:calc(0.04+0.14*var(--fade,1))] stroke-stage-landed [stroke-opacity:calc(0.3+0.45*var(--fade,1))]",
 		name: "",
-		sub: "fill-stage-landed",
+		sub: "fill-good",
 	},
 };
 
@@ -109,14 +139,16 @@ const SHAPE_MOTION: Partial<Record<Motion, string>> = {
 	approved: "animate-hive-cell-pulse",
 };
 
-// The SVG's words: in the map's mono face, or its sans one for states and chips, centered under their point.
-const NAME = "pointer-events-none font-mono text-[9px] font-normal";
-const SMALL = "pointer-events-none text-[7.5px]";
+// The SVG's words: a name in the map's mono face, a state and a chip in its sans one, centered on their point.
+const NAME = "pointer-events-none font-mono text-[10px] font-normal";
+const WORDS = "pointer-events-none font-sans text-[10px] font-semibold";
 
 export interface HiveMapProps {
 	repo: string;
 	branch: string;
 	cells?: HiveCells;
+	/** The goals, for a cell's details. */
+	goals?: Goal[];
 	truncated?: boolean;
 	error?: string;
 	/** Cells of the goal pointed at in the goals panel. */
@@ -132,11 +164,15 @@ export interface HiveMapProps {
 /**
  * The repo as a honeycomb: each busy top-level folder opened up to the paths agents are on, the rest of the repo
  * folded. A cell's color is its stage (the strip above is its key); chips on it are the agents at work there.
+ *
+ * The map is one stop for the keyboard: the arrow keys move between cells, Enter or Space picks one as a click does,
+ * and its details open beside it; Escape closes them and comes back to the cell.
  */
 export function HiveMap({
 	repo,
 	branch,
 	cells,
+	goals,
 	truncated,
 	error,
 	lit,
@@ -151,16 +187,19 @@ export function HiveMap({
 	const columns = width ? Math.max(3, Math.floor((width - cellWidth / 2) / cellWidth)) : COLUMNS;
 	const picked = filter?.kind === "cell" ? filter.key : undefined;
 	const status = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
-	const pickedCell = picked
-		? cells?.clusters.flatMap((cluster) => cluster.cells).find((cell) => cell.key === picked)
-		: undefined;
+	const all = cells?.clusters.flatMap((cluster) => cluster.cells) ?? [];
 	// Whether a cell, chip or cluster has only just appeared: the map opens settled, and only what comes later arrives.
 	const fresh = useFresh(!!cells, FRESH_MS);
 	const laid = (cells?.clusters ?? []).map((cluster) => {
-		const grid = hexGrid(cluster.cells.length, columns, RADIUS, TOP);
+		const grid = hexGrid(cluster.cells.length, columns, RADIUS);
+		// Names cut so the cells side by side still read apart.
+		const names = cellNames(
+			cluster.cells.map((cell) => cell.name),
+			NAME_FITS,
+		);
 		const placed = cluster.cells.flatMap((cell, index) => {
 			const center = grid.centers[index];
-			return center ? [{ cell, cluster: cluster.key, x: center.x, y: center.y }] : [];
+			return center ? [{ cell, cluster: cluster.key, x: center.x, y: center.y, name: names[index]! }] : [];
 		});
 		return { cluster, grid, placed };
 	});
@@ -170,27 +209,71 @@ export function HiveMap({
 		(each) => each.cell.key,
 		LEAVING_MS,
 	);
+
+	// The one cell the keyboard reaches with Tab: the last one focused, else the one picked, else the first.
+	const [active, setActive] = useState<string | null>(null);
+	const has = (key: string | null | undefined): key is string => !!key && all.some((cell) => cell.key === key);
+	const reachable = has(active) ? active : has(picked) ? picked : all[0]?.key;
+	const elements = useRef(new Map<string, SVGGElement>());
+	const focusCell = (key: string) => elements.current.get(key)?.focus();
+	const move = (event: KeyboardEvent<HTMLDivElement>) => {
+		const direction = ARROWS[event.key];
+		const home = event.key === "Home" || event.key === "End";
+		if (!direction && !home) return;
+		const from = (event.target as Element).closest<SVGGElement>("[data-cell]")?.dataset.cell;
+		if (!from) return;
+		event.preventDefault();
+		if (home) {
+			const key = event.key === "Home" ? all[0]?.key : all[all.length - 1]?.key;
+			if (key) focusCell(key);
+			return;
+		}
+		const centers = [...elements.current].map(([key, element]) => {
+			const box = element.getBoundingClientRect();
+			return { key, x: box.left + box.width / 2, y: box.top + box.height / 2 };
+		});
+		const here = centers.find((center) => center.key === from);
+		const to = here && nearestInDirection(here, centers, direction!);
+		if (to) focusCell(to);
+	};
+
+	// A cell's details, opened by a click, a tap or Enter, beside it.
+	const [opened, setOpened] = useState<string | null>(null);
+	const openedCell = all.find((cell) => cell.key === opened);
+	const anchor = useRef<SVGGElement | null>(null);
+	anchor.current = openedCell ? (elements.current.get(openedCell.key) ?? null) : null;
+	// Closed by a click elsewhere, focus stays where that click put it; closed by Escape, it comes back to the cell.
+	const outside = useRef(false);
+	const pick = (cell: Cell) => {
+		setOpened(picked === cell.key ? null : cell.key);
+		onPick(cell);
+	};
+
 	return (
-		<section className="min-w-0" aria-labelledby="hive-map-title">
+		<section className="min-w-0" aria-labelledby="hive-map-title" aria-describedby="hive-map-keys">
 			<div className="mb-1.5 flex items-baseline gap-2.5">
 				<h2 id="hive-map-title" className="m-0 text-lead">
 					The hive
 				</h2>
 				<span className="text-ui text-muted-foreground">{branch}, opened up where agents work</span>
 			</div>
+			<p id="hive-map-keys" className="sr-only">
+				The arrow keys move between cells; Enter shows a cell's goals and details.
+			</p>
 			{cells?.clusters.length ? <RedKey /> : null}
 			{!cells ? <p className="my-[1em] text-muted-foreground">{status}</p> : null}
 			{cells && !cells.clusters.length ? (
 				<p className="my-[1em] text-muted-foreground">{branch} has no files yet.</p>
 			) : null}
-			<div ref={boxRef}>
+			{/* Drawn at its own size, never scaled down: a box too narrow for three cells scrolls instead. */}
+			<div ref={boxRef} className="overflow-x-auto" onKeyDown={move}>
 				{laid.map(({ cluster, grid, placed }) => (
 					// A cluster that opens later (a folder agents start on) eases in.
 					<div
 						key={cluster.key || "~rest"}
 						className={cn(fresh(`cluster:${cluster.key}`) && "animate-hive-cluster-in")}
 					>
-						<h3 className="mx-0 mt-2.5 mb-0.5 text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase">
+						<h3 className="mx-0 mt-2.5 mb-1 text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase">
 							{cluster.label}
 						</h3>
 						{/* The comb's height eases as cells come and go, so what's below doesn't jump. */}
@@ -200,30 +283,46 @@ export function HiveMap({
 								viewBox={`0 0 ${grid.width} ${grid.height}`}
 								width={grid.width}
 								height={grid.height}
-								style={{ maxWidth: "100%", height: "auto" }}
 								role="group"
 								aria-label={`${cluster.label}: ${counted(cluster.cells.length, "cell")}`}
 							>
-								{placed.map(({ cell, x, y }) => (
+								{placed.map(({ cell, x, y, name }) => (
 									<HexCell
 										key={cell.key}
 										cell={cell}
+										name={name}
 										x={x}
 										y={y}
 										lit={lit.has(cell.key)}
 										picked={picked === cell.key}
+										popped={opened === cell.key}
+										reachable={reachable === cell.key}
 										dim={dims(cell, filter)}
 										motion={cell.goals.map((key) => motions.get(key)).find(Boolean)}
 										fresh={fresh}
 										onHover={onHover}
-										onPick={onPick}
+										onPick={pick}
+										onFocused={setActive}
+										element={(element) => {
+											if (element) elements.current.set(cell.key, element);
+											else elements.current.delete(cell.key);
+										}}
 										now={now}
 									/>
 								))}
 								{leaving
 									.filter((gone) => gone.cluster === cluster.key)
-									.map(({ cell, x, y }) => (
-										<HexCell key={`gone:${cell.key}`} cell={cell} x={x} y={y} leaving fresh={fresh} now={now} />
+									.map(({ cell, x, y, name }) => (
+										<HexCell
+											key={`gone:${cell.key}`}
+											cell={cell}
+											name={name}
+											x={x}
+											y={y}
+											leaving
+											fresh={fresh}
+											now={now}
+										/>
 									))}
 							</svg>
 						</div>
@@ -236,14 +335,54 @@ export function HiveMap({
 					This repo is large: the map shows the first part of its tree.
 				</p>
 			) : null}
-			{pickedCell && pickedCell.kind !== "files" && !pickedCell.planned ? (
-				<p className={NOTE}>
-					<code>{pickedCell.path}</code> · <a href={href.code(repo, pickedCell.path, branch)}>Open in Code</a>
-				</p>
-			) : null}
+			<Popover
+				open={!!openedCell}
+				onOpenChange={(open) => {
+					if (!open) setOpened(null);
+				}}
+			>
+				<PopoverAnchor virtualRef={anchor} />
+				{openedCell ? (
+					<PopoverContent
+						// Beside the cell where there's room, and under it on a phone.
+						side={wide(anchor.current) ? "right" : "bottom"}
+						align={wide(anchor.current) ? "start" : "center"}
+						collisionPadding={12}
+						aria-label={cellPlace(openedCell)}
+						onInteractOutside={() => {
+							outside.current = true;
+						}}
+						onCloseAutoFocus={(event) => {
+							event.preventDefault();
+							if (!outside.current) focusCell(openedCell.key);
+							outside.current = false;
+						}}
+					>
+						<CellDetails
+							repo={repo}
+							branch={branch}
+							cell={openedCell}
+							goals={goals ?? []}
+							picked={picked === openedCell.key}
+							onPick={() => pick(openedCell)}
+							now={now}
+						/>
+					</PopoverContent>
+				) : null}
+			</Popover>
 		</section>
 	);
 }
+
+/** Whether the window a cell is in has room for its details beside it. */
+const wide = (element: Element | null) => (element?.ownerDocument.defaultView?.innerWidth ?? 1280) >= 640;
+
+const ARROWS: Record<string, Direction> = {
+	ArrowUp: "up",
+	ArrowDown: "down",
+	ArrowLeft: "left",
+	ArrowRight: "right",
+};
 
 // A line under the map.
 const NOTE = "mx-0 mt-1.5 mb-0 text-ui";
@@ -260,7 +399,7 @@ function RedKey() {
 		>
 			{KEYED.map((state) => (
 				<li key={state} className="inline-flex items-center gap-1.5">
-					<StateMark state={state} className="size-3 rounded-xs" glyph="text-[8px]" />
+					<StateMark state={state} className="size-3.5 rounded-xs" />
 					{STATES[state].short}
 				</li>
 			))}
@@ -281,8 +420,8 @@ function dims(cell: Cell, filter: HiveFilter | null): boolean {
 	return !cell.agents.includes(filter.agent) && cell.landed?.agent !== filter.agent;
 }
 
-/** What a cell says to someone who can't see it, and in its tooltip. */
-export function cellLabel(cell: Cell): string {
+/** Where a cell is: its path, "lib/router/" for a folder, or what it folds together. */
+export function cellPlace(cell: Cell): string {
 	const where =
 		cell.kind === "files"
 			? cell.path
@@ -291,7 +430,12 @@ export function cellLabel(cell: Cell): string {
 			: cell.kind === "folder"
 				? `${cell.path}/`
 				: cell.path;
-	const what = cell.planned ? `${where} (new)` : where;
+	return cell.planned ? `${where} (new)` : where;
+}
+
+/** What a cell says to someone who can't see it, and in its tooltip. */
+export function cellLabel(cell: Cell): string {
+	const what = cellPlace(cell);
 	const agents = cell.agents.length ? `, ${cell.agents.join(", ")} at work` : "";
 	if (cell.state === "free") return `${what}: ${cell.kind === "file" ? "nobody on it" : counted(cell.files, "file")}`;
 	if (cell.state === "landed") return `${what}: ${cell.landed?.agent ?? "an agent"} landed a change here lately`;
@@ -299,25 +443,43 @@ export function cellLabel(cell: Cell): string {
 	return `${what}: ${stateWords(cell.state)}${agents}`;
 }
 
+/** The chips a cell shows: up to three agents, or two and "+n". */
+function chipsOf(cell: Cell): { agents: string[]; more: number } {
+	if (!cell.agents.length) return { agents: cell.landed ? [cell.landed.agent] : [], more: 0 };
+	if (cell.agents.length <= CHIPS) return { agents: cell.agents, more: 0 };
+	return { agents: cell.agents.slice(0, CHIPS - 1), more: cell.agents.length - (CHIPS - 1) };
+}
+
 function HexCell({
 	cell,
+	name,
 	x,
 	y,
 	lit = false,
 	picked = false,
+	popped = false,
+	reachable = false,
 	dim = false,
 	motion,
 	leaving = false,
 	fresh,
 	onHover,
 	onPick,
+	onFocused,
+	element,
 	now,
 }: {
 	cell: Cell;
+	/** Its name as shown, cut to fit. */
+	name: string;
 	x: number;
 	y: number;
 	lit?: boolean;
 	picked?: boolean;
+	/** Its details are open. */
+	popped?: boolean;
+	/** The map's one stop for Tab. */
+	reachable?: boolean;
 	dim?: boolean;
 	motion?: GoalMotion | undefined;
 	/** Gone: drawn a moment longer, fading, where it was. */
@@ -325,6 +487,8 @@ function HexCell({
 	fresh: (key: string) => boolean;
 	onHover?(cell: string | null): void;
 	onPick?(cell: Cell): void;
+	onFocused?(cell: string): void;
+	element?(element: SVGGElement | null): void;
 	now: number;
 }) {
 	// A cell that appears grows in; one that goes shrinks away where it was.
@@ -342,149 +506,237 @@ function HexCell({
 		cell.planned && cell.state === "free"
 			? "new"
 			: stateWords(cell.state) || (cell.kind === "file" ? "" : counted(cell.files, "file"));
-	// Words too long for one line take two, and the name and its folder move up to make room.
-	const lines = wordLines(sub);
-	const up = lines.length > 1 ? 3.5 : 0;
-	const chips = cell.agents.slice(0, CHIPS);
-	const extra = cell.agents.length - chips.length;
-	const chipY = -RADIUS + 3;
-	const chipX = (index: number, count: number) => (index - (count - 1) / 2) * 15;
+	const { agents, more } = chipsOf(cell);
+	const chipCount = agents.length + (more ? 1 : 0);
+	// Words too long for one line take two; they and the name sit under the chips, or centered without any.
+	const lines = wordLines(sub, chipCount > 0);
+	const at = layout(lines.length, chipCount > 0);
+	const chipX = (index: number) => (index - (chipCount - 1) / 2) * CHIP_STEP;
 	// A chip that appears pops on; on a goal that has just arrived, in its turn in the burst.
 	const chipClass = (agent: string) => {
 		const isFresh = fresh(`chip:${cell.key}:${agent}`);
 		const pops = motion?.motion === "arrived" ? "animate-hive-chip-arrive" : isFresh ? "animate-hive-chip-in" : "";
 		return cn("origin-center [transform-box:fill-box]", pops);
 	};
-	const chip = (landed = false, more = false) => ({
-		circle: cn(
-			"stroke-1",
-			landed ? "fill-background stroke-stage-landed" : "fill-surface-3 stroke-foreground",
-			more && "[stroke-dasharray:2_2]",
-		),
-		text: cn(SMALL, "font-sans font-bold", landed ? "fill-stage-landed" : "fill-foreground"),
-	});
 	const keys = (event: KeyboardEvent) => {
 		if (event.key === "Enter" || event.key === " ") {
 			event.preventDefault();
 			onPick?.(cell);
 		}
 	};
-	const interactive = leaving
-		? { "aria-hidden": true }
-		: {
-				role: "button",
-				tabIndex: 0,
-				"aria-label": label,
-				"aria-pressed": picked,
-				onMouseEnter: () => onHover?.(cell.key),
-				onMouseLeave: () => onHover?.(null),
-				onFocus: () => onHover?.(cell.key),
-				onBlur: () => onHover?.(null),
-				onClick: () => onPick?.(cell),
-				onKeyDown: keys,
-			};
-	return (
-		<g
-			data-state={cell.state}
-			className={cn(
-				// Each cell is moved into place by its transform, so it glides when the comb rearranges.
-				"group cursor-pointer outline-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]",
-				dim && "opacity-30",
-				leaving && "pointer-events-none",
-			)}
-			style={style}
-			{...interactive}
-		>
-			{leaving ? null : <title>{label}</title>}
-			<g className={cn("origin-center [transform-box:fill-box]", arriving)}>
-				<polygon
-					className={cn(
-						"fill-card stroke-border stroke-[1.5]",
-						"[transition:fill_0.4s_ease,fill-opacity_0.4s_ease,stroke_0.4s_ease,stroke-opacity_0.4s_ease,stroke-width_0.2s_ease]",
-						look.shape,
-						"group-hover:stroke-3",
-						lit && "stroke-3",
-						picked && "stroke-foreground stroke-3",
-						motion && SHAPE_MOTION[motion.motion],
-					)}
-					points={hexPoints(0, 0, RADIUS - GAP)}
-				/>
-				{/* Keyboard focus: the ring every focused thing has, hugging the cell in the gap before its neighbors. */}
-				<polygon
-					className="pointer-events-none fill-none stroke-ring stroke-2 opacity-0 group-focus-visible:opacity-100"
-					points={hexPoints(0, 0, RADIUS - GAP + 2)}
-				/>
-				{cell.state === "landing" ? (
-					<circle className="animate-hive-cell-blink fill-stage-landing" cx={0} cy={20} r={3.5} />
-				) : null}
-				{cell.parent ? (
-					<text
-						className="pointer-events-none fill-muted-foreground font-mono text-[7.5px] opacity-80"
-						textAnchor="middle"
-						x={0}
-						y={-10 - up}
-					>
-						{fitParent(cell.parent)}
-					</text>
-				) : null}
-				<text className={cn(NAME, look.name || "fill-muted-foreground")} textAnchor="middle" x={0} y={sub ? 2 - up : 4}>
-					{fitName(cell.name)}
+	const shape = (
+		<g className={cn("origin-center [transform-box:fill-box]", arriving)}>
+			<polygon
+				className={cn(
+					"fill-card stroke-border stroke-[1.5]",
+					"[transition:fill_0.4s_ease,fill-opacity_0.4s_ease,stroke_0.4s_ease,stroke-opacity_0.4s_ease,stroke-width_0.2s_ease]",
+					look.shape,
+					"group-hover:stroke-3",
+					lit && "stroke-3",
+					(picked || popped) && "stroke-foreground stroke-3",
+					motion && SHAPE_MOTION[motion.motion],
+				)}
+				points={hexPoints(0, 0, DRAWN)}
+			/>
+			{/* Keyboard focus: the ring every focused thing has, hugging the cell in the gap before its neighbors. */}
+			<polygon
+				className="pointer-events-none fill-none stroke-ring stroke-2 opacity-0 group-focus-visible:opacity-100"
+				points={hexPoints(0, 0, DRAWN + 2)}
+			/>
+			{cell.state === "landing" ? (
+				<circle className="animate-hive-cell-blink fill-stage-landing" cx={0} cy={DRAWN - 9} r={3.5} />
+			) : null}
+			<CellName cell={cell} name={name} y={at.name} className={look.name || "fill-muted-foreground"} />
+			{lines.length ? (
+				<text className={cn(WORDS, look.sub || "fill-muted-foreground")} textAnchor="middle" x={0} y={at.words[0]}>
+					{/* The space ends the first line, so the words read as written. */}
+					{lines.map((line, index) => (
+						<tspan key={index} x={0} dy={index ? LEADING : 0}>
+							{index < lines.length - 1 ? `${line} ` : line}
+						</tspan>
+					))}
 				</text>
-				{sub ? (
-					<text
-						className={cn(
-							SMALL,
-							"font-sans font-semibold tracking-[0.04em] uppercase",
-							look.sub || "fill-muted-foreground",
-						)}
-						textAnchor="middle"
-						x={0}
-						y={13 - up}
-					>
-						{/* The space ends the first line, so the words read as written. */}
-						{lines.map((line, index) => (
-							<tspan key={index} x={0} dy={index ? 8.5 : 0}>
-								{index < lines.length - 1 ? `${line} ` : line}
-							</tspan>
-						))}
-					</text>
-				) : null}
-				{chips.map((agent, index) => (
-					<g key={agent} className={chipClass(agent)}>
-						<circle className={chip().circle} cx={chipX(index, chips.length + (extra ? 1 : 0))} cy={chipY} r={7.5} />
-						<text
-							className={chip().text}
-							textAnchor="middle"
-							x={chipX(index, chips.length + (extra ? 1 : 0))}
-							y={chipY + 3}
-						>
-							{agentChip(agent)}
-						</text>
-					</g>
-				))}
-				{extra ? (
-					<g className={chipClass("+more")}>
-						<circle
-							className={chip(false, true).circle}
-							cx={chipX(chips.length, chips.length + 1)}
-							cy={chipY}
-							r={7.5}
-						/>
-						<text className={chip().text} textAnchor="middle" x={chipX(chips.length, chips.length + 1)} y={chipY + 3}>
-							+{extra}
-						</text>
-					</g>
-				) : null}
-				{!chips.length && cell.landed ? (
-					<g className={chipClass(`landed:${cell.landed.agent}`)}>
-						<circle className={chip(true).circle} cx={0} cy={chipY} r={7.5} />
-						<text className={chip(true).text} textAnchor="middle" x={0} y={chipY + 3}>
-							{agentChip(cell.landed.agent)}
-						</text>
-					</g>
-				) : null}
-			</g>
+			) : null}
+			{agents.map((agent, index) => (
+				<g key={agent} className={chipClass(agent)}>
+					<circle
+						className={cn("fill-card stroke-[1.5]", HUE_STROKE[agentHue(agent)])}
+						cx={chipX(index)}
+						cy={CHIP_Y}
+						r={CHIP_R}
+					/>
+					<ChipText x={chipX(index)} text={agentChip(agent)} />
+				</g>
+			))}
+			{more ? (
+				<g className={chipClass("+more")}>
+					<circle
+						className="fill-card stroke-border-strong stroke-[1.5] [stroke-dasharray:2_2]"
+						cx={chipX(agents.length)}
+						cy={CHIP_Y}
+						r={CHIP_R}
+					/>
+					<ChipText x={chipX(agents.length)} text={`+${more}`} />
+				</g>
+			) : null}
 		</g>
+	);
+	if (leaving)
+		return (
+			<g
+				data-state={cell.state}
+				className="pointer-events-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]"
+				style={style}
+				aria-hidden="true"
+			>
+				{shape}
+			</g>
+		);
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<g
+					data-state={cell.state}
+					data-cell={cell.key}
+					className={cn(
+						// Each cell is moved into place by its transform, so it glides when the comb rearranges.
+						"group cursor-pointer outline-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]",
+						dim && "opacity-30",
+					)}
+					style={style}
+					role="button"
+					tabIndex={reachable ? 0 : -1}
+					aria-label={label}
+					aria-haspopup="dialog"
+					aria-expanded={popped}
+					ref={element}
+					onMouseEnter={() => onHover?.(cell.key)}
+					onMouseLeave={() => onHover?.(null)}
+					onFocus={() => {
+						onFocused?.(cell.key);
+						onHover?.(cell.key);
+					}}
+					onBlur={() => onHover?.(null)}
+					onClick={() => onPick?.(cell)}
+					onKeyDown={keys}
+				>
+					{shape}
+				</g>
+			</TooltipTrigger>
+			{/* Its place in full, and what's happening there; hidden while its details are open beside it. */}
+			<TooltipContent side="top" className={cn(popped && "hidden")}>
+				<span className="block font-mono wrap-anywhere">{cellPlace(cell)}</span>
+				{label.slice(cellPlace(cell).length + 2)}
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+/**
+ * A cell's name: a file's or folder's in the mono face, cut to fit (see cellNames), and drawn a little closer together where
+ * it's a letter too wide; what a cell folds together ("the others") in words.
+ */
+function CellName({ cell, name, y, className }: { cell: Cell; name: string; y: number; className: string }) {
+	if (cell.kind === "files")
+		return (
+			<text className={cn(WORDS, "font-normal", className)} textAnchor="middle" x={0} y={y}>
+				{fitLines(cell.name, [NAME_ROOM], (text) => sansWidth(text, TYPE))[0]}
+			</text>
+		);
+	const squeeze = name.length * TYPE * MONO > NAME_ROOM;
+	return (
+		<text
+			className={cn(NAME, className)}
+			textAnchor="middle"
+			x={0}
+			y={y}
+			{...(squeeze ? { textLength: NAME_ROOM, lengthAdjust: "spacing" } : {})}
+		>
+			{name}
+		</text>
+	);
+}
+
+/** A chip's letters, squeezed a little where three digits would touch its ring. */
+function ChipText({ x, text }: { x: number; text: string }) {
+	return (
+		<text
+			className={cn(WORDS, "fill-foreground font-bold")}
+			textAnchor="middle"
+			x={x}
+			y={CHIP_Y + 3.5}
+			{...(text.length > 2 ? { textLength: CHIP_R * 1.6, lengthAdjust: "spacingAndGlyphs" } : {})}
+		>
+			{text}
+		</text>
+	);
+}
+
+/** A cell's details: where it is, what's happening there, the goals in it and where to go next. */
+function CellDetails({
+	repo,
+	branch,
+	cell,
+	goals,
+	picked,
+	onPick,
+	now,
+}: {
+	repo: string;
+	branch: string;
+	cell: Cell;
+	goals: Goal[];
+	picked: boolean;
+	onPick(): void;
+	now: number;
+}) {
+	const byKey = new Map(goals.map((goal) => [goal.key, goal]));
+	const inIt = cell.goals.flatMap((key) => byKey.get(key) ?? []);
+	const state = cell.state;
+	const code = cell.kind !== "files" && !cell.planned;
+	return (
+		<div className="grid gap-2">
+			<p className="m-0 font-mono text-meta font-semibold wrap-anywhere">{cellPlace(cell)}</p>
+			<p className="m-0 flex items-center gap-1.5 text-ui">
+				{state === "free" || state === "next" ? null : <StateMark state={state} className="size-3.5 rounded-xs" />}
+				<span className={state === "free" || state === "next" ? "text-muted-foreground" : STATES[state].text}>
+					{state === "free"
+						? cell.kind === "file"
+							? "Nobody on it"
+							: `${counted(cell.files, "file")}, nobody on them`
+						: state === "next"
+							? "Backlog work waiting for an agent"
+							: state === "landed"
+								? `Landed ${timeAgo(cell.landed?.at, now)} by ${displayName(cell.landed?.agent) ?? "an agent"}`
+								: STATES[state].label}
+				</span>
+			</p>
+			{inIt.length ? (
+				<ul className="m-0 grid list-none gap-1.5 p-0">
+					{inIt.slice(0, 5).map((goal) => (
+						<li key={goal.key} className="grid gap-px">
+							<a className="font-semibold" href={href.change(repo, goal.change)}>
+								{goal.title}
+							</a>
+							<span className="text-caption text-muted-foreground">
+								{goal.agent} · {goalStatus(goal).words}
+							</span>
+						</li>
+					))}
+					{inIt.length > 5 ? (
+						<li className="text-caption text-muted-foreground">and {counted(inIt.length - 5, "more goal")}</li>
+					) : null}
+				</ul>
+			) : null}
+			<p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-ui">
+				{code ? <a href={href.code(repo, cell.path, branch)}>Open in Code</a> : null}
+				{inIt.length || picked ? (
+					<Button variant="link" className="leading-[inherit]" onClick={onPick}>
+						{picked ? "Show every goal" : "Show only its goals"}
+					</Button>
+				) : null}
+			</p>
+		</div>
 	);
 }
 

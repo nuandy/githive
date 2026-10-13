@@ -195,3 +195,54 @@ export const href = {
 	agents: () => "#/settings/agents",
 	admin: () => "#/admin",
 };
+
+/**
+ * The Hive tab's view, in its address's query, so a link opens it as it was:
+ *   #/repos/:owner/:name?window=6h&view=timeline&agent=<agent>&row=<goal>
+ * the goals' time window, Story or Timeline, the agent the goals and map are filtered to, and the goal row open.
+ */
+export interface HiveQuery {
+	/** The time window, in ms. */
+	window?: number;
+	view?: "story" | "timeline";
+	agent?: string;
+	row?: string;
+}
+
+const MINUTE = 60_000;
+const HIVE_WINDOWS: Record<string, number> = {
+	"15m": 15 * MINUTE,
+	"30m": 30 * MINUTE,
+	"1h": 60 * MINUTE,
+	"6h": 6 * 60 * MINUTE,
+	"24h": 24 * 60 * MINUTE,
+};
+
+/** The Hive tab's view from an address; what it doesn't know, it leaves out. */
+export function hiveQuery(hash: string): HiveQuery {
+	const params = new URLSearchParams(hash.split("?")[1] ?? "");
+	const span = HIVE_WINDOWS[params.get("window") ?? ""];
+	const view = params.get("view");
+	const agent = params.get("agent");
+	const row = params.get("row");
+	return {
+		...(span ? { window: span } : {}),
+		...(view === "story" || view === "timeline" ? { view } : {}),
+		...(agent ? { agent } : {}),
+		...(row ? { row } : {}),
+	};
+}
+
+/** An address with the Hive tab's view in its query, the rest of it as it was; what's unset is left out. */
+export function withHiveQuery(hash: string, query: HiveQuery): string {
+	const [path = "", search = ""] = hash.split("?");
+	const params = new URLSearchParams(search);
+	for (const key of ["window", "view", "agent", "row"]) params.delete(key);
+	const span = Object.entries(HIVE_WINDOWS).find(([, ms]) => ms === query.window)?.[0];
+	if (span) params.set("window", span);
+	if (query.view) params.set("view", query.view);
+	if (query.agent) params.set("agent", query.agent);
+	if (query.row) params.set("row", query.row);
+	const rest = params.toString();
+	return rest ? `${path}?${rest}` : path;
+}

@@ -1,11 +1,12 @@
 import type { BacklogItem, DemoRunStatus, HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAnnouncer } from "../hooks/useAnnouncer";
 import { usePoll } from "../hooks/usePoll";
 import { freeWork, type Goal, hiveGoals } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
 import { announcement, type GoalMotion, goalMotions, MOTION_MS } from "../lib/hiveMotion";
 import { motionMs } from "../lib/motion";
+import { type HiveQuery, hiveQuery, withHiveQuery } from "../lib/routes";
 import { chooseRange, DEFAULT_RANGE, timeAxis } from "../lib/timeAxis";
 import { DemoBanner } from "./DemoRun";
 import { GoalsPanel } from "./GoalsPanel";
@@ -27,11 +28,14 @@ export function HiveTab({
 	branch,
 	snapshot,
 	api,
+	writes = false,
 }: {
 	repo: string;
 	branch: string;
 	snapshot: RepoSnapshot;
 	api: HiveApi;
+	/** The reader can write here: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
 }) {
 	const load = api.landing;
 	const landing = usePoll(load ? `landing:${repo}:${branch}` : null, () => load!(repo, branch), 5_000);
@@ -47,12 +51,17 @@ export function HiveTab({
 		snapshot.claims.filter((claim) => (claim.into ?? branch) !== branch).map((claim) => claim.change),
 	);
 	const loadDemo = api.demoRun;
+	const [query, setQuery] = useAddressQuery();
 	return (
 		<>
 			{loadDemo ? <DemoBanner repo={repo} load={loadDemo} changed={snapshot.claims} /> : null}
 			<Hive
 				repo={repo}
 				branch={branch}
+				query={query}
+				onQuery={setQuery}
+				writes={writes}
+				origin={typeof window === "undefined" ? "" : window.location.origin}
 				snapshot={onBranch}
 				elsewhere={elsewhere}
 				{...(landing.data ? { landing: landing.data } : {})}
@@ -71,6 +80,12 @@ export function HiveTab({
 export interface HiveProps {
 	repo: string;
 	branch: string;
+	/** The reader can write here, and where GitHive is: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
+	origin?: string;
+	/** The view the address asks for (its window, Story or Timeline, the agent, the open row), and changing it. */
+	query?: HiveQuery;
+	onQuery?(query: HiveQuery): void;
 	snapshot: RepoSnapshot;
 	landing?: RepoLanding;
 	landingError?: string;
@@ -118,15 +133,23 @@ export function Hive(props: HiveProps) {
 	// The range is picked once, from the first goals read with the event log in, and after that only by the person.
 	// Before the log arrives the landing alone knows when goals finished but not when they began, so they'd look
 	// shorter than they were.
-	const [picked, setPicked] = useState<number | null>(null);
+	const [ownQuery, setOwnQuery] = useState<HiveQuery>({});
+	const query = props.query ?? ownQuery;
+	const update = (patch: HiveQuery) => (props.onQuery ?? setOwnQuery)(tidy({ ...query, ...patch }));
 	const auto = useRef<number | null>(null);
 	const logIn = !props.showsFeed || events !== undefined || props.eventsError !== undefined;
 	if (auto.current === null && logIn && goals.length) auto.current = chooseRange(goals, now);
-	const range = picked ?? auto.current ?? DEFAULT_RANGE;
+	const range = query.window ?? auto.current ?? DEFAULT_RANGE;
 	// Where the goals' clock starts: the range back from now, and further when quiet stretches fold.
 	const since = timeAxis(goals, range, now).start;
 	const [hovered, setHovered] = useState<{ goal?: string; cell?: string }>({});
-	const [filter, setFilter] = useState<HiveFilter | null>(null);
+	// A cell picked on the map filters the goals to it; the agent filter is in the address, so a link keeps it.
+	const [cellFilter, setCellFilter] = useState<HiveFilter | null>(null);
+	const filter: HiveFilter | null = cellFilter ?? (query.agent ? { kind: "agent", agent: query.agent } : null);
+	const setFilter = (next: HiveFilter | null) => {
+		setCellFilter(next?.kind === "cell" ? next : null);
+		update({ agent: next?.kind === "agent" ? next.agent : undefined });
+	};
 	const litCells = new Set(
 		hovered.goal
 			? (cells?.clusters.flatMap((cluster) => cluster.cells) ?? [])
@@ -150,6 +173,8 @@ export function Hive(props: HiveProps) {
 				range={range}
 				since={since}
 				now={now}
+				{...(props.writes ? { writes: true } : {})}
+				{...(props.origin ? { origin: props.origin } : {})}
 			/>
 			{/* The hive beside the goals; on narrow screens, under them. */}
 			<div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start gap-5 to-1100:grid-cols-[minmax(0,1fr)]">
@@ -159,6 +184,7 @@ export function Hive(props: HiveProps) {
 						repo={repo}
 						branch={branch}
 						{...(cells ? { cells } : {})}
+						goals={goals}
 						{...(props.tree?.truncated ? { truncated: true } : {})}
 						{...(props.treeError ? { error: props.treeError } : {})}
 						lit={litCells}
@@ -166,8 +192,8 @@ export function Hive(props: HiveProps) {
 						motions={motions}
 						onHover={(cell) => setHovered(cell ? { cell } : {})}
 						onPick={(cell) =>
-							setFilter((current) =>
-								current?.kind === "cell" && current.key === cell.key
+							setFilter(
+								filter?.kind === "cell" && filter.key === cell.key
 									? null
 									: {
 											kind: "cell",
@@ -185,7 +211,11 @@ export function Hive(props: HiveProps) {
 					branch={branch}
 					goals={goals}
 					range={range}
-					onRange={setPicked}
+					onRange={(window) => update({ window })}
+					view={query.view}
+					onView={(view) => update({ view })}
+					row={query.row}
+					onRow={(row) => update({ row })}
 					{...(props.eventsError ? { error: props.eventsError } : {})}
 					lit={litGoals}
 					filter={filter}
@@ -200,6 +230,43 @@ export function Hive(props: HiveProps) {
 			<Announcer said={said} />
 		</div>
 	);
+}
+
+/** A query with what's unset left out. */
+function tidy(query: HiveQuery): HiveQuery {
+	return Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined)) as HiveQuery;
+}
+
+/** Tells whoever reads the address that it changed without a hashchange (replaceState sends none). */
+const ADDRESS_CHANGED = "githive:address";
+
+function subscribeAddress(changed: () => void) {
+	window.addEventListener("hashchange", changed);
+	window.addEventListener(ADDRESS_CHANGED, changed);
+	return () => {
+		window.removeEventListener("hashchange", changed);
+		window.removeEventListener(ADDRESS_CHANGED, changed);
+	};
+}
+
+/**
+ * The Hive's view as the address has it, and changing it there: in place, so it isn't a step back for the browser and
+ * the page doesn't go anywhere.
+ */
+function useAddressQuery(): [HiveQuery, (query: HiveQuery) => void] {
+	const hash = useSyncExternalStore(
+		subscribeAddress,
+		() => window.location.hash,
+		() => "",
+	);
+	const query = useMemo(() => hiveQuery(hash), [hash]);
+	const set = useCallback((next: HiveQuery) => {
+		const to = withHiveQuery(window.location.hash, next);
+		if (to === window.location.hash) return;
+		window.history.replaceState(window.history.state, "", to);
+		window.dispatchEvent(new Event(ADDRESS_CHANGED));
+	}, []);
+	return [query, set];
 }
 
 /**

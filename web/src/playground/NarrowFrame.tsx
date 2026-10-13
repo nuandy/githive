@@ -1,16 +1,19 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { PortalContainer } from "../components/ui/tooltip";
 
 // The playground's narrow view. The Hive tab lays itself out by the window's width (media queries), so a narrow
 // container in a wide window wouldn't show its narrow layout. An iframe is a window of its own: the same Hive, from
 // the same run, drawn into it by a React root of its own, with the page's styles and its light or dark copied in and
-// kept in step.
+// kept in step. Its tooltips and popovers open in it too.
 
 const BLANK = "<!doctype html><html><head></head><body></body></html>";
 
 export function NarrowFrame({ width, children }: { width: number; children: ReactNode }) {
 	const frame = useRef<HTMLIFrameElement>(null);
 	const [root, setRoot] = useState<Root | null>(null);
+	// The frame's own body, where its tooltips and popovers go.
+	const [body, setBody] = useState<HTMLElement | null>(null);
 	const [height, setHeight] = useState(800);
 
 	useEffect(() => {
@@ -50,6 +53,7 @@ export function NarrowFrame({ width, children }: { width: number; children: Reac
 			const sizes = new ResizeObserver(() => setHeight(Math.ceil(doc.body.getBoundingClientRect().height)));
 			sizes.observe(doc.body);
 			made = createRoot(container);
+			setBody(doc.body);
 			setRoot(made);
 			stop = () => {
 				styles.disconnect();
@@ -70,8 +74,8 @@ export function NarrowFrame({ width, children }: { width: number; children: Reac
 	}, []);
 
 	useEffect(() => {
-		root?.render(children);
-	}, [root, children]);
+		root?.render(<PortalContainer value={body}>{children}</PortalContainer>);
+	}, [root, body, children]);
 
 	return (
 		<iframe

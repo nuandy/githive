@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { ago } from "../test/fixtures";
-import { freeWork, goalStatus, hiveGoals, rejections, shortTitle, stageCounts } from "./goals";
+import { distinctTitles, freeWork, goalStatus, hiveGoals, rejections, shortTitle, stageCounts } from "./goals";
 
 type Claim = RepoSnapshot["claims"][number];
 
@@ -35,6 +35,28 @@ describe("a goal's short title", () => {
 		const title = shortTitle(`Add ${"very ".repeat(30)}long tests`);
 		expect(title.length).toBeLessThanOrEqual(65);
 		expect(title.endsWith("…")).toBe(true);
+	});
+});
+
+describe("titles side by side", () => {
+	it("fold a long start several share, so what tells them apart comes first", () => {
+		const titles = [
+			"Add edge-case tests for res.links() in test/res.links.edges.js",
+			"Add edge-case tests for req.is() in test/req.is.edges.js",
+			"Fix the cookie parser",
+		];
+		expect(distinctTitles(titles)).toEqual([
+			"…tests for res.links() in test/res.links.edges.js",
+			"…tests for req.is() in test/req.is.edges.js",
+			"Fix the cookie parser",
+		]);
+	});
+
+	it("leave a short shared start, and titles alike in full, as they are", () => {
+		const short = ["Add tests for res.links()", "Add tests for req.is()"];
+		expect(distinctTitles(short)).toEqual(short);
+		const same = ["Bump the router to 2.0", "Bump the router to 2.0"];
+		expect(distinctTitles(same)).toEqual(same);
 	});
 });
 

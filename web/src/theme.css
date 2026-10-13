@@ -112,6 +112,18 @@
 	--diff-del: #fbe9e6;
 	--diff-del-strong: #f3cdc6;
 
+	/* Agents' hues: each agent's chip on the Hive is ringed in one, the same wherever it shows (agentHue in
+	   lib/hiveCells.ts). Amber, green and red (hue-1, -5, -6) are the lamps' colors, so no agent gets them. Readable on
+	   both themes. */
+	--hue-0: #3b82f6;
+	--hue-1: #f59e0b;
+	--hue-2: #14b8a6;
+	--hue-3: #ec4899;
+	--hue-4: #8b5cf6;
+	--hue-5: #22c55e;
+	--hue-6: #ef4444;
+	--hue-7: #06b6d4;
+
 	/* Code's syntax colors, in the Code tab: each reads at 4.5:1 or more on the card and surface-2. */
 	--code-keyword: #8a2f8f;
 	--code-string: #2a6630;
@@ -273,6 +285,14 @@
 	--color-diff-add-strong: var(--diff-add-strong);
 	--color-diff-del: var(--diff-del);
 	--color-diff-del-strong: var(--diff-del-strong);
+	--color-hue-0: var(--hue-0);
+	--color-hue-1: var(--hue-1);
+	--color-hue-2: var(--hue-2);
+	--color-hue-3: var(--hue-3);
+	--color-hue-4: var(--hue-4);
+	--color-hue-5: var(--hue-5);
+	--color-hue-6: var(--hue-6);
+	--color-hue-7: var(--hue-7);
 	--color-code-keyword: var(--code-keyword);
 	--color-code-string: var(--code-string);
 	--color-code-literal: var(--code-literal);

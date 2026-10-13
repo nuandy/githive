@@ -264,7 +264,7 @@ function RepoTabContent({
 				/>
 			);
 		case "hive":
-			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
+			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} writes={canWrite(access?.level)} />;
 		case "history":
 			return <HistoryTab repo={repo} branch={branch} api={api} />;
 		case "claims":

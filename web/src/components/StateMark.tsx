@@ -3,14 +3,14 @@ import { cn } from "../lib/utils";
 
 /**
  * A change state's mark: a square in its color and pattern, its glyph on it, so color never says it alone (see
- * status.ts). Its caller sizes and rounds it; `glyph` sizes the glyph. Without a state it takes `empty`'s look, and
- * changes color smoothly as one comes and goes.
+ * status.ts). Its caller sizes and rounds it, 14px or more so the glyph's bold 10px reads; `glyph` sizes the glyph.
+ * Without a state it takes `empty`'s look, and changes color smoothly as one comes and goes.
  */
 export function StateMark({
 	state,
 	empty,
 	className,
-	glyph = "text-[9px]",
+	glyph = "text-[10px] font-black",
 }: {
 	state: ChangeState | undefined;
 	empty?: string;

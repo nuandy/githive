@@ -1,10 +1,11 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FocusEvent, useEffect, useReducer, useRef, useState } from "react";
+import { useFresh } from "../hooks/useFresh";
 import { useGlide } from "../hooks/useGlide";
 import { useLingering } from "../hooks/useLingering";
 import { displayName } from "../lib/agent";
-import { type Goal, type GoalStep, goalStatus } from "../lib/goals";
-import { agentChip } from "../lib/hiveCells";
-import type { GoalMotion, Motion } from "../lib/hiveMotion";
+import { distinctTitles, type Goal, type GoalStep, goalStatus } from "../lib/goals";
+import { agentChip, agentHue, HUE_BORDER } from "../lib/hiveCells";
+import { type GoalLayout, type GoalMotion, holdLayout, type Motion, pendingWords } from "../lib/hiveMotion";
 import { briefPaths, shortSha, timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
 import { clockTime, timeAgo } from "../lib/relativeTime";
@@ -25,13 +26,17 @@ import { cn } from "../lib/utils";
 import type { HiveFilter } from "./HiveTab";
 import { Button } from "./ui/button";
 import { Segmented } from "./ui/segmented";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // The goals panel: one row per goal, in flight on top (newest arrival first), finished below. Story reads in words,
 // with a slim bar on the shared clock; Timeline is the same rows, morphed, the bars taking the room. Rows never jump:
-// a new goal comes in at the top, a landed one stays a minute before it moves down to Finished.
+// a new goal comes in at the top, a landed one stays a minute before it moves down to Finished. And nothing moves
+// under someone reading: while the pointer or focus is in the panel, or a row is open, new goals and goals that
+// finished wait behind a quiet "2 new", which brings them in, as leaving the panel does.
 //
 // The morph is transitions, so a row changes shape instead of being drawn again: switching narrows the words column
 // (--words), packs the rows (--row-pad), folds the second line away and lets the bars take the room, each in 0.45s.
+// In Story the bars keep to about 120px beside titles of up to two lines, and on a narrow screen go under them.
 
 type View = "story" | "timeline";
 
@@ -60,9 +65,10 @@ const SECTION =
 	"flex items-center gap-2.5 text-micro font-bold tracking-[0.06em] text-muted-foreground uppercase [transition:margin_0.45s_ease] after:order-1 after:h-px after:flex-1 after:bg-border";
 const sectionRoom = (timeline: boolean) => (timeline ? "mx-0 mt-1.5 mb-0.5" : "mx-0 mt-2.5 mb-1");
 /** A row's line: the agent's chip, then the chevron, the words and the bar. */
-const LINE = "flex items-center gap-2 px-2";
-/** What holds the chevron, the words and the bar: a button on a goal's row. */
-const MAIN = "flex min-w-0 flex-1 items-center justify-start gap-2.5 p-0 text-left whitespace-normal";
+const LINE = "flex items-center gap-1.5 px-2";
+/** What holds the words and the bar; in Story on a narrow screen the bar goes under the words. */
+const MAIN = "flex min-w-0 flex-1 items-center justify-start gap-x-2.5 p-0 text-left whitespace-normal";
+const MAIN_STORY = "to-640:flex-wrap to-640:gap-y-1";
 /** The words column, as wide as the view gives it. */
 const WORDS = "w-(--words) min-w-0 flex-none [transition:width_0.45s_ease]";
 /** A row's frame: it folds shut when left out, and its edge and fill fade as it's pointed at or opened. */
@@ -73,11 +79,15 @@ const RED_EDGE = "border-[color-mix(in_srgb,var(--bad)_45%,transparent)]";
 /** Everything on the clock glides when the range changes or time moves it, rather than jumping. */
 const GLIDES = "[transition:left_0.45s_ease,width_0.45s_ease,opacity_0.3s_ease]";
 
-/** The agent's chip: a ring with its short name, smaller in Timeline. */
-const chipBox = (timeline: boolean) =>
+/**
+ * The agent's chip: its short name in a ring of its own hue (the map's chips wear the same), smaller in Timeline. Its
+ * letters are 10px either way.
+ */
+const chipBox = (timeline: boolean, agent?: string) =>
 	cn(
-		timeline ? "size-4.5 text-[8px]" : "size-6 text-[9px]",
-		"flex-none rounded-[50%] border border-foreground bg-surface-2 p-0 leading-none font-bold text-foreground",
+		timeline ? "size-5" : "size-6",
+		"flex-none rounded-[50%] border-[1.5px] bg-card p-0 text-[10px] leading-none font-bold text-foreground",
+		agent ? HUE_BORDER[agentHue(agent)] : "border-foreground",
 		"[transition:width_0.45s_ease,height_0.45s_ease]",
 	);
 
@@ -106,15 +116,32 @@ export interface GoalsPanelProps {
 	onSeen(change: string): void;
 	onHover(change: string | null): void;
 	now: number;
-	/** The view to start in, where there's no remembered one (tests). */
-	view?: View;
+	/**
+	 * Story or Timeline: with `onView`, the one the address asks for, else the one remembered in this browser; without
+	 * it, the view to start in where there's no remembered one (tests).
+	 */
+	view?: View | undefined;
+	onView?(view: View): void;
+	/** The row the address opens, and telling it which row was opened last (or that it was closed). */
+	row?: string | undefined;
+	onRow?(row: string | undefined): void;
 }
 
 export function GoalsPanel(props: GoalsPanelProps) {
 	const { repo, branch, goals, range, filter, now } = props;
-	const [view, setView] = useView(props.view);
+	const [ownView, setOwnView] = useView(props.view);
+	const view = props.onView ? (props.view ?? ownView) : ownView;
+	const setView = (next: View) => {
+		setOwnView(next);
+		props.onView?.(next);
+	};
 	const timeline = view === "timeline";
-	const [open, setOpen] = useState<Set<string>>(new Set());
+	const [open, setOpen] = useState<Set<string>>(() => new Set(props.row ? [props.row] : []));
+	// A row the address names opens, when the page opens and whenever the address changes to it.
+	const linked = props.row;
+	useEffect(() => {
+		if (linked) setOpen((current) => (current.has(linked) ? current : new Set([...current, linked])));
+	}, [linked]);
 	const [showFinished, setShowFinished] = useState(false);
 	const [held, setHeld] = useState<string | null>(null);
 	const panel = useRef<HTMLElement>(null);
@@ -124,8 +151,29 @@ export function GoalsPanel(props: GoalsPanelProps) {
 		!!goal.finished && (now - finishedAt(goal) < SETTLE_MS || (held === goal.key && now - finishedAt(goal) < HELD_MS));
 	// Every goal keeps its row. One the filter or the range leaves out folds away rather than vanishing, so nothing
 	// appears or disappears at once.
-	const inFlight = goals.filter((goal) => !goal.finished || settling(goal));
-	const done = goals.filter((goal) => goal.finished && !settling(goal)).sort((a, b) => finishedAt(b) - finishedAt(a));
+	const live: GoalLayout = {
+		inFlight: goals.filter((goal) => !goal.finished || settling(goal)).map((goal) => goal.key),
+		done: goals
+			.filter((goal) => goal.finished && !settling(goal))
+			.sort((a, b) => finishedAt(b) - finishedAt(a))
+			.map((goal) => goal.key),
+	};
+	// Held still while someone reads: the pointer or focus is in the panel, or a row is open.
+	const [pointerIn, setPointerIn] = useState(false);
+	const [focusIn, setFocusIn] = useState(false);
+	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
+	// the point there. An open row folded away in it holds nothing still.
+	const finishedShown = timeline || showFinished;
+	const { shown, arrived, finished, apply } = useHeld(
+		live,
+		(drawn) =>
+			pointerIn ||
+			focusIn ||
+			[...open].some((key) => drawn.inFlight.includes(key) || (finishedShown && drawn.done.includes(key))),
+	);
+	const byKey = new Map(goals.map((goal) => [goal.key, goal]));
+	const inFlight = shown.inFlight.flatMap((key) => byKey.get(key) ?? []);
+	const done = shown.done.flatMap((key) => byKey.get(key) ?? []);
 	const inRange = (goal: Goal) => finishedAt(goal) >= axis.start;
 	const flying = inFlight.filter((goal) => matches(goal, filter));
 	const landed = done.filter((goal) => matches(goal, filter) && inRange(goal));
@@ -140,8 +188,16 @@ export function GoalsPanel(props: GoalsPanelProps) {
 		`${inFlight.map((goal) => goal.key).join(" ")} | ${done.map((goal) => goal.key).join(" ")}`,
 		"li[data-key]",
 	);
+	// A row that comes in without a motion of its own (brought in from behind "2 new") fades in where it lands.
+	const fresh = useFresh(true, 400);
+	// Titles that start alike fold their shared start, so what tells them apart comes first.
+	const titles = new Map(
+		distinctTitles(goals.map((goal) => goal.title)).map((title, index) => [goals[index]!.key, title]),
+	);
 	const toggle = (key: string) => {
 		props.onSeen(key);
+		if (!open.has(key)) props.onRow?.(key);
+		else if (key === props.row) props.onRow?.(undefined);
 		setOpen((current) => {
 			const next = new Set(current);
 			if (next.has(key)) next.delete(key);
@@ -155,6 +211,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			repo={repo}
 			branch={branch}
 			goal={goal}
+			title={titles.get(goal.key) ?? goal.title}
 			axis={axis}
 			timeline={timeline}
 			hidden={!shows}
@@ -162,6 +219,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			onToggle={() => toggle(goal.key)}
 			lit={props.lit.has(goal.key)}
 			motion={props.motions.get(goal.key)}
+			appearing={fresh(goal.key)}
 			unseen={props.unseen.has(goal.key)}
 			onHover={(hovering) => {
 				setHeld(hovering ? goal.key : null);
@@ -174,14 +232,20 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			now={now}
 		/>
 	);
-	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
-	// the point there.
-	const finishedShown = timeline || showFinished;
 	return (
 		<section
 			ref={panel}
 			data-view={view}
-			className={cn("min-w-0", timeline ? "[--row-pad:2px] [--words:26%]" : "[--row-pad:7px] [--words:56%]")}
+			onPointerEnter={() => setPointerIn(true)}
+			onPointerLeave={() => setPointerIn(false)}
+			onFocus={() => setFocusIn(true)}
+			onBlur={(event: FocusEvent) => {
+				if (!event.currentTarget.contains(event.relatedTarget)) setFocusIn(false);
+			}}
+			className={cn(
+				"min-w-0",
+				timeline ? "[--row-pad:2px] [--words:26%]" : "[--row-pad:7px] [--words:calc(100%-130px)] to-640:[--words:100%]",
+			)}
 			aria-labelledby="goals-title"
 		>
 			<div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -193,7 +257,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 					<Button
 						className="animate-hive-pop-in rounded-full border-link bg-link-soft px-2.5 py-px text-caption leading-5 font-semibold text-link"
 						onClick={() => props.onFilter(null)}
-						title="Show every goal"
+						aria-label={`${filter.kind === "agent" ? `Only ${filter.agent}` : `Only ${filter.label}`}: show every goal`}
 					>
 						{filter.kind === "agent" ? `only ${filter.agent}` : `only ${filter.label}`}{" "}
 						<span aria-hidden="true">×</span>
@@ -236,6 +300,20 @@ export function GoalsPanel(props: GoalsPanelProps) {
 					<AxisRow axis={axis} timeline={timeline} />
 					<div className={cn(SECTION, sectionRoom(timeline))}>
 						<span>In flight · {working}</span>
+						{arrived.length || finished.length ? (
+							// Quiet, and no taller than the heading, so its coming moves nothing.
+							<Button
+								key="pending"
+								className={cn(
+									"order-2 -my-1 animate-hive-pop-in rounded-full border-link/40 bg-link-soft px-2.5 py-0",
+									"text-caption leading-5 font-semibold tracking-normal text-link normal-case",
+								)}
+								onClick={apply}
+								aria-label={`${pendingWords(arrived, finished)}: show them`}
+							>
+								{pendingWords(arrived, finished)}
+							</Button>
+						) : null}
 					</div>
 					<ol className="m-0 list-none p-0">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
 					{flying.length ? null : (
@@ -315,6 +393,24 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	);
 }
 
+/**
+ * The rows as drawn: as they are, or held still while `paused` says so of the rows drawn last (see holdLayout), with
+ * what waits and a way to bring it in now.
+ */
+function useHeld(live: GoalLayout, paused: (drawn: GoalLayout) => boolean) {
+	const drawn = useRef<GoalLayout | undefined>(undefined);
+	const latest = useRef(live);
+	latest.current = live;
+	const [, redraw] = useReducer((count: number) => count + 1, 0);
+	const held = holdLayout(drawn.current, live, !!drawn.current && paused(drawn.current));
+	drawn.current = held.shown;
+	const apply = () => {
+		drawn.current = latest.current;
+		redraw();
+	};
+	return { ...held, apply };
+}
+
 /** Before any goal: a faint sample row, saying what each one will show and where agents come from. */
 function EmptyGoals({ timeline }: { timeline: boolean }) {
 	return (
@@ -327,13 +423,15 @@ function EmptyGoals({ timeline }: { timeline: boolean }) {
 				<div className="min-h-0 overflow-hidden">
 					<div className={cn(LINE, "py-(--row-pad) [transition:padding_0.45s_ease]")}>
 						<span className={cn(chipBox(timeline), "grid place-items-center border-dashed")}>?</span>
-						<span className={MAIN}>
+						<span className="-mx-0.5 inline-grid size-5 flex-none place-items-center">
 							<Chevron />
+						</span>
+						<span className={cn(MAIN, !timeline && MAIN_STORY)}>
 							<span className={WORDS}>
 								<span className={titleClass(timeline)}>What an agent sets out to do</span>
 								<span className={metaClass(timeline)}>where it stands · which agent · how long it took</span>
 							</span>
-							<span className={TRACK}>
+							<span className={cn(TRACK, !timeline && "to-640:min-h-3 to-640:basis-full")}>
 								<span className={phaseClass("building")} style={{ left: "38%", width: "24%" }} />
 								<span className={phaseClass("review")} style={{ left: "62%", width: "16%" }} />
 								<span className={markClass("approved", true, timeline)} style={{ left: "78%" }} />
@@ -360,7 +458,7 @@ function matches(goal: Goal, filter: HiveFilter | null): boolean {
 	return filter.goals.includes(goal.key);
 }
 
-/** Story or Timeline, remembered in this browser. */
+/** Story or Timeline, remembered in this browser: the default where the address doesn't say. */
 function useView(initial: View = "story"): [View, (view: View) => void] {
 	const [view, setView] = useState<View>(() => {
 		try {
@@ -408,9 +506,9 @@ function AxisRow({ axis, timeline }: { axis: Axis; timeline: boolean }) {
 	return (
 		<div className={cn(LINE, "py-0")} aria-hidden="true">
 			<span className={cn(chipBox(timeline), "invisible")} />
+			<span className="-mx-0.5 size-5 flex-none" />
 			<span className={MAIN}>
-				<span className="invisible -mr-1 size-2.5 flex-none" />
-				<span className={WORDS} />
+				<span className={cn(WORDS, !timeline && "to-640:hidden")} />
 				<span className="relative min-h-4 flex-1 self-stretch font-mono text-[10px] leading-4 font-normal text-muted-foreground">
 					{axis.pieces
 						.filter((piece) => piece.kind === "quiet")
@@ -443,6 +541,8 @@ interface GoalRowProps {
 	repo: string;
 	branch: string;
 	goal: Goal;
+	/** Its title as the list shows it (see distinctTitles). */
+	title: string;
 	axis: Axis;
 	timeline: boolean;
 	/** Left out by the filter or the range: folded away, not gone. */
@@ -451,6 +551,8 @@ interface GoalRowProps {
 	onToggle(): void;
 	lit: boolean;
 	motion: (GoalMotion & { seq: number }) | undefined;
+	/** Only just drawn, with no motion of its own: it fades in. */
+	appearing: boolean;
 	unseen: boolean;
 	onHover(hovering: boolean): void;
 	onAgent(agent: string): void;
@@ -461,6 +563,7 @@ function GoalRow({
 	repo,
 	branch,
 	goal,
+	title,
 	axis,
 	timeline,
 	hidden,
@@ -468,6 +571,7 @@ function GoalRow({
 	onToggle,
 	lit,
 	motion,
+	appearing,
 	unseen,
 	onHover,
 	onAgent,
@@ -494,6 +598,8 @@ function GoalRow({
 							: "border-transparent hover:border-border",
 			);
 	const style = motion ? ({ "--motion-delay": `${motion.delay}ms` } as CSSProperties) : undefined;
+	const steps = `steps-${goal.key}`;
+	const meta = `${status.words} · ${goal.agent} · ${whenWords(goal, now)}${goal.paths.length ? ` · ${briefPaths(goal.paths, 1)}` : ""}`;
 	return (
 		<li
 			className={cn(
@@ -502,7 +608,7 @@ function GoalRow({
 				hidden ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]",
 				edge,
 				!hidden && (open || lit ? "bg-card" : "hover:bg-card"),
-				motion && ROW_MOTION[motion.motion],
+				motion ? ROW_MOTION[motion.motion] : appearing && "animate-hive-fade-in",
 			)}
 			style={style}
 			data-key={goal.key}
@@ -510,49 +616,71 @@ function GoalRow({
 			inert={hidden}
 			onMouseEnter={() => onHover(true)}
 			onMouseLeave={() => onHover(false)}
+			onFocus={() => onHover(true)}
+			onBlur={() => onHover(false)}
 		>
 			<div className="min-h-0 overflow-hidden">
 				<div className={cn(LINE, "py-(--row-pad) [transition:padding_0.45s_ease]")}>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								className={cn(
+									chipBox(timeline, goal.agent),
+									"touch-target inline-flex cursor-pointer items-center justify-center gap-1.5 [font-family:inherit] whitespace-nowrap no-underline",
+								)}
+								aria-label={`Only ${goal.agent}'s goals`}
+								onClick={() => onAgent(goal.agent)}
+							>
+								{agentChip(goal.agent)}
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>Only {goal.agent}'s goals</TooltipContent>
+					</Tooltip>
+					{/* The chevron alone opens and closes the row; the title goes to the change. */}
 					<button
 						type="button"
-						className={cn(
-							chipBox(timeline),
-							"inline-flex cursor-pointer items-center justify-center gap-1.5 [font-family:inherit] whitespace-nowrap no-underline",
-						)}
-						title={`Only ${goal.agent}'s goals`}
-						onClick={() => onAgent(goal.agent)}
-					>
-						{agentChip(goal.agent)}
-					</button>
-					<button
-						type="button"
-						className={cn(
-							MAIN,
-							"group/main cursor-pointer rounded-md border-0 bg-transparent [font-family:inherit] [font-size:inherit] leading-[inherit] font-normal text-inherit no-underline",
-						)}
+						className="group/chevron touch-target -mx-0.5 inline-grid size-5 flex-none cursor-pointer place-items-center rounded-sm border-0 bg-transparent p-0 hover:bg-surface-3"
 						aria-expanded={open}
+						aria-controls={steps}
+						aria-label={`Steps of ${goal.title}`}
 						onClick={onToggle}
-						onFocus={() => onHover(true)}
-						onBlur={() => onHover(false)}
-						title={goal.intent || goal.title}
 					>
 						<Chevron open={open} />
+					</button>
+					<span className={cn(MAIN, !timeline && MAIN_STORY)}>
 						<span className={cn(WORDS, goal.finished && "opacity-75")}>
-							<span className={cn(titleClass(timeline), "group-hover/main:text-link")}>
-								{goal.title}
-								{unseen ? (
-									<span
-										className="ml-1.5 inline-block size-[7px] rounded-full bg-link align-[2px]"
-										title="Changed while you were away"
-									/>
-								) : null}
+							<span className="flex items-start gap-1.5">
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<a
+											className={cn(titleClass(timeline), "min-w-0 text-foreground hover:text-link")}
+											href={href.change(repo, goal.change)}
+										>
+											{title}
+										</a>
+									</TooltipTrigger>
+									{/* Its title in full, and the second line that Timeline folds away and a narrow row cuts. */}
+									<TooltipContent side="top" align="start" className="max-w-96 text-left">
+										<span className="block font-semibold">{goal.title}</span>
+										{meta}
+									</TooltipContent>
+								</Tooltip>
+								{unseen ? <UnseenDot /> : null}
 							</span>
 							<span className={metaClass(timeline)}>
 								<span className={TONE_CLASS[status.tone]}>{status.words}</span> · {goal.agent} · {whenWords(goal, now)}
 								{goal.paths.length ? ` · ${briefPaths(goal.paths, 1)}` : ""}
 							</span>
 						</span>
-						<span className={cn(TRACK, timeline && goal.finished && "opacity-75")} aria-hidden="true">
+						<span
+							className={cn(
+								TRACK,
+								!timeline && "to-640:min-h-3 to-640:basis-full",
+								timeline && goal.finished && "opacity-75",
+							)}
+							aria-hidden="true"
+						>
 							<BarView
 								bar={bar}
 								axis={axis}
@@ -562,11 +690,12 @@ function GoalRow({
 								now={now}
 							/>
 						</span>
-					</button>
+					</span>
 				</div>
 				{open || drawn ? (
 					// A row's steps slide open, and fold shut before they go.
 					<div
+						id={steps}
 						className={cn(FOLD, "grid-rows-[1fr]", open ? "animate-goal-drawer-open" : "animate-goal-drawer-close")}
 						inert={!open}
 						onAnimationEnd={(event) => {
@@ -583,11 +712,28 @@ function GoalRow({
 	);
 }
 
-/** A goal's title, smaller in Timeline. */
+/** A row that changed while the tab was hidden: a dot, in words for whoever can't see it, and in a tooltip. */
+function UnseenDot() {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					role="img"
+					tabIndex={0}
+					aria-label="Changed while you were away"
+					className="mt-1.5 inline-block size-[7px] flex-none rounded-full bg-link"
+				/>
+			</TooltipTrigger>
+			<TooltipContent>Changed while you were away</TooltipContent>
+		</Tooltip>
+	);
+}
+
+/** A goal's title: up to two lines in Story, one in Timeline, where it's smaller. */
 const titleClass = (timeline: boolean) =>
 	cn(
-		"block truncate [transition:font-size_0.45s_ease]",
-		timeline ? "text-meta font-medium" : "text-body-sm font-semibold",
+		"block no-underline [transition:font-size_0.45s_ease]",
+		timeline ? "truncate text-meta font-medium" : "line-clamp-2 text-body-sm font-semibold",
 	);
 
 /** Its second line: where it stands, whose, how long. Timeline folds it away. */
@@ -606,9 +752,9 @@ function Chevron({ open = false }: { open?: boolean }) {
 	return (
 		<svg
 			className={cn(
-				"-mr-1 size-2.5 flex-none [transition:rotate_0.25s_ease,color_0.2s_ease]",
+				"size-2.5 flex-none [transition:rotate_0.25s_ease,color_0.2s_ease]",
 				open ? "rotate-90 text-foreground" : "text-muted-foreground",
-				"group-hover/goal:text-link group-focus-visible/main:text-link",
+				"group-hover/chevron:text-link group-focus-visible/chevron:text-link",
 			)}
 			viewBox="0 0 10 10"
 			width="10"
@@ -819,7 +965,9 @@ function GoalSteps({
 	open: boolean;
 	now: number;
 }) {
-	const waiting = goal.state === "needs-person" || (goal.approval?.awaiting?.length ?? 0) > 0;
+	// Only a change that needs a person (status.ts, waitingOn) asks for one here: its agent's question to answer, or a
+	// vote only people may give. One still building, or waiting on its reviewers, is the agents' to move.
+	const waiting = goal.state === "needs-person";
 	const intent = goal.intent.trim();
 	const arrives = open && "animate-goal-step-in";
 	return (
@@ -857,7 +1005,9 @@ function GoalSteps({
 				))}
 			</ol>
 			<p className={cn("mx-0 mt-1.5 mb-0.5 text-caption", arrives)} style={stagger(goal.steps.length + 1)}>
-				<a href={href.change(repo, goal.change)}>{waiting ? "Answer it on its page →" : "Open the change →"}</a>
+				<a href={href.change(repo, goal.change, "conversation", { decide: !!waiting })}>
+					{!waiting ? "Open the change →" : goal.attention ? "Answer it on its page →" : "Vote on its page →"}
+				</a>
 			</p>
 		</div>
 	);
