@@ -13,7 +13,11 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 function nameOf(active) {
 	if (!active || active === document.body) return "<body>";
 	if (active.id === "decide") return "#decide";
-	return (active.getAttribute("aria-label") ?? active.textContent ?? active.tagName).trim().slice(0, 40);
+	if (active.hasAttribute("aria-label")) return active.getAttribute("aria-label").slice(0, 40);
+	// Its words, but for what's hidden from a screen reader (the user menu's initial).
+	const words = active.cloneNode(true);
+	for (const hidden of words.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+	return words.textContent.trim().slice(0, 40);
 }
 const focused = () => page.evaluate(`(${nameOf})(document.activeElement)`);
 // Focus moves once an overlay's closing motion ends: wait for it, up to a point, before reading it.

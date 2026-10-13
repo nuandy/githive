@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { NOW, ago, visibleText } from "../test/fixtures";
+import { NOW, ago, inlineText, visibleText } from "../test/fixtures";
 import { type AdminActions, AdminView } from "./AdminPage";
 import { TopBar } from "./TopBar";
 
@@ -72,7 +72,7 @@ describe("the Admin page", () => {
 			<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} adminRequests={2} />,
 		);
 		expect(html).toContain('href="#/admin"');
-		expect(html).toContain("Admin, 2 requests waiting");
+		expect(inlineText(html)).toContain("Admin 2 requests waiting");
 		const person = renderToStaticMarkup(
 			<TopBar
 				crumbs={[]}
