@@ -12,19 +12,16 @@ import type {
 	PullAnswer,
 	RepoLanding,
 	RepoSnapshot,
-	SettingsInput,
 } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { canVote, canWrite } from "../lib/permissions";
-import { BranchRules } from "./BranchRules";
 import { GitHubLink } from "./GitHubLink";
-import { GitHubSettings } from "./GitHubSettings";
-import { MergeSettings } from "./MergeSettings";
-import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
+import { RepoAccessBox, type RepoManageApi } from "./RepoAdmin";
+import { RepoSettings } from "./RepoSettings";
 import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
-import { href, type ChangeTab, type RepoTab } from "../lib/routes";
+import { href, type ChangeTab, type RepoTab, type SettingsSection } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { messageOf } from "../lib/errors";
 import { cn } from "../lib/utils";
@@ -63,6 +60,7 @@ export type RepoView =
 			/** Code tab */ path?: string;
 			ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+			/** Settings tab: the section shown. */ section?: SettingsSection;
 	  }
 	| { kind: "change"; change: string; tab: ChangeTab };
 
@@ -190,39 +188,15 @@ const NothingYet = ({ repo }: { repo: string }) => (
 	</Box>
 );
 
-/** For the repo's admins: the forms that change how changes merge. */
-function SettingsEditor({
-	repo,
-	branch,
-	snapshot,
-	manage,
-	onSaved,
-}: {
-	repo: string;
-	branch: string;
-	snapshot: RepoSnapshot;
-	manage: RepoManageApi;
-	onSaved?: () => void;
-}) {
-	const save = (settings: SettingsInput) => manage.changeSettings!(repo, settings);
-	return (
-		<>
-			<MergeSettings snapshot={snapshot} save={save} onSaved={onSaved} />
-			<BranchRules branch={branch} rules={snapshot.branchRules} save={save} onSaved={onSaved} />
-			<GitHubSettings branch={branch} github={snapshot.github} save={save} onSaved={onSaved} />
-		</>
-	);
-}
-
 interface RepoTabContentProps extends Pick<
 	RepoPageProps,
-	"repo" | "view" | "snapshot" | "changeHistory" | "auditError" | "onAuditRetry" | "api" | "access" | "manage"
+	"repo" | "view" | "snapshot" | "changeHistory" | "auditError" | "onAuditRetry" | "api" | "access"
 > {
 	/** The tab shown: a change's page shows under Changes. */
 	current: RepoTab | "changes";
 	branch: string;
-	/** The repo's access settings, for those who can change them. */
-	admin: ReactNode;
+	/** The Settings tab: an admin's sections, or what readers see. */
+	settings: ReactNode;
 	voting: boolean;
 	onSettingsChanged?: () => void;
 }
@@ -239,8 +213,7 @@ function RepoTabContent({
 	branch,
 	api,
 	access,
-	manage,
-	admin,
+	settings,
 	voting,
 	onSettingsChanged,
 }: RepoTabContentProps) {
@@ -255,7 +228,8 @@ function RepoTabContent({
 			/>
 		);
 	}
-	if (!snapshot) return current === "settings" && admin ? admin : <NothingYet repo={repo} />;
+	if (current === "settings") return settings ?? <NothingYet repo={repo} />;
+	if (!snapshot) return <NothingYet repo={repo} />;
 	if (view.kind === "change") {
 		return (
 			<ChangePage
@@ -284,13 +258,6 @@ function RepoTabContent({
 			return <ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />;
 		case "agents":
 			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
-		case "settings": {
-			const editor =
-				access?.level === "admin" && manage?.changeSettings ? (
-					<SettingsEditor repo={repo} branch={branch} snapshot={snapshot} manage={manage} onSaved={onSettingsChanged} />
-				) : undefined;
-			return <SettingsTab snapshot={snapshot} access={admin} editor={editor} />;
-		}
 	}
 	// The branch asked for in the address, when the repo has it.
 	const asked = view.branch && (snapshot.branches ?? []).some((known) => known.name === view.branch);
@@ -362,15 +329,27 @@ export function RepoPage({
 	const current = view.kind === "change" ? "changes" : view.tab;
 	// A tab's content fades in as you switch to it; the first one comes in with the page.
 	const switched = useChanged(current);
-	const admin = manage ? (
-		<RepoAdmin
-			repo={repo}
-			access={access}
-			manage={manage}
-			onChanged={() => onAccessChanged?.()}
-			onDeleted={() => onDeleted?.()}
-		/>
-	) : undefined;
+	// An admin's Settings has a page per section; everyone else reads how changes merge and who may do what.
+	let settings: ReactNode = null;
+	if (manage && access?.level === "admin")
+		settings = (
+			<RepoSettings
+				repo={repo}
+				branch={branch}
+				section={view.kind === "repo" ? (view.section ?? "general") : "general"}
+				snapshot={snapshot}
+				access={access}
+				manage={manage}
+				{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
+				onAccessChanged={() => onAccessChanged?.()}
+				onDeleted={() => onDeleted?.()}
+			/>
+		);
+	else if (snapshot)
+		settings = (
+			<SettingsTab snapshot={snapshot} access={manage ? <RepoAccessBox repo={repo} access={access} /> : null} />
+		);
+	else if (manage) settings = <RepoAccessBox repo={repo} access={access} />;
 	return (
 		<>
 			<RepoHeader
@@ -424,8 +403,7 @@ export function RepoPage({
 						branch={branch}
 						api={api}
 						access={access}
-						manage={manage}
-						admin={admin}
+						settings={settings}
 						voting={voting}
 						onSettingsChanged={onSettingsChanged}
 					/>

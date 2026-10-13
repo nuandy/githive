@@ -100,7 +100,7 @@ export function TokenInput({
 		<div
 			data-slot="token-input"
 			className={cn(
-				"relative flex min-w-0 cursor-text flex-wrap items-center gap-1 rounded-md border border-input bg-card px-1.5 py-1",
+				"relative flex min-h-9.5 min-w-0 cursor-text flex-wrap items-center gap-1 rounded-md border border-input bg-card px-1.5 py-1",
 				"transition-[border-color] duration-fast ease-out",
 				"has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
 				invalid && "border-bad",
@@ -153,7 +153,7 @@ export function TokenInput({
 				aria-activedescendant={lit ? `${listId}-${shown.indexOf(lit)}` : undefined}
 				aria-invalid={invalid || undefined}
 				aria-describedby={describedBy}
-				className="min-w-24 flex-1 border-0 bg-transparent px-1 py-0.5 text-foreground outline-none placeholder:text-muted-foreground"
+				className="min-w-16 flex-1 border-0 bg-transparent px-1 py-0.5 text-foreground outline-none placeholder:text-muted-foreground"
 				value={typed}
 				placeholder={value.length ? undefined : placeholder}
 				autoComplete="off"

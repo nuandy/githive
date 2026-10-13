@@ -5,7 +5,7 @@ import { repoSnapshot, stubApi, visibleText } from "../test/fixtures";
 import { newRepoInput, NewRepoView } from "./NewRepoPage";
 import { type OrgActions, OrgView } from "./OrgPage";
 import { OrgsView } from "./OrgsPage";
-import { RepoAdmin, type RepoManageApi, VisibilityToggle } from "./RepoAdmin";
+import { DangerZone, GeneralSection, RepoAccessBox, type RepoManageApi, VisibilityToggle } from "./RepoAdmin";
 import { RepoPage } from "./RepoPage";
 
 const noop = async () => ({}) as never;
@@ -228,22 +228,23 @@ describe("a repo's access settings", () => {
 		visibility: "private",
 	});
 
-	it("gives admins visibility, collaborators and deleting", () => {
-		const text = visibleText(
-			renderToStaticMarkup(
-				<RepoAdmin
-					repo="acme/web"
-					access={access("admin")}
-					manage={manageApi}
-					onChanged={() => {}}
-					onDeleted={() => {}}
-				/>,
-			),
+	it("gives admins visibility and collaborators under General, and deleting in the Danger zone", () => {
+		const html = renderToStaticMarkup(
+			<GeneralSection repo="acme/web" access={access("admin")} manage={manageApi} onChanged={() => {}} />,
 		);
+		const text = visibleText(html);
 		expect(text).toContain("Admin: write, and change settings");
 		expect(text).toContain("Make public");
 		expect(text).toContain("Collaborators");
-		expect(text).toContain("Delete this repository");
+		// The form that adds a collaborator labels its fields, and says what the permission chosen lets them do.
+		expect(html).toMatch(/<label[^>]*for="collab-handle">Their handle<\/label>/);
+		expect(html).toMatch(/<label[^>]*for="collab-level">Permission<\/label>/);
+		expect(html).not.toContain("placeholder=");
+		expect(text).toContain("Write: review, and claim, push and merge changes.");
+		const danger = renderToStaticMarkup(<DangerZone repo="acme/web" deleteRepo={noop} onDeleted={() => {}} />);
+		expect(visibleText(danger)).toContain("Delete this repository");
+		// Deleting asks in a dialog, which wants the repo's name typed.
+		expect(danger).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>Delete repository…<\/button>/);
 	});
 
 	describe("its visibility", () => {
@@ -264,6 +265,7 @@ describe("a repo's access settings", () => {
 			);
 			expect(text).toContain("Make acme/docs public? Anyone signed in to GitHive can read its code and history.");
 			expect(text).toContain("Yes, make public");
+			expect(text).toContain("Keep private");
 		});
 
 		it("offers making a private repo public by name, before asking", () => {
@@ -284,17 +286,7 @@ describe("a repo's access settings", () => {
 	});
 
 	it("shows everyone else what they may do, and nothing to change", () => {
-		const text = visibleText(
-			renderToStaticMarkup(
-				<RepoAdmin
-					repo="acme/web"
-					access={access("write")}
-					manage={manageApi}
-					onChanged={() => {}}
-					onDeleted={() => {}}
-				/>,
-			),
-		);
+		const text = visibleText(renderToStaticMarkup(<RepoAccessBox repo="acme/web" access={access("write")} />));
 		expect(text).toContain("Write: review, and claim, push and merge changes");
 		expect(text).toMatch(/Only the owner.s members and its collaborators/);
 		expect(text).not.toContain("Collaborators");
@@ -325,32 +317,31 @@ describe("a repo's access settings", () => {
 			policy: { required: 2, vetoes: ["security"], escalate: [{ paths: ["package.json"], required: 3 }] },
 			verify: ["npm test"],
 		};
-		const render = (level: RepoAccess["level"]) =>
+		const render = (level: RepoAccess["level"], section?: "review" | "checks" | "path-rules" | "general") =>
 			renderToStaticMarkup(
 				<RepoPage
 					repo="acme/web"
-					view={{ kind: "repo", tab: "settings" }}
+					view={{ kind: "repo", tab: "settings", ...(section ? { section } : {}) }}
 					snapshot={snapshot}
 					api={stubApi()}
 					access={access(level)}
 					manage={{ ...manageApi, changeSettings: noop }}
 				/>,
 			);
-		const admin = render("admin");
-		expect(admin).toContain('id="settings-required" type="number" min="0" inputMode="numeric" value="2"');
-		expect(admin).toContain('value="npm test"');
-		expect(visibleText(admin)).toContain("Save settings");
-		// Saving is in ink: green is for landing and approving.
-		const saves = admin.match(/<button[^>]*type="submit"[^>]*>(?:Save|Saving)[^<]*/g) ?? [];
-		expect(saves.length).toBeGreaterThan(0);
-		for (const save of saves) {
-			expect(save).toContain("bg-primary");
-			expect(save).not.toContain("bg-good");
+		const review = render("admin", "review");
+		expect(review).toMatch(/id="settings-required" type="number" min="0" inputMode="numeric"[^>]* value="2"/);
+		expect(render("admin", "checks")).toContain('value="npm test"');
+		expect(visibleText(render("admin", "path-rules"))).toContain("Path rules");
+		expect(visibleText(render("admin"))).toContain("How the records are kept");
+		// Each section saves on its own, in ink: green is for landing and approving.
+		for (const section of ["review", "checks", "path-rules"] as const) {
+			const saves = render("admin", section).match(/<button[^>]*type="submit"[^>]*>(?:Save|Saving)[^<]*/g) ?? [];
+			expect(saves).toHaveLength(1);
+			expect(saves[0]).toContain("bg-primary");
+			expect(saves[0]).not.toContain("bg-good");
 		}
-		expect(visibleText(admin)).toContain("Stricter rules for paths");
-		expect(visibleText(admin)).toContain("How the records are kept");
-		const writer = visibleText(render("write"));
-		expect(writer).not.toContain("Save settings");
+		const writer = visibleText(render("write", "review"));
+		expect(writer).not.toContain("Save");
 		expect(writer).toContain("Merging needs 2 approvals; security can block");
 		expect(writer).toContain("package.json need 3 approvals");
 	});
@@ -376,8 +367,11 @@ describe("a repo's access settings", () => {
 		// Someone who may only write is told who can start it, with no button.
 		expect(render("write", { kind: "repo", tab: "changes" })).not.toContain("Start GitHive");
 		expect(render("write", { kind: "repo", tab: "changes" })).toContain("once one of its admins starts it");
-		// Settings shows who may do what and the code shows, but there is no way to start.
-		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Delete");
+		// Settings shows who may do what, and deleting, and the code shows, but there is no way to start.
+		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Collaborators");
+		expect(render("admin", { kind: "repo", tab: "settings", section: "danger-zone" })).toContain(
+			"Delete this repository",
+		);
 		expect(render("admin", { kind: "repo", tab: "settings" })).not.toContain("Nothing here yet");
 		expect(render("admin", { kind: "repo", tab: "code" })).not.toContain("Nothing here yet");
 	});

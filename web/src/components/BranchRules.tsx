@@ -1,97 +1,109 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import type { BranchRule, SavedMergeSettings, SettingsInput } from "../api";
-import { branchRulesFrom, emptyRule, type RuleDraft, ruleDraftsFrom } from "../lib/branchRules";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { useArrivals } from "../hooks/useArrivals";
+import { useHeldDraft } from "../hooks/useHeldDraft";
+import { branchRuleProblems, branchRulesFrom, emptyRule, type RuleDraft, ruleDraftsFrom } from "../lib/branchRules";
 import { messageOf } from "../lib/errors";
+import { counted } from "../lib/plural";
+import { draftKey } from "../lib/settingsDrafts";
+import { holderLabel, resolveHolder, roleProblem, type TokenOption, textOf, tokensOf } from "../lib/tokens";
 import { cn } from "../lib/utils";
+import { Icon } from "./Icon";
+import type { SettingsContext } from "./MergeSettings";
 import {
 	COMMAND,
+	failedStatus,
+	type FieldProblem,
+	problemsFor,
+	problemsStatus,
 	REMOVE,
 	RULE,
-	SaveBar,
-	SaveErrors,
+	savedStatus,
 	SETTINGS_FIELDS,
-	SETTINGS_FORM,
 	SettingField,
-	SettingsSection,
-} from "./MergeSettings";
-import { BoxBody } from "./ui/box";
+	SettingsPart,
+} from "./SettingsParts";
 import { Button } from "./ui/button";
 import { Collapse, Fold } from "./ui/collapse";
 import { Input, Label, NativeSelect, Textarea } from "./ui/field";
+import { SaveBar } from "./ui/save-bar";
+import { TokenInput } from "./ui/token-input";
 
-export interface BranchRulesProps {
-	/** The project's branch, which always has the repo's own settings. */
-	branch: string;
-	rules: BranchRule[] | undefined;
-	/** The settings tool, for this repo. */
-	save(settings: SettingsInput): Promise<SavedMergeSettings>;
-	onSaved?(): void;
-}
+const rulesDiffer = (a: RuleDraft[], b: RuleDraft[]) => JSON.stringify(a) !== JSON.stringify(b);
 
-/** Other branches' settings, for admins. Each rule matches branches by pattern and changes only what it sets. */
-export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) {
-	const freshKey = JSON.stringify(ruleDraftsFrom(rules));
-	const [drafts, setDrafts] = useState<RuleDraft[]>(() => JSON.parse(freshKey) as RuleDraft[]);
-	const [baseKey, setBaseKey] = useState(freshKey);
+/**
+ * Other branches' settings, for admins. Each rule matches branches by pattern and changes only what it sets. The
+ * rules are one draft, held for the session, saved together.
+ */
+export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, drafts, options }: SettingsContext) {
+	const held = useHeldDraft(drafts, draftKey(repo, "branch-rules"), ruleDraftsFrom(snapshot.branchRules), rulesDiffer);
 	const [busy, setBusy] = useState(false);
-	const [errors, setErrors] = useState<string[]>([]);
-	const [saved, setSaved] = useState(false);
-	const dirty = JSON.stringify(drafts) !== baseKey;
+	const [tried, setTried] = useState(false);
+	const [status, setStatus] = useState<ReactNode>(null);
+	const { draft: rules, base } = held;
+	const problems = tried ? branchRuleProblems(rules) : [];
 
-	// If someone else changed the rules, follow them unless this form has edits of its own.
-	const dirtyRef = useRef(dirty);
-	dirtyRef.current = dirty;
-	useEffect(() => {
-		if (dirtyRef.current) return;
-		setDrafts(JSON.parse(freshKey) as RuleDraft[]);
-		setBaseKey(freshKey);
-	}, [freshKey]);
-
-	const edit = (index: number, patch: Partial<RuleDraft>) => {
-		setSaved(false);
-		setDrafts((current) => current.map((draft, ruleIndex) => (ruleIndex === index ? { ...draft, ...patch } : draft)));
+	const change = (next: (current: RuleDraft[]) => RuleDraft[]) => {
+		setStatus(null);
+		held.edit(next);
 	};
-	const remove = (index: number) => setDrafts((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+	const edit = (index: number, patch: Partial<RuleDraft>) =>
+		change((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule)));
+	const remove = (index: number) => change((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
 	// A rule added after the page showed unfolds into place.
-	const added = useArrivals(drafts.map((_, index) => String(index)));
+	const added = useArrivals(rules.map((_, index) => String(index)));
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		const result = branchRulesFrom(drafts);
-		if (!result.rules) return setErrors(result.errors);
+		setTried(true);
+		const result = branchRulesFrom(rules);
+		if (!result.rules) return;
 		setBusy(true);
-		setErrors([]);
+		setStatus(null);
 		try {
 			const done = await save({ branch_rules: result.rules });
-			const next = ruleDraftsFrom(done.branchRules);
-			setDrafts(next);
-			setBaseKey(JSON.stringify(next));
-			setSaved(true);
+			held.reset(ruleDraftsFrom(done.branchRules));
+			setTried(false);
+			const count = done.branchRules?.length ?? 0;
+			setStatus(
+				savedStatus(count ? `Saved. ${counted(count, "branch rule")} from now on.` : "Saved. No branch rules."),
+			);
 			onSaved?.();
 		} catch (err) {
-			setErrors([messageOf(err)]);
+			setStatus(failedStatus(messageOf(err)));
 		} finally {
 			setBusy(false);
 		}
 	};
+	const discard = () => {
+		held.discard();
+		setTried(false);
+		setStatus(null);
+	};
 
 	return (
-		<form className={SETTINGS_FORM} onSubmit={submit}>
-			<SettingsSection id="settings-branches" title="Branch rules">
-				<BoxBody className={SETTINGS_FIELDS}>
-					<p className="m-0 text-muted-foreground">
-						Settings for other branches than {branch}, by name: feature/* for every feature branch, say. A field left
-						blank keeps the repo's setting above, and follows it when it changes. The first rule that matches a branch
-						is its rule; {branch} always has the repo's own.
-					</p>
-					{drafts.map((draft, index) => (
+		<form className="grid gap-4" onSubmit={submit} noValidate>
+			<SettingsPart
+				id="settings-branch-rules"
+				title="Branch rules"
+				description={
+					`Settings for branches other than ${branch}, by name: feature/* for every feature branch, say. A field ` +
+					`left blank keeps the repo's setting, and follows it when it changes. The first rule that matches a ` +
+					`branch is its rule; ${branch} always has the repo's own.`
+				}
+			>
+				<div className={cn(SETTINGS_FIELDS, "px-0.5 py-4")}>
+					{rules.length ? null : (
+						<p className="m-0 text-muted-foreground">No branch rules: every branch has the repo's settings.</p>
+					)}
+					{rules.map((rule, index) => (
 						<Collapse key={index} open appear={added(String(index))} className="-m-1">
 							<div className="p-1">
 								<BranchRuleFields
-									draft={draft}
+									draft={rule}
 									index={index}
 									busy={busy}
+									problems={problems}
+									options={options}
 									edit={(patch) => edit(index, patch)}
 									remove={() => remove(index)}
 								/>
@@ -99,19 +111,19 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 						</Collapse>
 					))}
 					<div>
-						<Button onClick={() => setDrafts((current) => [...current, emptyRule()])} disabled={busy}>
+						<Button onClick={() => change((current) => [...current, emptyRule()])} disabled={busy}>
+							<Icon name="plus" />
 							Add a branch rule
 						</Button>
 					</div>
-				</BoxBody>
-			</SettingsSection>
-			<SaveBar>
-				<SaveErrors errors={errors} />
-				{saved && !dirty ? <p className="mt-0 mb-2 animate-appear text-good">Branch rules saved.</p> : null}
-				<Button type="submit" variant="primary" disabled={busy || !dirty}>
-					{busy ? "Saving…" : "Save branch rules"}
-				</Button>
-			</SaveBar>
+				</div>
+			</SettingsPart>
+			<SaveBar
+				status={problems.length ? problemsStatus(problems) : status}
+				dirty={rulesDiffer(rules, base)}
+				busy={busy}
+				onDiscard={discard}
+			/>
 		</form>
 	);
 }
@@ -120,21 +132,28 @@ interface BranchRuleFieldsProps {
 	draft: RuleDraft;
 	index: number;
 	busy: boolean;
+	problems: FieldProblem[];
+	options: { roles: TokenOption[]; holders: TokenOption[] };
 	edit(patch: Partial<RuleDraft>): void;
 	remove(): void;
 }
 
-/** One branch rule: the branches it matches and what it changes for them. */
-// A branch rule's settings: four fields abreast, wrapping on narrow windows, their fields of one height on one line.
-const GRID = "grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] items-end gap-x-4 gap-y-3";
-const GRID_FIELD = "h-9 w-full";
+// A branch rule's settings, two abreast (one under another on a narrow window), their fields one height.
+const GRID =
+	"grid grid-cols-2 items-start gap-x-4 gap-y-3 to-640:grid-cols-1 [&_[data-slot=input]]:h-9.5 [&_[data-slot=native-select]]:h-9.5";
 
 /** One branch rule: the branches it matches and what it changes for them. Its own checks unfold as they're chosen. */
-function BranchRuleFields({ draft, index, busy, edit, remove }: BranchRuleFieldsProps) {
+function BranchRuleFields({ draft, index, busy, problems, options, edit, remove }: BranchRuleFieldsProps) {
 	const these = draft.checks === "these";
+	const pattern = problemsFor(problems, `rule-pattern-${index}`);
+	const required = problemsFor(problems, `rule-required-${index}`);
+	const vetoes = problemsFor(problems, `rule-vetoes-${index}`);
+	const grants = problemsFor(problems, `rule-grants-${index}`);
+	const verify = problemsFor(problems, `rule-verify-${index}`);
+	const whole = problemsFor(problems, `rule-${index}`);
 	return (
-		<fieldset className={cn(RULE, "gap-0")} disabled={busy}>
-			<legend className="sr-only">Rule {index + 1}</legend>
+		<fieldset className={cn(RULE, "gap-0")} disabled={busy} aria-describedby={whole.attrs["aria-describedby"]}>
+			<legend className="px-1 text-ui font-semibold">Rule {index + 1}</legend>
 			<SettingField>
 				<Label htmlFor={`rule-pattern-${index}`}>Branches</Label>
 				<Input
@@ -143,45 +162,28 @@ function BranchRuleFields({ draft, index, busy, edit, remove }: BranchRuleFields
 					placeholder="feature/*"
 					value={draft.pattern}
 					onChange={(event) => edit({ pattern: event.target.value })}
+					spellCheck={false}
+					{...pattern.attrs}
 				/>
+				{pattern.line}
 			</SettingField>
-			<div className={cn(GRID, "mt-2")}>
+			<div className={cn(GRID, "mt-3")}>
 				<SettingField>
 					<Label htmlFor={`rule-required-${index}`}>Required approvals</Label>
 					<Input
 						id={`rule-required-${index}`}
-						className={GRID_FIELD}
 						inputMode="numeric"
-						placeholder="the repo's"
+						placeholder="The repo's"
 						value={draft.required}
 						onChange={(event) => edit({ required: event.target.value })}
+						{...required.attrs}
 					/>
-				</SettingField>
-				<SettingField>
-					<Label htmlFor={`rule-vetoes-${index}`}>Roles that can block</Label>
-					<Input
-						id={`rule-vetoes-${index}`}
-						className={GRID_FIELD}
-						placeholder="the repo's"
-						value={draft.vetoes}
-						onChange={(event) => edit({ vetoes: event.target.value })}
-					/>
-				</SettingField>
-				<SettingField>
-					<Label htmlFor={`rule-grants-${index}`}>Who may vote as them</Label>
-					<Input
-						id={`rule-grants-${index}`}
-						className={GRID_FIELD}
-						placeholder="person:* for people only"
-						value={draft.grants}
-						onChange={(event) => edit({ grants: event.target.value })}
-					/>
+					{required.line}
 				</SettingField>
 				<SettingField>
 					<Label htmlFor={`rule-checks-${index}`}>Checks</Label>
 					<NativeSelect
 						id={`rule-checks-${index}`}
-						className={GRID_FIELD}
 						value={draft.checks}
 						onChange={(event) => edit({ checks: event.target.value as RuleDraft["checks"] })}
 					>
@@ -190,20 +192,55 @@ function BranchRuleFields({ draft, index, busy, edit, remove }: BranchRuleFields
 						<option value="these">These</option>
 					</NativeSelect>
 				</SettingField>
+				<SettingField>
+					<Label htmlFor={`rule-vetoes-${index}`}>Roles that can block</Label>
+					<TokenInput
+						id={`rule-vetoes-${index}`}
+						value={tokensOf(draft.vetoes)}
+						onChange={(chosen) => edit({ vetoes: textOf(chosen) })}
+						options={options.roles}
+						problemOf={roleProblem}
+						placeholder="The repo's"
+						disabled={busy}
+						aria-invalid={!!vetoes.attrs["aria-invalid"]}
+						aria-describedby={vetoes.attrs["aria-describedby"]}
+					/>
+					{vetoes.line}
+				</SettingField>
+				<SettingField>
+					<Label htmlFor={`rule-grants-${index}`}>Who may vote as them</Label>
+					<TokenInput
+						id={`rule-grants-${index}`}
+						value={tokensOf(draft.grants)}
+						onChange={(chosen) => edit({ grants: textOf(chosen) })}
+						options={options.holders}
+						labelOf={holderLabel}
+						resolve={resolveHolder}
+						placeholder="People and GitHive's reviewers"
+						disabled={busy}
+						aria-invalid={!!grants.attrs["aria-invalid"]}
+						aria-describedby={grants.attrs["aria-describedby"]}
+					/>
+					{grants.line}
+				</SettingField>
 			</div>
 			<Fold open={these} className="-mx-1 -mb-1">
-				<SettingField className="px-1 pt-2 pb-1">
+				<SettingField className="px-1 pt-3 pb-1">
 					<Label htmlFor={`rule-verify-${index}`}>Its checks, one command a line</Label>
 					<Textarea
 						id={`rule-verify-${index}`}
 						className={cn(COMMAND, "leading-[1.45]")}
 						value={draft.verify}
 						onChange={(event) => edit({ verify: event.target.value })}
+						spellCheck={false}
+						{...verify.attrs}
 					/>
+					{verify.line}
 				</SettingField>
 			</Fold>
-			<Button variant="link" className={cn(REMOVE, "mt-2")} onClick={remove}>
-				Remove this rule
+			{whole.line ? <div className="mt-3">{whole.line}</div> : null}
+			<Button variant="link" className={cn(REMOVE, "mt-3")} onClick={remove}>
+				Remove rule {index + 1}
 			</Button>
 		</fieldset>
 	);

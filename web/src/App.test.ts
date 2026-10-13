@@ -17,6 +17,12 @@ describe("the window title", () => {
 		expect(headingOf({ page: "repo", repo, tab: "code", path: "" }, 0, "").title).toBe(
 			"Code · acme/storefront · GitHive",
 		);
+		expect(headingOf({ page: "repo", repo, tab: "settings", section: "general" }, 0, "").title).toBe(
+			"Settings · acme/storefront · GitHive",
+		);
+		expect(headingOf({ page: "repo", repo, tab: "settings", section: "branch-rules" }, 0, "").title).toBe(
+			"Branch rules · Settings · acme/storefront · GitHive",
+		);
 		expect(headingOf({ page: "not-found" }, 0, "").title).toBe("Page not found · GitHive");
 	});
 

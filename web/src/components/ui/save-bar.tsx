@@ -12,6 +12,7 @@ export function SaveBar({
 	dirty,
 	busy = false,
 	onDiscard,
+	canDiscard = dirty,
 	saveLabel = "Save",
 	discardLabel = "Discard",
 	className,
@@ -24,6 +25,8 @@ export function SaveBar({
 	/** A save is under way. */
 	busy?: boolean;
 	onDiscard(): void;
+	/** Whether Discard does anything: while there are edits, unless told otherwise (closing an editor, say). */
+	canDiscard?: boolean;
 	saveLabel?: string;
 	discardLabel?: string;
 }) {
@@ -41,7 +44,7 @@ export function SaveBar({
 				{status}
 			</p>
 			<div className="flex gap-2">
-				<Button disabled={busy || !dirty} onClick={onDiscard}>
+				<Button disabled={busy || !canDiscard} onClick={onDiscard}>
 					{discardLabel}
 				</Button>
 				<Button type="submit" variant="primary" disabled={busy || !dirty}>
