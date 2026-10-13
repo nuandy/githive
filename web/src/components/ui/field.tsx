@@ -6,6 +6,8 @@ import { cn } from "../../lib/utils";
 
 const field = [
 	"min-w-0 rounded-md border border-input bg-card px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground",
+	// A field whose value is wrong says so under it (FieldHint), and its edge is red.
+	"aria-invalid:border-bad",
 	"[font-family:inherit] [font-size:inherit] [font-weight:inherit] leading-[inherit]",
 	"transition-[border-color] duration-fast ease-out",
 	"disabled:cursor-not-allowed disabled:opacity-55",

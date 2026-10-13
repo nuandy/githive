@@ -14,6 +14,7 @@ import { Dialog, DialogTrigger, OVERLAY, PANEL } from "./dialog";
 import { Popover, PopoverTrigger } from "./popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 import { Announcer } from "./announcer";
+import { TokenInput } from "./token-input";
 import { mayAnnounce, SAY_EVERY_MS } from "../../hooks/useAnnouncer";
 
 describe("the building blocks", () => {
@@ -197,6 +198,43 @@ describe("the building blocks", () => {
 		expect(html).not.toMatch(/data-slot="segmented"[^>]*overflow-hidden/);
 		expect(html).toContain("focus-visible:outline-2");
 		expect(html).not.toContain("focus-visible:outline-none");
+	});
+});
+
+describe("a token input", () => {
+	const tokens = (value: string[], invalid = false) =>
+		renderToStaticMarkup(
+			<TokenInput
+				id="vetoes"
+				value={value}
+				onChange={() => undefined}
+				labelOf={(token) => (token === "person:*" ? "Any person" : token)}
+				problemOf={(token) => (/^[a-z-]+$/.test(token) ? null : "not a role name")}
+				placeholder="security"
+				aria-invalid={invalid}
+				aria-describedby="vetoes-hint"
+			/>,
+		);
+
+	it("shows each choice as a chip a button takes away, then a field that offers more as you type", () => {
+		const html = tokens(["security", "person:*"]);
+		expect(html).toMatch(/<input[^>]*id="vetoes"[^>]*role="combobox"[^>]*aria-expanded="false"/);
+		expect(html).toContain('aria-describedby="vetoes-hint"');
+		expect(html).toContain('aria-label="Remove security"');
+		// A preset shows its words, and says its value to a screen reader.
+		expect(html).toMatch(/Any person<\/span><span class="sr-only"> \(person:\*\)<\/span>/);
+		expect(html).toContain('role="listbox"');
+		// The placeholder only while nothing is chosen.
+		expect(html).not.toContain('placeholder="security"');
+		expect(tokens([])).toContain('placeholder="security"');
+	});
+
+	it("marks a choice that's wrong, and the field, in red", () => {
+		const html = tokens(["Security Team"], true);
+		expect(html).toMatch(/data-slot="token" class="[^"]*border-bad/);
+		expect(html).toContain('<span class="sr-only">: not a role name</span>');
+		expect(html).toContain('aria-invalid="true"');
+		expect(html).toMatch(/data-slot="token-input" class="[^"]*border-bad/);
 	});
 });
 
