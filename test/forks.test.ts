@@ -262,7 +262,14 @@ describe("status", () => {
 		});
 		expect(summaries.at(-1)?.patch).toMatchObject({
 			needsYou: 1,
-			waiting: [{ change: "a-1", title: "Speed up the a module", reason: "reviewers disagree on the cache size" }],
+			waiting: [
+				{
+					kind: "question",
+					change: "a-1",
+					title: "Speed up the a module",
+					reason: "reviewers disagree on the cache size",
+				},
+			],
 		});
 
 		// An agent can't pass itself off as a person to answer it.
@@ -293,6 +300,43 @@ describe("status", () => {
 		const after = await repoSnapshot(watched, "project");
 		expect(after.claims[0]!.attention).toBeUndefined();
 		expect(after.votes[0]).toMatchObject({ commit: head, reviewer: "person:abc", role: "review", verdict: "approve" });
+	}, 60_000);
+
+	it("counts a pushed change waiting on a vote only people give as needing a person, not one sent back", async () => {
+		await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["person:*"] } });
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Handle refund webhooks" });
+		await call("claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "Speed up the b module" });
+		await call("claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "Not pushed yet" });
+		await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
+		const sentBack = await pushChange(fork.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n" });
+		// Sent back to its agent: its agent's turn, not a person's.
+		await call("vote", {
+			commit: sentBack,
+			reviewer: "rev-1",
+			role: "review",
+			verdict: "reject",
+			evidence: "no tests",
+		});
+		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
+		const watched = {
+			...ctx(),
+			summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }),
+		};
+		await repoSnapshot(watched, "project");
+		expect(summaries.at(-1)?.patch).toMatchObject({
+			open: 3,
+			needsYou: 1,
+			waiting: [
+				{
+					kind: "vote",
+					change: "a-1",
+					title: "Handle refund webhooks",
+					role: "security",
+					reason: "Waiting for a security vote, which only a person can give.",
+				},
+			],
+		});
+		expect((summaries.at(-1)?.patch.waiting as unknown[]).length).toBe(1);
 	}, 60_000);
 
 	it("says how a change ended once its claim is gone", async () => {
