@@ -145,7 +145,8 @@ function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
 	);
 }
 
-/** Where you are: each place on the way a link, the last one not; on a phone, only the last two. */
+/** Where you are: each place on the way a link, the last one not. Only the last one shortens, so the others never
+ *  print under it; on a phone, only the last one: the repo header and the page say the rest. */
 function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
 	return (
 		<nav className="min-w-0 overflow-hidden" aria-label="Breadcrumb">
@@ -156,9 +157,8 @@ function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
 						<li
 							key={`${index}:${crumb.label}`}
 							className={cn(
-								"flex min-w-0 items-center whitespace-nowrap before:mx-2 before:text-border-strong before:content-['/']",
-								last && "overflow-hidden",
-								index < crumbs.length - 2 && "to-560:hidden",
+								"flex items-center whitespace-nowrap before:mx-2 before:text-border-strong before:content-['/']",
+								last ? "min-w-0 overflow-hidden" : "shrink-0 to-560:hidden",
 							)}
 						>
 							{crumb.href && !last ? (
