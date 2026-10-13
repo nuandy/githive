@@ -24,7 +24,6 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 	};
 	const removeCheck = (index: number) =>
 		update({ verify: draft.verify.filter((_, checkIndex) => checkIndex !== index) });
-	const hasBrowserCheck = draft.verify.some((command) => command.includes(BROWSER_CHECK));
 
 	return (
 		<SettingsSection id="settings-checks" title="Merge checks">
@@ -63,18 +62,7 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 						<Icon name="plus" />
 						Add a check
 					</Button>
-					{hasBrowserCheck ? null : (
-						<Button
-							className="animate-appear"
-							onClick={() => update({ verify: [...draft.verify, BROWSER_CHECK] })}
-							disabled={busy}
-						>
-							<Icon name="plus" />
-							Add a browser check
-						</Button>
-					)}
 				</div>
-				<BrowserCheckHelp />
 				<SettingField>
 					<Label htmlFor="skip-checks">Skipped for changes that only touch</Label>
 					<Textarea
@@ -96,44 +84,12 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 	);
 }
 
-/** The command that opens the site in Chromium (src/browser-check/check.mjs). */
-export const BROWSER_CHECK = "githive-browser-check";
-
 /** A note under the checks that unfolds: a quiet rule above it, its summary muted. */
 const MORE = cn(
 	"disclosure mt-4 border-t border-border pt-3",
 	"[&>summary]:cursor-pointer [&>summary]:font-medium [&>summary]:text-muted-foreground",
 	"[&_p]:my-2 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_li]:wrap-anywhere",
 );
-
-/** What the browser check does and how to point it at an app. */
-function BrowserCheckHelp() {
-	return (
-		<details className={MORE}>
-			<summary>What the browser check does</summary>
-			<p>
-				<code>{BROWSER_CHECK}</code> opens the site in Chromium. A page fails on an uncaught error, a console error, or
-				one of its own files failing to load. Then it clicks every button, in-page link and summary, one at a time from
-				a fresh load, and fails on a click that throws or that leaves the page as it was: the dead buttons two changes
-				can make together, each right alone.
-			</p>
-			<ul>
-				<li>
-					A static site is served from the repo's files: <code>--root site</code> for a folder,{" "}
-					<code>--page /about.html</code> for each page (the default is <code>/</code>).
-				</li>
-				<li>
-					An app with a server: <code>--start "npm run dev" --url http://localhost:5173</code>. It waits up to two
-					minutes for the URL to answer.
-				</li>
-				<li>
-					A button whose effect the page can't show, such as copying to the clipboard: mark it{" "}
-					<code>data-githive-ignore</code>, or pass <code>--ignore "#copy-link"</code>.
-				</li>
-			</ul>
-		</details>
-	);
-}
 
 /** Why a repo with agents working in parallel wants checks, shown while it has none. */
 function NoChecksHint() {
@@ -160,8 +116,7 @@ function CheckEnvironment({ branch }: { branch: string }) {
 			<ul>
 				<li>
 					Debian, with Node 24, npm and git. Python 3 (with uv), Go, Rust and Bun too, when the repo has a
-					pyproject.toml or requirements.txt, a go.mod, a Cargo.toml, or a bun.lock. Chromium, when a check runs{" "}
-					<code>{BROWSER_CHECK}</code>.
+					pyproject.toml or requirements.txt, a go.mod, a Cargo.toml, or a bun.lock.
 				</li>
 				<li>
 					Dependencies installed first: npm ci (npm install without a lockfile) unless a check installs them, or bun

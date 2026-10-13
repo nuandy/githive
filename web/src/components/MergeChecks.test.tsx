@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { draftFrom } from "../lib/mergeSettings";
-import { BROWSER_CHECK, MergeChecks } from "./MergeChecks";
+import { MergeChecks } from "./MergeChecks";
 
 describe("the merge checks", () => {
 	const shown = (verify: string[]) =>
@@ -14,9 +14,11 @@ describe("the merge checks", () => {
 			/>,
 		);
 
-	it("offers to add the browser check until a check runs it", () => {
-		expect(shown(["npm test"])).toContain("Add a browser check");
-		expect(shown(["npm test", `${BROWSER_CHECK} --page /`])).not.toContain("Add a browser check");
-		expect(shown([])).toContain("What the browser check does");
+	it("lists the checks with a way to add one, and says what they run in", () => {
+		const html = shown(["npm test"]);
+		expect(html).toContain('value="npm test"');
+		expect(html).toContain("Add a check");
+		expect(html).toContain("What the checks run in");
+		expect(html).not.toMatch(/browser check|Chromium/i);
 	});
 });

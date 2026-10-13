@@ -14,23 +14,12 @@ const compiledWasm: Plugin = {
 	},
 };
 
-// The Worker bundles the browser check's script as text (wrangler's Text rule), to write it into check containers.
-const browserCheckText: Plugin = {
-	name: "browser-check-text",
-	enforce: "pre",
-	load(id) {
-		const file = id.split("?")[0]!;
-		if (file.endsWith("/browser-check/check.mjs"))
-			return `import { readFileSync } from "node:fs";\nexport default readFileSync(${JSON.stringify(file)}, "utf8");`;
-	},
-};
-
 /** What no test run looks in. */
 export const SHARED_EXCLUDES = ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "demo/**"];
 export const SOAK = "test/soak/**";
 
 export default defineConfig({
-	plugins: [compiledWasm, browserCheckText],
+	plugins: [compiledWasm],
 	resolve: {
 		// Durable Object classes import cloudflare:workers; tests run them in Node with a stand-in.
 		alias: {

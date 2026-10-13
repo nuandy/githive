@@ -6,7 +6,6 @@ import { rpc } from "./rpc";
 import { mergeForCheck } from "./gate-check";
 import { type ContainerStart, cloneProject, logGitRequests, logStopped } from "./gate-container";
 import { checkoutDetached, fetchBase } from "./gate-git";
-import { installBrowserCheck, installedBrowser, setUpBrowserCheck } from "./gate-browser";
 import { checksFor, installMatches, isInstall, lockHash, setUpToolchains, skippedInstall } from "./gate-install";
 import {
 	type ChecksBranch,
@@ -259,15 +258,13 @@ export class Gate extends DurableObject<Env> {
 		const checks = await checksFor(container, plan.checks);
 
 		// Toolchains are read from the merged code, since a change may add one.
-		const setup = [...(await this.setUpToolchains(container)), ...(await setUpBrowserCheck(container, checks))];
+		const setup = await this.setUpToolchains(container);
 		if (setup.some((r) => r.exitCode !== 0)) return result({ results: setup });
 
 		const results = await this.runChecks(container, checks);
 		if (!results) return this.check(head, plan);
 		// This Gate had to set up or install more than the snapshot held, so ask the repo's own Gate to refresh it.
-		let installed = results.some((r) => isInstall(r.command) && !r.output.startsWith("Skipped"));
-		// A check that installed Chromium did what the snapshot should have had too.
-		if (installedBrowser(results)) installed = true;
+		const installed = results.some((r) => isInstall(r.command) && !r.output.startsWith("Skipped"));
 		if (plan.repo && !this.ownsSnapshot(plan.repo) && (started === "fresh" || installed))
 			this.askForWarmUp(plan.repo, plan);
 		return result({
@@ -452,7 +449,6 @@ export class Gate extends DurableObject<Env> {
 			await checkoutDetached(container, `refs/remotes/base/${branch}`);
 			await this.setUpToolchains(container);
 			await this.installForChecks(container, input.checks);
-			await installBrowserCheck(container, input.checks);
 		}
 		await this.ctx.storage.put("warmedAt", Date.now());
 		await this.snapshotIfDue(container, input.repo);

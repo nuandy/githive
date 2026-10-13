@@ -1,8 +1,8 @@
 // What a change's site preview looks like, as Clef sees it, beside a push's other hints (see push-hints.ts). A public
 // repo that's a static site serves each change's latest push as a preview (src/routes/site.ts); Browser Run takes a
 // wide and a narrow screenshot of it, and Clef is asked whether a person opening it would find it broken: blank,
-// unstyled, laid out wrong, or showing an error. That catches what the browser check can't (a page with no errors that
-// looks wrong), before review rather than after landing. It's a hint, so nothing waits on it and nothing is refused.
+// unstyled, laid out wrong, or showing an error message, as a page can look with nothing in it failing. It's a hint,
+// given before review, so nothing waits on it and nothing is refused.
 
 import type { Clef, ClefQuestion } from "./clef";
 import type { PushHint } from "./push-hints";

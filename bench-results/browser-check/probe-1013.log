@@ -1,7 +1,0 @@
-[14 s] repo nuandy/browser-probe-mv5uppda
-[28 s] claimed: true
-[42 s] pushed the page with the dead button; merging
-[133 s] merge: {"ok":false,"reasons":["checks failed: githive-browser-check exited 1"],"why":["checks"],"checks":[{"command":"githive-browser-check","exitCode":1,"output":"browser check failed on 1 page:\n- /: clicking button#show \"Show\" changed nothing on the page\nA button whose effect the page can't show (copying to the clipboard) can be marked data-githive-ignore.\n"}],"next":"Its checks failed: `githive-browser-check` exited 1. Reproduce it in your clone, up to date with the branch it lands on; fix it, push a new commit to `fork`, then call `status`."}
-[135 s] pushed the fix; merging
-[149 s] merge: {"ok":true,"commit":"cddb53b5ccfe6e71e84fe2b34e3dd7a8a98d1992","next":"Landed as cddb53b5; your claim is released. Choose your next work from `backlog` or `reviews`."}
-[175 s] deleted nuandy/browser-probe-mv5uppda
