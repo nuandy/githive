@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import type { ManageApi, OrgDetail, OrgRole } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { canLeave, canManage } from "../lib/orgs";
-import { LEVELS, type Level } from "../lib/permissions";
+import { LEVEL_WORDS, LEVELS, type Level } from "../lib/permissions";
 import { href } from "../lib/routes";
 import { useRowActions } from "../hooks/useRowActions";
 import { type Undo, useUndo } from "../hooks/useUndo";
@@ -13,11 +13,12 @@ import { MembersSection } from "./OrgMembers";
 import { TeamsSection } from "./OrgTeams";
 import { Page } from "./Page";
 import { Badge } from "./ui/badge";
-import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
 import { Empty } from "./ui/empty";
 import { Field, FieldHint, Input, Label, NativeSelect } from "./ui/field";
-import { LINE, ManageHeader, ManagePage, NOTE, ROW, ROW_MAIN, ROWS, RULED, STACK, TITLE } from "./ui/manage";
+import { LINE, ManageHeader, ManagePage, ROW, ROW_MAIN, ROWS, RULED, STACK } from "./ui/manage";
+import { SaveBar } from "./ui/save-bar";
 
 /** What the org page can do; the page refreshes after each. */
 export type OrgActions = Pick<
@@ -157,9 +158,7 @@ function OrgRepos({ org }: { org: OrgDetail }) {
 	return (
 		<Box aria-labelledby="org-repos">
 			<BoxHeader>
-				<h2 id="org-repos" className={TITLE}>
-					Repositories
-				</h2>
+				<BoxTitle id="org-repos">Repositories</BoxTitle>
 			</BoxHeader>
 			{org.repos.length === 0 ? (
 				<p className={cn(LINE, "text-muted-foreground")}>
@@ -194,6 +193,11 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 	const [saved, setSaved] = useState(false);
 	const changed =
 		name !== (org.name ?? "") || level !== org.defaultPermission || membersCreate !== org.membersCanCreateRepos;
+	const discard = () => {
+		setName(org.name ?? "");
+		setLevel(org.defaultPermission);
+		setMembersCreate(org.membersCanCreateRepos);
+	};
 
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
@@ -212,9 +216,7 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 		<Box asChild>
 			<form onSubmit={save} aria-labelledby="org-settings">
 				<BoxHeader>
-					<h2 id="org-settings" className={TITLE}>
-						Settings
-					</h2>
+					<BoxTitle id="org-settings">Settings</BoxTitle>
 				</BoxHeader>
 				<BoxBody className={STACK}>
 					<Field>
@@ -240,6 +242,7 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 							className="w-full max-w-120"
 							value={level}
 							onChange={(event) => setLevel(event.target.value as Level)}
+							aria-describedby="org-default-means org-default-hint"
 						>
 							{LEVELS.map((option) => (
 								<option key={option} value={option}>
@@ -247,7 +250,8 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 								</option>
 							))}
 						</NativeSelect>
-						<FieldHint>
+						<FieldHint id="org-default-means">{LEVEL_WORDS[level]}.</FieldHint>
+						<FieldHint id="org-default-hint">
 							Owners and admins can always do everything. Collaborators added to one repository get what they're given
 							there.
 						</FieldHint>
@@ -263,17 +267,13 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 						<span>Members can make repositories</span>
 					</Label>
 					{errorFor("settings")}
-					{saved && !changed ? (
-						<p className={cn(NOTE, "animate-appear")} role="status">
-							Saved.
-						</p>
-					) : null}
-					<div className="flex flex-wrap gap-2">
-						<Button type="submit" variant="primary" disabled={!changed || busy === "settings"}>
-							{busy === "settings" ? "Saving…" : "Save"}
-						</Button>
-					</div>
 				</BoxBody>
+				<SaveBar
+					status={saved && !changed ? <span className="animate-appear text-good">Saved.</span> : null}
+					dirty={changed}
+					busy={busy === "settings"}
+					onDiscard={discard}
+				/>
 			</form>
 		</Box>
 	);

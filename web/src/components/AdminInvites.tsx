@@ -5,10 +5,10 @@ import { cn } from "../lib/utils";
 import type { AdminSectionProps } from "./AdminPage";
 import { AdminRow, AdminRows } from "./AdminRows";
 import { ConfirmButton } from "./Confirm";
-import { Box, BoxHeader } from "./ui/box";
+import { Box, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
-import { FieldHint, Input } from "./ui/field";
-import { INLINE, INLINE_INPUT, NOTE, STACK, TITLE } from "./ui/manage";
+import { Field, FieldHint, Input, Label } from "./ui/field";
+import { ADD_FORM, INLINE_FIELDS, INLINE_INPUT, NOTE } from "./ui/manage";
 
 /** The emails approved to sign in, with a form to approve another and a way to remove each. */
 export function AdminInvites({
@@ -34,38 +34,8 @@ export function AdminInvites({
 	return (
 		<Box aria-labelledby="admin-invites">
 			<BoxHeader>
-				<h2 id="admin-invites" className={TITLE}>
-					Who can sign in
-				</h2>
+				<BoxTitle id="admin-invites">Who can sign in</BoxTitle>
 			</BoxHeader>
-			<form className={cn("px-0.5 py-4", STACK)} onSubmit={approveEmail}>
-				<div className={INLINE}>
-					<label htmlFor="admin-email" className="sr-only">
-						Email to approve
-					</label>
-					<Input
-						id="admin-email"
-						type="email"
-						value={email}
-						onChange={(event) => setEmail(event.target.value)}
-						placeholder="person@example.com"
-						className={INLINE_INPUT}
-						autoComplete="off"
-					/>
-					<Button type="submit" variant="primary" disabled={!email.trim() || busy === "approve-email"}>
-						{busy === "approve-email" ? "Approving…" : "Approve an email"}
-					</Button>
-				</div>
-				<FieldHint>
-					They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone
-					already signed in.
-				</FieldHint>
-				{emailError ? (
-					<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
-						{emailError}
-					</p>
-				) : null}
-			</form>
 			<AdminRows items={invites} keyOf={(invite) => invite.email} empty="Nobody is approved yet.">
 				{(invite, arrived) => {
 					const key = `invite:${invite.email}`;
@@ -95,6 +65,33 @@ export function AdminInvites({
 					);
 				}}
 			</AdminRows>
+			<form className={ADD_FORM} onSubmit={approveEmail} aria-label="Approve an email">
+				<div className={INLINE_FIELDS}>
+					<Field className={INLINE_INPUT}>
+						<Label htmlFor="admin-email">Email to approve</Label>
+						<Input
+							id="admin-email"
+							type="email"
+							value={email}
+							onChange={(event) => setEmail(event.target.value)}
+							autoComplete="off"
+							aria-describedby="admin-email-hint"
+						/>
+					</Field>
+					<Button type="submit" variant="primary" disabled={!email.trim() || busy === "approve-email"}>
+						{busy === "approve-email" ? "Approving…" : "Approve"}
+					</Button>
+				</div>
+				<FieldHint id="admin-email-hint">
+					They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone
+					already signed in.
+				</FieldHint>
+				{emailError ? (
+					<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
+						{emailError}
+					</p>
+				) : null}
+			</form>
 		</Box>
 	);
 }

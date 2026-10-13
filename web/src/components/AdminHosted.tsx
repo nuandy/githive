@@ -5,10 +5,10 @@ import { cn } from "../lib/utils";
 import type { AdminSectionProps } from "./AdminPage";
 import { AdminRow, AdminRows } from "./AdminRows";
 import { ConfirmButton } from "./Confirm";
-import { Box, BoxHeader } from "./ui/box";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
-import { FieldHint, Input } from "./ui/field";
-import { INLINE, INLINE_INPUT, NOTE, STACK, TITLE } from "./ui/manage";
+import { Field, FieldHint, Input, Label } from "./ui/field";
+import { ADD_FORM, INLINE_FIELDS, INLINE_INPUT, NOTE } from "./ui/manage";
 
 /** Who may start GitHive's hosted agents, with a form to allow another and a way to remove each. */
 export function AdminHosted({
@@ -34,40 +34,14 @@ export function AdminHosted({
 	return (
 		<Box aria-labelledby="admin-hosted">
 			<BoxHeader>
-				<h2 id="admin-hosted" className={TITLE}>
-					Hosted agents
-				</h2>
+				<BoxTitle id="admin-hosted">Hosted agents</BoxTitle>
 			</BoxHeader>
-			<form className={cn("px-0.5 py-4", STACK)} onSubmit={allowPerson}>
+			<BoxBody>
 				<FieldHint>
 					GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed here
 					can start them.
 				</FieldHint>
-				<div className={INLINE}>
-					<label htmlFor="admin-hosted-handle" className="sr-only">
-						Handle to allow
-					</label>
-					<Input
-						id="admin-hosted-handle"
-						type="text"
-						value={handle}
-						onChange={(event) => setHandle(event.target.value)}
-						placeholder="handle"
-						className={INLINE_INPUT}
-						autoComplete="off"
-						spellCheck={false}
-					/>
-					<Button type="submit" variant="primary" disabled={!handle.trim() || busy === "allow-hosted"}>
-						{busy === "allow-hosted" ? "Allowing…" : "Allow a person"}
-					</Button>
-				</div>
-				<FieldHint>By their handle; they need to have signed in once.</FieldHint>
-				{handleError ? (
-					<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
-						{handleError}
-					</p>
-				) : null}
-			</form>
+			</BoxBody>
 			<AdminRows items={hosted} keyOf={(person) => person.handle} empty="Nobody may start hosted agents yet.">
 				{(person, arrived) => {
 					const key = `hosted:${person.handle}`;
@@ -97,6 +71,31 @@ export function AdminHosted({
 					);
 				}}
 			</AdminRows>
+			<form className={ADD_FORM} onSubmit={allowPerson} aria-label="Allow a person">
+				<div className={INLINE_FIELDS}>
+					<Field className={INLINE_INPUT}>
+						<Label htmlFor="admin-hosted-handle">Their handle</Label>
+						<Input
+							id="admin-hosted-handle"
+							type="text"
+							value={handle}
+							onChange={(event) => setHandle(event.target.value)}
+							autoComplete="off"
+							spellCheck={false}
+							aria-describedby="admin-hosted-hint"
+						/>
+					</Field>
+					<Button type="submit" variant="primary" disabled={!handle.trim() || busy === "allow-hosted"}>
+						{busy === "allow-hosted" ? "Allowing…" : "Allow"}
+					</Button>
+				</div>
+				<FieldHint id="admin-hosted-hint">They need to have signed in to GitHive once.</FieldHint>
+				{handleError ? (
+					<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
+						{handleError}
+					</p>
+				) : null}
+			</form>
 		</Box>
 	);
 }

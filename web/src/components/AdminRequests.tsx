@@ -3,10 +3,9 @@ import { timeAgo } from "../lib/relativeTime";
 import type { AdminSectionProps } from "./AdminPage";
 import { AdminRow, AdminRows } from "./AdminRows";
 import { ConfirmButton } from "./Confirm";
-import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
 import { FieldHint } from "./ui/field";
-import { TITLE } from "./ui/manage";
 
 const PROVIDERS: Record<string, string> = { github: "GitHub", google: "Google" };
 
@@ -25,9 +24,7 @@ export function AdminRequests({
 	return (
 		<Box aria-labelledby="admin-requests">
 			<BoxHeader>
-				<h2 id="admin-requests" className={TITLE}>
-					Requests
-				</h2>
+				<BoxTitle id="admin-requests">Requests</BoxTitle>
 			</BoxHeader>
 			<BoxBody>
 				<FieldHint>

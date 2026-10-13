@@ -210,7 +210,11 @@ export function orgDetails(repos: RepoFixture[]): Record<string, OrgDetail> {
 					members: [ROBIN.handle, PEOPLE.ines.handle, PEOPLE.theo.handle],
 				},
 			],
-			invites: [{ email: "quinn@acme.example", role: "member", createdAt: daysAgo(2, 130) }],
+			invites: [
+				{ email: "quinn@acme.example", role: "member", createdAt: daysAgo(2, 130) },
+				// The request the Admin page shows, waiting on GitHive's approval.
+				{ email: "jun@acme.example", role: "member", createdAt: ago(190), awaitingApproval: true },
+			],
 		},
 		fieldnotes: {
 			...fieldOrg,

@@ -506,7 +506,8 @@ export interface OrgDetail extends Org {
 	repos: RepoRecord[];
 	members: { userId: string; handle: string; name: string | null; avatarUrl: string | null; role: OrgRole }[];
 	teams: { id: string; slug: string; name: string | null; members: string[] }[];
-	invites: { email: string; role: OrgRole; createdAt: string }[];
+	/** Each says if it waits on a GitHive admin approving the email (newer servers). */
+	invites: { email: string; role: OrgRole; createdAt: string; awaitingApproval?: boolean }[];
 }
 
 /** What the caller may do in a repo (GET /repos/:owner/:name/access). */

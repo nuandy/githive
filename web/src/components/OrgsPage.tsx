@@ -9,7 +9,7 @@ import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
 import { Badge } from "./ui/badge";
-import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
 import { Field, FieldHint, Input, Label } from "./ui/field";
 
@@ -52,9 +52,7 @@ function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 	return (
 		<Box aria-labelledby="orgs-title">
 			<BoxHeader>
-				<h2 id="orgs-title" className="text-lead">
-					Where your repositories live
-				</h2>
+				<BoxTitle id="orgs-title">Where your repositories live</BoxTitle>
 			</BoxHeader>
 			<ul className="m-0 list-none p-0">
 				<li className={ROW}>
@@ -72,7 +70,7 @@ function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 					memberOf.map((org) => (
 						<li key={org.slug} className={cn(ROW, appear)}>
 							<div className={ROW_MAIN}>
-								<Icon name="repo" className="text-muted-foreground" />
+								<Icon name="org" className="text-muted-foreground" />
 								<a href={href.org(org.slug)}>{org.slug}</a>
 								{org.name ? <span className="text-muted-foreground">{org.name}</span> : null}
 							</div>
@@ -110,9 +108,7 @@ function NewOrgForm({ createOrg, onCreated }: Pick<OrgsViewProps, "createOrg" | 
 		<Box asChild>
 			<form onSubmit={submit} aria-labelledby="new-org-title">
 				<BoxHeader>
-					<h2 id="new-org-title" className="text-lead">
-						Create an organization
-					</h2>
+					<BoxTitle id="new-org-title">Create an organization</BoxTitle>
 				</BoxHeader>
 				<BoxBody className="grid gap-4">
 					<Field>

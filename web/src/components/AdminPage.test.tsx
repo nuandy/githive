@@ -50,6 +50,12 @@ describe("the Admin page", () => {
 		expect(text).toMatch(/doesn.t sign out someone already signed in/);
 		expect(text).toContain("allowed by admin@example.com");
 		expect(text).toMatch(/run on GitHive.s model account, so only the people listed here can start them/);
+		// The forms that add to a list are labelled, and come after it.
+		expect(html).toMatch(/<label[^>]*for="admin-email">Email to approve<\/label>/);
+		expect(html).toMatch(/<label[^>]*for="admin-hosted-handle">Their handle<\/label>/);
+		expect(html).not.toContain("placeholder=");
+		expect(html.indexOf("ada@example.com")).toBeLessThan(html.indexOf('for="admin-email"'));
+		expect(html.indexOf("allowed by admin@example.com")).toBeLessThan(html.indexOf('for="admin-hosted-handle"'));
 	});
 
 	it("says when there's nothing waiting, and nobody listed", () => {

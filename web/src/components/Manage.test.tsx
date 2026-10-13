@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { MyOrg, OrgDetail, RepoAccess } from "../api";
 import { repoSnapshot, stubApi, visibleText } from "../test/fixtures";
 import { newRepoInput, NewRepoView } from "./NewRepoPage";
+import { promotionQuestion, roleMeans } from "./OrgMembers";
 import { type OrgActions, OrgView } from "./OrgPage";
 import { OrgsView } from "./OrgsPage";
 import { DangerZone, GeneralSection, RepoAccessBox, type RepoManageApi, VisibilityToggle } from "./RepoAdmin";
@@ -158,6 +159,15 @@ describe("your organizations", () => {
 		expect(text).toContain("acme Acme admin");
 		expect(text).toContain("Create an organization");
 	});
+
+	it("marks an org with a building, not a repository's book", () => {
+		const html = renderToStaticMarkup(
+			<OrgsView me={{ handle: "ada" }} orgs={[ADA, acmeMembership("admin")]} createOrg={noop} onCreated={() => {}} />,
+		);
+		const acmeRow = html.slice(html.indexOf('href="#/orgs/acme"') - 600, html.indexOf('href="#/orgs/acme"'));
+		expect(acmeRow).toContain("M6 22V4");
+		expect(acmeRow).not.toContain("M4 19.5v-15");
+	});
 });
 
 describe("an organization's page", () => {
@@ -176,6 +186,53 @@ describe("an organization's page", () => {
 		// You don't change your own role here, and the last owner can't leave.
 		expect(html).not.toContain('id="role-ada"');
 		expect(text).not.toContain("Leave");
+	});
+
+	it("labels the fields that add people and teams, at the end of their lists", () => {
+		const html = renderToStaticMarkup(
+			<OrgView org={acme("owner")} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />,
+		);
+		for (const [id, label] of [
+			["add-member-email", "Email"],
+			["add-member-role", "Role"],
+			["new-team-slug", "Team name"],
+			["new-team-name", "Display name (optional)"],
+			["team-add-security", "Add to @acme/security"],
+		] as const)
+			expect(html).toMatch(new RegExp(`<label[^>]*for="${id}">${label.replace(/[()]/g, "\\$&")}</label>`));
+		expect(html).not.toContain('placeholder="person@example.com"');
+		expect(html).not.toContain('placeholder="security"');
+		// Each add-form comes after the rows it adds to.
+		expect(html.indexOf("dan@example.com")).toBeLessThan(html.indexOf('for="add-member-email"'));
+		expect(html.indexOf("@acme/security")).toBeLessThan(html.indexOf('for="new-team-slug"'));
+		// What the role chosen lets them do.
+		expect(visibleText(html)).toContain("Member: Write in its repositories");
+	});
+
+	it("keeps a badge on an invitation that waits on GitHive's approval", () => {
+		const waiting = acme("owner", {
+			invites: [{ email: "dan@example.com", role: "member", createdAt: "", awaitingApproval: true }],
+		});
+		const text = visibleText(
+			renderToStaticMarkup(<OrgView org={waiting} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />),
+		);
+		expect(text).toContain("dan@example.com Waiting for GitHive approval");
+		expect(text).toContain("joins once a GitHive admin approves them");
+		expect(
+			visibleText(
+				renderToStaticMarkup(
+					<OrgView org={acme("owner")} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />,
+				),
+			),
+		).not.toContain("Waiting for GitHive approval");
+	});
+
+	it("asks before making someone an admin or owner, saying what they'll be able to do", () => {
+		expect(promotionQuestion("sol", "acme", "owner")).toBe(
+			"Make sol an owner of acme? Owners can delete any of its repositories, and remove anyone, other owners too.",
+		);
+		expect(promotionQuestion("sol", "acme", "admin")).toMatch(/^Make sol an admin of acme\? Admins can delete/);
+		expect(roleMeans("admin", { defaultPermission: "write" })).toMatch(/^Admin: add and remove people/);
 	});
 
 	it("shows members the people and teams, without managing, and lets them leave", () => {
