@@ -1,4 +1,5 @@
 import type { LandedChange } from "../api";
+import { counted } from "./plural";
 
 // What a branch's history (History's data: the changes landed, newest first) says beyond each change: the last one to
 // touch a file, and which landed together.
@@ -31,4 +32,15 @@ export function batchesOf(changes: LandedChange[]): Batch[] {
 		else batches.push({ ...(change.at ? { at: change.at } : {}), changes: [change] });
 	}
 	return batches;
+}
+
+const twoDigits = (value: number) => String(value).padStart(2, "0");
+
+/** A batch's quiet heading: "Landed together at 14:02 · 3 changes", with its date on another day than today. */
+export function batchWords(at: string, count: number, now: number | Date = Date.now()): string {
+	const when = new Date(at);
+	const time = `${twoDigits(when.getHours())}:${twoDigits(when.getMinutes())}`;
+	const today = when.toDateString() === new Date(now).toDateString();
+	const day = today ? "" : ` on ${when.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+	return `Landed together${day} at ${time} · ${counted(count, "change")}`;
 }

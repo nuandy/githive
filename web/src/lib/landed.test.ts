@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LandedChange } from "../api";
-import { batchesOf, lastChangeTo } from "./landed";
+import { batchesOf, batchWords, lastChangeTo } from "./landed";
 
 const landed = (change: string, files: string[], at?: string): LandedChange => ({
 	commit: `${change}-merge`,
@@ -40,5 +40,13 @@ describe("changes landed together", () => {
 			[undefined, ["seed"]],
 			[undefined, ["prettier"]],
 		]);
+	});
+});
+
+describe("a batch's heading", () => {
+	it("says when it landed, on another day with its date, and how many changes", () => {
+		const at = new Date(2026, 9, 13, 14, 2).toISOString();
+		expect(batchWords(at, 3, new Date(2026, 9, 13, 18, 0))).toBe("Landed together at 14:02 · 3 changes");
+		expect(batchWords(at, 2, new Date(2026, 9, 15, 9, 0))).toMatch(/^Landed together on Oct 13 at 14:02 · 2 changes$/);
 	});
 });
