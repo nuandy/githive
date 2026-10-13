@@ -17,6 +17,7 @@ import {
 import { AdminPage } from "./components/AdminPage";
 import { AgentsPage } from "./components/AgentsPage";
 import { InboxPage } from "./components/InboxPage";
+import { DashboardKeys } from "./components/Keyboard";
 import { NewRepoPage } from "./components/NewRepoPage";
 import { OrgPage } from "./components/OrgPage";
 import { OrgsPage } from "./components/OrgsPage";
@@ -174,6 +175,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	// The reader's own repos, most recently active first, for the repo crumb's switcher.
 	const repoRows = summaries.data ? buildRepoRows(summaries.data) : [];
 	const yourRepos = repoRows.filter((row) => !row.public).map((row) => row.name);
+	// The keyboard's shortcuts, listed: from ? or the user menu.
+	const [shortcutsShown, setShortcutsShown] = useState(false);
 
 	const changeId = route.page === "change" ? route.change : null;
 	const { liveStatus, snapshot, audit, access, change } = useRepoData(repoName, changeId);
@@ -242,6 +245,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				crumbs={crumbs}
 				repos={yourRepos}
 				onRepos={onRepos}
+				onShortcuts={() => setShortcutsShown(true)}
 				inboxCount={inbox.count}
 				inboxCurrent={route.page === "inbox"}
 				me={me}
@@ -253,6 +257,14 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			/>
 			<PageErrors errors={errors} />
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
+			<DashboardKeys
+				route={route}
+				repos={yourRepos}
+				snapshot={snapshot.data}
+				people={me.kind === "user"}
+				help={shortcutsShown}
+				onHelp={setShortcutsShown}
+			/>
 		</Shell>
 	);
 }

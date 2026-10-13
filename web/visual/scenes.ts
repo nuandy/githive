@@ -285,11 +285,25 @@ const APP: Scene[] = [
 	page("admin-confirm", "/admin", { who: "operator", act: click("Remove") }),
 	page("not-found", "/nope/nothing"),
 	page("theme-menu", "/", { act: async (p) => p.getByRole("button", { name: /^Theme:/ }).click() }),
+	// On a phone, light and dark are in the user menu.
+	page("repos-menu-narrow", "/", { widths: [390], act: openUserMenu }),
+	// The keyboard: the ⌘K palette, typed into, and the list of shortcuts.
+	page("palette", STOREFRONT, { act: async (p) => p.keyboard.press("Control+k") }),
+	page("palette-typed", STOREFRONT, {
+		act: async (p) => {
+			await p.keyboard.press("Control+k");
+			await p.keyboard.type("docs");
+		},
+	}),
+	page("shortcuts", "/", { act: async (p) => p.keyboard.press("?") }),
 	// A choice against the system's: these match repos.dark and repos.light.
 	page("theme-dark-chosen", "/", { storage: { "githive.theme": "dark" }, schemes: ["light"] }),
 	page("theme-light-chosen", "/", { storage: { "githive.theme": "light" }, schemes: ["dark"] }),
 
 	page("storefront-hive", STOREFRONT),
+	// The repo crumb's switcher, and on a phone the header's ⋯ menu.
+	page("storefront-switcher", STOREFRONT, { act: click(/switch repository/) }),
+	page("storefront-header-menu", STOREFRONT, { widths: [390], act: click("More for acme/storefront") }),
 	page("storefront-hive-row", STOREFRONT, {
 		act: async (p) => p.locator('section[aria-labelledby="goals-title"] button[aria-expanded="false"]').first().click(),
 	}),
