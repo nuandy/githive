@@ -140,6 +140,8 @@ describe("the Agents page", () => {
 		expect(text).toContain("never used");
 		expect(text).toContain("ada/old-reviewer");
 		expect(text).toMatch(/Revoked/);
+		// A revoked agent says so in its badge, at full contrast, rather than fading.
+		expect(html).not.toContain("opacity-70");
 		// The active agent can get a token and be revoked; the revoked one can't.
 		expect(text).toContain("New token");
 		expect(html.match(/Expires in 90 days/g)).toHaveLength(1);

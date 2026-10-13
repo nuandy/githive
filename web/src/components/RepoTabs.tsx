@@ -302,7 +302,7 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 function ViolationRow({ violation }: { violation: RepoAudit["violations"][number] }) {
 	const by = violation.by ? identityName(violation.by) : "unverified";
 	return (
-		<li className={cn(AUDIT_ROW, violation.resolvedBy && "opacity-75")}>
+		<li className={AUDIT_ROW}>
 			<span className={cn(AUDIT_ICON, violation.resolvedBy ? "text-neutral" : "text-bad")}>
 				<Icon name={violation.resolvedBy ? "check-circle" : "alert"} />
 			</span>
@@ -311,6 +311,12 @@ function ViolationRow({ violation }: { violation: RepoAudit["violations"][number
 					<strong>{violation.rule}</strong> by {violation.author}
 					<span className="text-muted-foreground"> ({by})</span>
 					{" in"} <code>{shortSha(violation.commit)}</code>
+					{violation.resolvedBy ? (
+						<>
+							{" "}
+							<Badge size="sm">Resolved</Badge>
+						</>
+					) : null}
 				</p>
 				<p className="mt-0.5 mb-0 text-muted-foreground">{violation.detail}</p>
 				{violation.resolvedBy ? (
