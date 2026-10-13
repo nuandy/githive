@@ -10,6 +10,12 @@ import { cn } from "../../lib/utils";
 
 const Provided = createContext(false);
 
+/**
+ * Where overlays (tooltips, popovers) are put: the page's body, unless drawn into a window of their own (the Hive
+ * playground's narrow frame), whose body this names so they open beside what they're about.
+ */
+export const PortalContainer = createContext<HTMLElement | null>(null);
+
 export function TooltipProvider({ delayDuration = 300, ...props }: ComponentProps<typeof TooltipPrimitive.Provider>) {
 	return (
 		<Provided value={true}>
@@ -32,8 +38,9 @@ export function TooltipContent({
 	sideOffset = 6,
 	...props
 }: ComponentProps<typeof TooltipPrimitive.Content>) {
+	const container = useContext(PortalContainer);
 	return (
-		<TooltipPrimitive.Portal>
+		<TooltipPrimitive.Portal {...(container ? { container } : {})}>
 			<TooltipPrimitive.Content
 				data-slot="tooltip-content"
 				sideOffset={sideOffset}

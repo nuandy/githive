@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from "radix-ui";
-import type { ComponentProps } from "react";
+import { type ComponentProps, useContext } from "react";
 import { cn } from "../../lib/utils";
+import { PortalContainer } from "./tooltip";
 
 // A small panel that opens from what it's about, on a click or a tap: what a tooltip would say where there's no
 // pointer to hover with (a map cell on a phone), or a few controls. It grows out of its trigger and fades in, and
@@ -29,8 +30,9 @@ export function PopoverContent({
 	sideOffset = 6,
 	...props
 }: ComponentProps<typeof PopoverPrimitive.Content>) {
+	const container = useContext(PortalContainer);
 	return (
-		<PopoverPrimitive.Portal>
+		<PopoverPrimitive.Portal {...(container ? { container } : {})}>
 			<PopoverPrimitive.Content
 				data-slot="popover-content"
 				align={align}
