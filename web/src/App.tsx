@@ -146,7 +146,7 @@ export function App() {
 		return (
 			<EmptyPage role="alert">
 				<h1>GitHive didn't answer</h1>
-				<p>{bootError}. Reload the page to try again.</p>
+				<p>{bootError} Reload the page to try again.</p>
 			</EmptyPage>
 		);
 	}

@@ -541,6 +541,16 @@ export const SIGNED_OUT_EVENT = "githive:signed-out";
 /** What a call that needs signing in fails with: a session ended, or someone signed out asked for a private repo. */
 export const SIGNED_OUT_MESSAGE = "Your session ended: sign in to GitHive again.";
 
+/** A call the server refused: its words, and the HTTP status they came with (409 for a name that's taken, say). */
+export class ApiError extends Error {
+	readonly status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = "ApiError";
+		this.status = status;
+	}
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
 	const isRecord = value !== null && typeof value === "object" && !Array.isArray(value);
 	return isRecord ? (value as Record<string, unknown>) : null;
@@ -569,7 +579,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	}
 	if (!response.ok) {
 		if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
-		throw new Error(failureMessage(response, data));
+		throw new ApiError(failureMessage(response, data), response.status);
 	}
 	return data as T;
 }
