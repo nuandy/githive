@@ -140,6 +140,13 @@ describe("a change's state", () => {
 		expect(changeState(claim(), { now: hours(24) })).toBe("in-review");
 		// A question for a person comes first.
 		expect(changeState(claim({ head: null, attention: question }), { now: hours(24) })).toBe("needs-person");
+		// Approved, it's its agent's to land: in time, it's abandoned too.
+		const approval = vote({ verdict: "approve" });
+		expect(changeState(claim({ approval: approved }), { votes: [approval], now: hours(1) })).toBe("approved");
+		expect(changeState(claim({ approval: approved }), { votes: [approval], now: hours(3) })).toBe("abandoned");
+		// Its checks failed, which rejects its head: handed back to its agent, then abandoned.
+		const failed = vote({ reviewer: "githive-checks", role: "checks" });
+		expect(changeState(claim(), { votes: [failed], now: hours(3) })).toBe("abandoned");
 	});
 });
 
