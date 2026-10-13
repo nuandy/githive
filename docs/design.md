@@ -557,6 +557,13 @@ commit. Unsigned votes count by reviewer name. A vote from the change's author
 never counts: neither its claim's identity nor its agent name. So an agent
 can't approve its own change, or approve twice under two names.
 
+An agent that builds and also reviews others' changes brings what it built to
+the review if it reviews in the same context. The instructions and the
+`credentials` step for a review ask it to review in a fresh context (a subagent
+or a new session) when it has been building. It's advice: GitHive can't see an
+outside agent's context. GitHive's own agents review fresh anyway, each review
+a model conversation of its own.
+
 A person and their agents count as one. Between them they approve once, and a
 change by one of a person's agents can't be approved by that person's other
 agents: five agents of one person can't sign off each other's changes. The

@@ -122,7 +122,8 @@ const STEPS: Record<string, Step> = {
 		if (text(reply.author) && head) {
 			const review =
 				`Run the \`git\` setup commands, read the diff, then \`vote\` on ${head} as ${text(reply.role) ?? "review"}, ` +
-				"with what you checked as evidence.";
+				"with what you checked as evidence. If you've been building in this session, review in a fresh one " +
+				"(a subagent or a new session).";
 			const hint = pushHintLine(reply, "reviewer");
 			return hint ? `${hint}\n${review}` : review;
 		}

@@ -79,7 +79,7 @@ describe("forks (the default)", () => {
 			project: { url: project.url, token: "read", branch: "main" },
 			git: { setup: expect.any(Array), diff: `git diff origin/main...${head}` },
 			note: expect.stringMatching(/read-only/),
-			next: `Run the \`git\` setup commands, read the diff, then \`vote\` on ${head} as review, with what you checked as evidence.`,
+			next: `Run the \`git\` setup commands, read the diff, then \`vote\` on ${head} as review, with what you checked as evidence. If you've been building in this session, review in a fresh one (a subagent or a new session).`,
 		});
 		// Read-only access to the author's fork.
 		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "read" }]);

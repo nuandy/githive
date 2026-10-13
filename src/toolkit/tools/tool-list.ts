@@ -47,12 +47,13 @@ export const INSTRUCTIONS = [
 		"(`credentials` names it: main, master, ...) is written only through the toolkit.",
 	"3. Reviewers get the change's code with `credentials` and its change (read-only for a change that " +
 		"isn't yours: its branch in the author's fork, and the project to diff against; it marks the review " +
-		"as yours, so others aren't offered it), then `vote` on the exact commit they reviewed. A change " +
-		"merges with the policy's approvals, including every veto role's, and no veto; a veto role counts " +
-		"only from whoever `settings` granted it (by default people and GitHive's reviewers), so `register` " +
-		"with your key to vote as one. Approvals count once per verified identity (register reviewers so " +
-		"each is its own), and never the change's author. `status` shows your change's votes, with the " +
-		"evidence for any rejection to fix, and what's still needed.",
+		"as yours, so others aren't offered it), then `vote` on the exact commit they reviewed. Review in a " +
+		"fresh context (a subagent or a new session) when you've been building in this one, so what you built " +
+		"doesn't color what you review. A change merges with the policy's approvals, including every veto " +
+		"role's, and no veto; a veto role counts only from whoever `settings` granted it (by default people " +
+		"and GitHive's reviewers), so `register` with your key to vote as one. Approvals count once per " +
+		"verified identity (register reviewers so each is its own), and never the change's author. `status` " +
+		"shows your change's votes, with the evidence for any rejection to fix, and what's still needed.",
 	"4. Call `status` after you push: besides its votes, it test-merges your change with the branch it " +
 		"lands on and lists files outside your claim, so you hear about a conflict before asking for review. " +
 		"GitHive never guesses: it merges when git can merge cleanly, and otherwise tells you exactly what " +

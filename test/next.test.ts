@@ -40,7 +40,7 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 		"credentials",
 		{ change: "o-1" },
 		{ change: "o-1", author: "other", head: HEAD, role: "security" },
-		`Run the \`git\` setup commands, read the diff, then \`vote\` on ${HEAD} as security, with what you checked as evidence.`,
+		`Run the \`git\` setup commands, read the diff, then \`vote\` on ${HEAD} as security, with what you checked as evidence. If you've been building in this session, review in a fresh one (a subagent or a new session).`,
 	],
 	[
 		"status",
