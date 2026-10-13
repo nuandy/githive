@@ -1,5 +1,6 @@
 import type { BacklogItem, DemoRunStatus, HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAnnouncer } from "../hooks/useAnnouncer";
 import { usePoll } from "../hooks/usePoll";
 import { freeWork, type Goal, hiveGoals } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
@@ -9,6 +10,7 @@ import { DemoBanner } from "./DemoRun";
 import { GoalsPanel } from "./GoalsPanel";
 import { HiveMap } from "./HiveMap";
 import { HiveStrip } from "./HiveStrip";
+import { Announcer } from "./ui/announcer";
 
 export interface HiveApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
@@ -193,9 +195,7 @@ export function Hive(props: HiveProps) {
 					now={now}
 				/>
 			</div>
-			<p className="sr-only" aria-live="polite">
-				{said}
-			</p>
+			<Announcer said={said} />
 		</div>
 	);
 }
@@ -212,9 +212,6 @@ function useRemembered(claims: RepoSnapshot["claims"]): Map<string, string[]> {
 	}, [claims]);
 }
 
-/** How often the live region may speak. */
-const SAY_EVERY_MS = 4_000;
-
 /**
  * What's moving now, by change, from comparing each read of the goals with the last one drawn. While the tab is
  * hidden nothing plays; what changed meanwhile is marked unseen until it's looked at.
@@ -223,8 +220,7 @@ function useMotions(goals: Goal[], now: number) {
 	const drawn = useRef<Goal[] | undefined>(undefined);
 	const [motions, setMotions] = useState<Map<string, GoalMotion & { seq: number }>>(new Map());
 	const [unseen, setUnseen] = useState<Set<string>>(new Set());
-	const [said, setSaid] = useState("");
-	const lastSaid = useRef(0);
+	const { said, say } = useAnnouncer();
 	const seq = useRef(0);
 	const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
 	useEffect(() => {
@@ -249,11 +245,7 @@ function useMotions(goals: Goal[], now: number) {
 			})
 			.filter(Boolean);
 		// A screen reader hears at most one announcement every few seconds, however busy the hive.
-		const quietFor = Date.now() - lastSaid.current;
-		if (words.length && quietFor >= SAY_EVERY_MS) {
-			lastSaid.current = Date.now();
-			setSaid(words.join(". "));
-		}
+		say(words.join(". "));
 		// Each motion's class comes off once it has played; a newer read mustn't cancel that.
 		for (const motion of started) {
 			const timer = setTimeout(() => {

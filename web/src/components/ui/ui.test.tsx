@@ -12,6 +12,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogTrigger } from "./alert-dial
 import { Dialog, DialogTrigger, OVERLAY, PANEL } from "./dialog";
 import { Popover, PopoverTrigger } from "./popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
+import { Announcer } from "./announcer";
+import { mayAnnounce, SAY_EVERY_MS } from "../../hooks/useAnnouncer";
 
 describe("the building blocks", () => {
 	it("draws a plain button that doesn't submit forms", () => {
@@ -156,6 +158,21 @@ describe("the building blocks", () => {
 		expect(html).not.toMatch(/data-slot="segmented"[^>]*overflow-hidden/);
 		expect(html).toContain("focus-visible:outline-2");
 		expect(html).not.toContain("focus-visible:outline-none");
+	});
+});
+
+describe("the announcer", () => {
+	it("says what it's given in a polite live region no one sees", () => {
+		expect(renderToStaticMarkup(<Announcer said="ada landed Search" />)).toBe(
+			'<p data-slot="announcer" class="sr-only" aria-live="polite">ada landed Search</p>',
+		);
+	});
+
+	it("speaks at most once every few seconds", () => {
+		expect(mayAnnounce(0, 1_000)).toBe(false);
+		expect(mayAnnounce(0, SAY_EVERY_MS)).toBe(true);
+		expect(mayAnnounce(10_000, 12_000)).toBe(false);
+		expect(mayAnnounce(10_000, 12_000, 1_000)).toBe(true);
 	});
 });
 
