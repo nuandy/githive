@@ -254,6 +254,7 @@ function RepoTabContent({
 				refParam={view.kind === "repo" ? view.ref : undefined}
 				branch={branch}
 				api={api}
+				snapshot={snapshot}
 			/>
 		);
 	}

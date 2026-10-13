@@ -112,6 +112,15 @@
 	--diff-del: #fbe9e6;
 	--diff-del-strong: #f3cdc6;
 
+	/* Code's syntax colors, in the Code tab: each reads at 4.5:1 or more on the card and surface-2. */
+	--code-keyword: #8a2f8f;
+	--code-string: #2a6630;
+	--code-literal: #9a4a00;
+	--code-comment: #5b676e;
+	--code-title: #1c5a93;
+	--code-type: #00676b;
+	--code-attr: #7a5300;
+
 	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;
@@ -175,6 +184,14 @@
 	--diff-add-strong: #1b3a29;
 	--diff-del: #2c1618;
 	--diff-del-strong: #48201f;
+
+	--code-keyword: #d39be8;
+	--code-string: #9ccc8a;
+	--code-literal: #f0a76a;
+	--code-comment: #8b9a99;
+	--code-title: #8cc4f0;
+	--code-type: #6fcfc5;
+	--code-attr: #e8c17a;
 
 	--mark-tile: #f5f6f4;
 	--mark-line: #1e2b33;
@@ -252,6 +269,13 @@
 	--color-diff-add-strong: var(--diff-add-strong);
 	--color-diff-del: var(--diff-del);
 	--color-diff-del-strong: var(--diff-del-strong);
+	--color-code-keyword: var(--code-keyword);
+	--color-code-string: var(--code-string);
+	--color-code-literal: var(--code-literal);
+	--color-code-comment: var(--code-comment);
+	--color-code-title: var(--code-title);
+	--color-code-type: var(--code-type);
+	--color-code-attr: var(--code-attr);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
 	--color-mark-dot: var(--mark-dot);

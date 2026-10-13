@@ -1,21 +1,47 @@
-import type { RepoFile, RepoTree } from "../api";
+import { useState } from "react";
+import type { BranchHistory, LandedChange, RepoFile, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { useStagger } from "../hooks/useStagger";
-import { shortSha } from "../lib/model";
+import { type ClaimHolder, holderOf, holdersFromSnapshot } from "../lib/claimsMap";
+import { languageOf } from "../lib/highlight";
+import { lastChangeTo } from "../lib/landed";
+import { isMarkdown } from "../lib/markdown";
+import { shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
+import { timeAgo } from "../lib/relativeTime";
 import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
+import { STATES } from "../lib/status";
 import { listDir, normalizePath, pathCrumbs, pathKind } from "../lib/tree";
 import { cn } from "../lib/utils";
+import { TokenLine, useHighlighted } from "./Highlighted";
 import { Icon } from "./Icon";
+import { Markdown } from "./Markdown";
+import { StateMark } from "./StateMark";
 import { Badge } from "./ui/badge";
 import { Box, BoxHeader, Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Empty } from "./ui/empty";
+import { Segmented } from "./ui/segmented";
 
 export interface CodeApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
 	file(repo: string, path: string, ref?: string): Promise<RepoFile>;
+}
+
+/** What else the Code tab reads, where the dashboard has it: what's landed, and what's being checked to land. */
+export interface CodeExtrasApi {
+	history?: (repo: string, branch: string) => Promise<BranchHistory>;
+	landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 }
 
 export interface CodeViewProps {
@@ -30,6 +56,14 @@ export interface CodeViewProps {
 	treeError?: string;
 	file?: RepoFile;
 	fileError?: string;
+	/** The other branches changes land on, to switch to. */
+	branches?: string[];
+	/** The open change that holds the path shown, if one does. */
+	holder?: ClaimHolder;
+	/** The last landed change to touch the file shown, as History has it. */
+	lastChange?: LandedChange;
+	/** Show a Markdown file's source rather than formatted (tests set it). */
+	source?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -54,7 +88,20 @@ function bodyPhase(
 }
 
 /** The Code tab, given what it has loaded: a folder listing or one file with line numbers. */
-export function CodeView({ repo, path, refParam, branch, tree, treeError, file, fileError }: CodeViewProps) {
+export function CodeView({
+	repo,
+	path,
+	refParam,
+	branch,
+	tree,
+	treeError,
+	file,
+	fileError,
+	branches = [],
+	holder,
+	lastChange,
+	source,
+}: CodeViewProps) {
 	const clean = normalizePath(path);
 	const shownRef = refParam ?? branch;
 	const link = (target: string) => href.code(repo, target, refParam);
@@ -64,14 +111,7 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 	return (
 		<section className="grid min-w-0 gap-3" aria-labelledby="code-title">
 			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-				<Badge
-					outline
-					className="font-mono text-caption leading-4.5"
-					title={tree ? `At commit ${tree.commit}` : undefined}
-				>
-					<Icon name="commit" size={14} />
-					{refParam ? shortSha(refParam) : shownRef}
-				</Badge>
+				<RefMenu repo={repo} path={clean} refParam={refParam} branch={branch} branches={branches} tree={tree} />
 				{refParam ? (
 					<a href={href.code(repo, clean)} className="text-ui">
 						Back to {branch}
@@ -94,15 +134,20 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 				</nav>
 			</div>
 
+			{holder && clean ? <ClaimBanner path={clean} holder={holder} /> : null}
+			{lastChange ? <LastChange repo={repo} change={lastChange} /> : null}
 			<div key={phase} className={cn("min-w-0", fades)}>
 				<CodeBody
+					repo={repo}
 					tree={tree}
 					treeError={treeError}
 					path={clean}
+					refParam={refParam}
 					shownRef={shownRef}
 					link={link}
 					file={file}
 					fileError={fileError}
+					source={source}
 				/>
 			</div>
 			{tree?.truncated ? (
@@ -114,7 +159,102 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 	);
 }
 
+/**
+ * Which branch or commit the code is shown at: a chip, or with other branches to go to, a menu of them (the project's
+ * first) that sets the address's ref.
+ */
+function RefMenu({
+	repo,
+	path,
+	refParam,
+	branch,
+	branches,
+	tree,
+}: {
+	repo: string;
+	path: string;
+	refParam: string | undefined;
+	branch: string;
+	branches: string[];
+	tree: RepoTree | undefined;
+}) {
+	const names = [branch, ...branches.filter((name) => name !== branch).sort()];
+	const current = refParam ?? branch;
+	const onBranch = names.includes(current);
+	const label = onBranch ? current : shortSha(current);
+	const commit = tree ? `At commit ${shortSha(tree.commit)}` : undefined;
+	if (names.length < 2)
+		return (
+			<Badge outline className="font-mono text-caption leading-4.5" title={commit}>
+				<Icon name="commit" size={14} />
+				{label}
+			</Badge>
+		);
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button
+					size="sm"
+					className="font-mono text-caption font-medium data-[state=open]:bg-surface-2"
+					aria-label={`Branch: ${label}`}
+				>
+					<Icon name="commit" size={14} />
+					{label}
+					<Icon name="chevron" size={14} className="text-muted-foreground" />
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start">
+				<DropdownMenuLabel>Show the code on</DropdownMenuLabel>
+				<DropdownMenuRadioGroup
+					value={onBranch ? current : ""}
+					onValueChange={(name) => {
+						window.location.hash = href.code(repo, path, name === branch ? undefined : name);
+					}}
+				>
+					{names.map((name) => (
+						<DropdownMenuRadioItem key={name} value={name} className="font-mono">
+							{name}
+							{name === branch ? <span className="font-sans text-muted-foreground">project</span> : null}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** Over a file or folder an open change holds: who holds it, for what, and where that change is. */
+function ClaimBanner({ path, holder }: { path: string; holder: ClaimHolder }) {
+	return (
+		<Callout className="text-ui">
+			<StateMark state={holder.state} className="mt-0.75 size-3.5 flex-none rounded-xs" />
+			<p className="m-0">
+				<code>{path}</code> is claimed by {holder.agent} for “<a href={holder.href}>{shortTitle(holder.title)}</a>”,{" "}
+				{STATES[holder.state].short}.
+			</p>
+		</Callout>
+	);
+}
+
+/** The last landed change to touch the file, linked, with when it landed and its commit. */
+function LastChange({ repo, change }: { repo: string; change: LandedChange }) {
+	return (
+		<p className="m-0 text-ui text-muted-foreground">
+			<Icon name="merge" size={14} className="mr-1.5 inline -mb-px align-baseline" />
+			Last changed by <a href={href.change(repo, change.change)}>{shortTitle(change.title || change.change)}</a>
+			{change.at ? <>, landed {timeAgo(change.at)}</> : null}
+			{" · "}
+			<a href={href.code(repo, "", change.commit)}>
+				<code>{shortSha(change.commit)}</code>
+			</a>
+		</p>
+	);
+}
+
 interface CodeBodyProps {
+	repo: string;
+	refParam: string | undefined;
+	source: boolean | undefined;
 	tree: RepoTree | undefined;
 	treeError: string | undefined;
 	/** The normalized path shown. */
@@ -126,7 +266,7 @@ interface CodeBodyProps {
 }
 
 /** What's at the path: the listing's error or loading, nothing, a folder's entries, or a file. */
-function CodeBody({ tree, treeError, path, shownRef, link, file, fileError }: CodeBodyProps) {
+function CodeBody({ repo, refParam, source, tree, treeError, path, shownRef, link, file, fileError }: CodeBodyProps) {
 	if (treeError)
 		return (
 			<Callout tone="bad" role="alert">
@@ -157,7 +297,7 @@ function CodeBody({ tree, treeError, path, shownRef, link, file, fileError }: Co
 			</Box>
 		);
 	if (kind === "dir") return <FolderView files={tree.files} path={path} link={link} />;
-	return <FileView file={file} error={fileError} path={path} />;
+	return <FileView repo={repo} refParam={refParam} file={file} error={fileError} path={path} source={source} />;
 }
 
 /** A folder's entry: a row that lights up under the pointer. */
@@ -198,7 +338,26 @@ function FolderView({ files, path, link }: { files: string[]; path: string; link
 	);
 }
 
-function FileView({ file, error, path }: { file?: RepoFile; error?: string; path: string }) {
+/**
+ * A file: its size, then its lines numbered and in their syntax colors, or a Markdown file formatted, with its source
+ * a click away.
+ */
+function FileView({
+	repo,
+	refParam,
+	file,
+	error,
+	path,
+	source: sourceFirst = false,
+}: {
+	repo: string;
+	refParam: string | undefined;
+	file?: RepoFile;
+	error?: string;
+	path: string;
+	source?: boolean;
+}) {
+	const [source, setSource] = useState(sourceFirst);
 	if (error)
 		return (
 			<Callout tone="bad" role="alert">
@@ -217,6 +376,7 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 		);
 	const lines = file.text !== undefined ? file.text.replace(/\n$/, "").split("\n") : [];
 	const lineCount = file.text !== undefined ? `${counted(lines.length, "line")} · ` : "";
+	const formatted = isMarkdown(path) && file.text !== undefined && !file.binary && !file.tooBig;
 	return (
 		<Box asChild className="overflow-hidden">
 			<div>
@@ -225,8 +385,31 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 						{lineCount}
 						{formatSize(file.size)}
 					</span>
+					{formatted ? (
+						<Segmented
+							label={`Show ${path}`}
+							className="ml-auto font-normal"
+							options={[
+								{ value: "formatted", words: "Formatted" },
+								{ value: "source", words: "Source" },
+							]}
+							value={source ? "source" : "formatted"}
+							onPick={(picked) => setSource(picked === "source")}
+						/>
+					) : null}
 				</BoxHeader>
-				<FileContents file={file} lines={lines} path={path} />
+				{formatted && !source ? (
+					<Markdown
+						key="formatted"
+						className="animate-fade px-1 py-5"
+						source={file.text!}
+						repo={repo}
+						dir={path.split("/").slice(0, -1).join("/")}
+						gitRef={refParam}
+					/>
+				) : (
+					<FileContents key="source" file={file} lines={lines} path={path} />
+				)}
 			</div>
 		</Box>
 	);
@@ -236,6 +419,7 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 const NOT_SHOWN = "my-3.75 px-0.5 py-3 text-muted-foreground";
 
 function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; path: string }) {
+	const highlighted = useHighlighted(file.binary || file.tooBig ? undefined : file.text, languageOf(path));
 	if (file.binary) return <p className={NOT_SHOWN}>This is a binary file, so it isn't shown.</p>;
 	if (file.tooBig) return <p className={NOT_SHOWN}>This file is too big to show here.</p>;
 	return (
@@ -250,7 +434,9 @@ function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; 
 							>
 								{index + 1}
 							</td>
-							<td className="px-3 py-0 whitespace-pre">{line || " "}</td>
+							<td className="px-3 py-0 whitespace-pre">
+								{highlighted?.[index]?.length ? <TokenLine tokens={highlighted[index]} /> : line || " "}
+							</td>
 						</tr>
 					))}
 				</tbody>
@@ -259,19 +445,45 @@ function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; 
 	);
 }
 
-/** The Code tab with its loading: the listing at the project's branch (or the address's ref), and the file shown. */
+/**
+ * The Code tab with its loading: the listing at the project's branch (or the address's ref), the file shown, and on a
+ * branch, who holds the path and the last change to touch the file.
+ */
 export function CodeTab({
 	repo,
 	path,
 	refParam,
 	branch,
 	api,
-}: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError"> & { api: CodeApi }) {
+	snapshot,
+}: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError" | "branches" | "holder" | "lastChange"> & {
+	api: CodeApi & CodeExtrasApi;
+	/** The repo's claims and branches, once GitHive has started on it. */
+	snapshot?: RepoSnapshot | null;
+}) {
 	const ref = refParam ?? branch;
 	const tree = usePoll(`tree:${repo}:${ref}`, () => api.tree(repo, ref), 60_000);
 	const clean = normalizePath(path);
 	const isFile = !!tree.data && pathKind(tree.data.files, clean) === "file";
 	const file = usePoll(isFile ? `file:${repo}:${ref}:${clean}` : null, () => api.file(repo, clean, ref), 60_000);
+	const branches = (snapshot?.branches ?? []).map((other) => other.name);
+	// Who holds what, and what's landed, are a branch's: at a commit, neither shows.
+	const onBranch = ref === branch || branches.includes(ref) ? ref : undefined;
+	const held = !!snapshot && !!onBranch && !!clean;
+	const landing = usePoll(
+		held && api.landing ? `landing:${repo}:${onBranch}` : null,
+		() => api.landing!(repo, onBranch!),
+		30_000,
+	);
+	const history = usePoll(
+		isFile && onBranch && api.history ? `history:${repo}:${onBranch}` : null,
+		() => api.history!(repo, onBranch!),
+		60_000,
+	);
+	const holder = held
+		? holderOf(clean, holdersFromSnapshot(snapshot, repo, { branch: onBranch, landing: landing.data }))
+		: undefined;
+	const lastChange = isFile && history.data ? lastChangeTo(clean, history.data.changes) : undefined;
 	return (
 		<CodeView
 			repo={repo}
@@ -282,6 +494,9 @@ export function CodeTab({
 			treeError={tree.data ? undefined : tree.error}
 			file={file.data}
 			fileError={file.data ? undefined : file.error}
+			branches={branches}
+			holder={holder}
+			lastChange={lastChange}
 		/>
 	);
 }
