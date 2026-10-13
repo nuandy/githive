@@ -14,7 +14,7 @@ import { mergeTools } from "./tools/merge-tools";
 import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
-import { waitTools } from "./tools/wait-tool";
+import { seenRings, waitTools } from "./tools/wait-tool";
 import { workTools } from "./tools/work-tools";
 
 // GitHive's MCP tools (see docs/design.md). Each tool is stateless: it reads or writes the repo's records
@@ -108,7 +108,8 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 	const agent = await verifiedAgent(args, ctx, registry.commit.state).catch(() => undefined);
 	if (!agent) return result;
 	const branch = projectBranch(registry.commit.state);
-	const news = await ctx.news(repo, branch, agent).catch((): NewsItem[] => []);
+	const delivery = name === "wait" ? waitDelivery(args, result) : undefined;
+	const news = await ctx.news(repo, branch, agent, delivery).catch((): NewsItem[] => []);
 	if (!news.length) return result;
 	const says = (landed: LandedNews) => {
 		const more = landed.filesMore ? ` and ${landed.filesMore} more` : "";
@@ -120,6 +121,14 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 		...(result as Record<string, unknown>),
 		news: news.map((item) => (isLanded(item) ? { ...item, says: says(item) } : item)),
 	};
+}
+
+// A `wait` reply tells only what rang up to its own `seen`, and the `seen` it was called with shows the last reply
+// arrived (see news-log.ts).
+function waitDelivery(args: Args, result: object) {
+	const ack = seenRings(args.seen);
+	const through = seenRings((result as { seen?: unknown }).seen);
+	return { ...(ack === undefined ? {} : { ack }), ...(through === undefined ? {} : { through }) };
 }
 
 type LandedNews = Extract<NewsItem, { kind: "landed" }>;

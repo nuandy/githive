@@ -164,8 +164,16 @@ export interface ToolContext {
 	 * answering pending, how often it looks, and how many changes its batch may take.
 	 */
 	mergeLimits?: { answerWithinMs?: number; pollMs?: number; maxBatch?: number };
-	/** What landed on a branch since this agent was last told, then its notices (see RepoCache.landingNews). */
-	news?: (repo: string, branch: string, agent: string) => Promise<NewsItem[]>;
+	/**
+	 * What landed on a branch since this agent was last told, then its notices (see RepoCache.newsFor). `delivery` is
+	 * `wait`'s, whose cursor moves when its next call brings the `seen` back.
+	 */
+	news?: (
+		repo: string,
+		branch: string,
+		agent: string,
+		delivery?: { ack?: number; through?: number },
+	) => Promise<NewsItem[]>;
 	/** Leaves notices for agents on a branch, told with their next reply (see RepoCache.notify). Never fails. */
 	notify?: (repo: string, branch: string, notices: { agent: string; notice: Notice }[]) => Promise<void>;
 	/**

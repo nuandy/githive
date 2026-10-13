@@ -281,7 +281,8 @@ function repoCacheParts(env: Env) {
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
 		pushHints: (repo, change) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).keptPushHints(change)),
-		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
+		news: (repo, branch, agent, delivery) =>
+			rpc(env.REPO_CACHE.getByName(`repo:${repo}`).newsFor(branch, agent, delivery)),
 		notify: (repo, branch, notices) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),
 		// Attempts are lines for a merge commit's story, so losing them costs only a line.

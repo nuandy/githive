@@ -138,7 +138,7 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		};
 		const tools = toolCalls(() => server, {
 			doorbell: () => doorbell,
-			news: (_repo, branch, agent) => cache.landingNews(branch, agent),
+			news: (_repo, branch, agent, delivery) => cache.newsFor(branch, agent, delivery),
 			ping: (_repo, event, tool, whom) => cache.ping("records", true, event ? [event] : [], tool, whom),
 			keptClaims: (_repo, read) => read(),
 		});
@@ -164,6 +164,22 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		expect(await call("wait", { agent: "author", seen: woken.seen, seconds: 1 }, "author")).toMatchObject({
 			changed: false,
 		});
+	});
+
+	it("tells a notice again when its wait reply was lost, and only once when it arrived", async () => {
+		const { call, cache } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		await cache.notify("main", [{ agent: "author", notice: notice("bob's change alters getUser") }]);
+		const woken = await call("wait", { agent: "author", seen: quiet.seen, seconds: 5 }, "author");
+		expect(woken.news).toEqual([expect.objectContaining({ says: "bob's change alters getUser" })]);
+		// The agent never got that reply, so it calls with the seen before it, and hears the notice again.
+		const retold = await call("wait", { agent: "author", seen: quiet.seen, seconds: 5 }, "author");
+		expect(retold).toMatchObject({ changed: true, what: ["notices"] });
+		expect(retold.news).toEqual([expect.objectContaining({ says: "bob's change alters getUser" })]);
+		// It got this one: its seen comes back, and the notice isn't told a third time.
+		const after = await call("wait", { agent: "author", seen: retold.seen, seconds: 1 }, "author");
+		expect(after).toMatchObject({ changed: false });
+		expect(after).not.toHaveProperty("news");
 	});
 
 	it("holds through a notice for another agent, and catches one left between two calls", async () => {

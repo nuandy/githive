@@ -49,7 +49,7 @@ in Git. Nothing decides, orders work or blocks a landing.
                  - main's interface changes per landed commit
                             │ notices
                             ▼
-                 RepoCache news channel (per agent, per branch)
+                 RepoCache news log (per repo; each agent reads from its own cursor)
                             │ rides the news every reply already carries
                             ▼
                  agent's next tool reply: news [{ kind, says, next }]
@@ -58,7 +58,7 @@ in Git. Nothing decides, orders work or blocks a landing.
 ### 1. The news channel
 
 Each object reply carries `news`: what others landed since the agent was last told, and the notices kept for it
-(`RepoCache.landingNews`).
+(`RepoCache.newsFor`, `src/news-log.ts`).
 
 - **Kinds** (each item has `kind`, a `says` line and, where there is one, a `next`):
 
@@ -67,17 +67,24 @@ Each object reply carries `news`: what others landed since the agent was last to
   | `landed` | Another change landed on a branch the agent works on. |
   | `interface` | A landed change altered a name the agent's change uses. |
   | `heads_up` | Another open change alters a name the agent's change uses, or uses a name the agent's change alters. |
+  | `clef` | Clef's hints about the agent's latest push. |
+  | `missed` | The agent's cursor is older than the log, so some news wasn't told: `status`, `reviews` and `backlog` say where things stand. |
 
-- **Notices** are kept per agent in RepoCache, across branches (each notice says which branch it's about), so a
-  notice about a change into a feature branch reaches its agent too. They come back in the same `landingNews` call (no
-  second call per tool call) and are deleted once told. Each agent keeps at most 50, for at most 24 hours. Unlike
-  landed news, notices reach an agent on its first call.
+- **One log, read from cursors.** Each ring that tells something (notices, a landing) leaves an entry in RepoCache's
+  news log under the ring's count, and each agent reads from its own cursor, so nothing is deleted on the way out.
+  The log keeps its last 1,000 entries; a reply tells at most 50 notices and 20 landings, none older than a day.
+  Notices are across branches (each says which branch it's about), so a notice about a change into a feature branch
+  reaches its agent too, and unlike landed news they reach an agent on its first call.
+- **A reply's cursor.** Most replies move the agent's cursor as they're made, so one lost on the way loses its news,
+  as before. A `wait` reply tells only what rang up to its own `seen`, and the cursor moves there when the next call
+  brings that `seen` back: a lost `wait` reply loses nothing, since the next call, with the older `seen`, is told it
+  again.
 - **GitHive's hosted builder** hears them too. Its toolkit calls aren't the agent's own, so they bring no news;
-  before each turn it takes the notices about the change it builds (`RepoCache.changeNotices`) and tells its model
+  before each turn it reads the notices about the change it builds from a cursor of its own (`RepoCache.changeNotices`) and tells its model
   in a few lines, with an interface change's next step worded for its own clone (`src/builder-news.ts`). When it
   pushes into a conflict, it's told who changed those files on the branch, from `status`'s `touchedBy`.
 - **Landed news** starts at the agent's first call, even when nothing has landed yet, so the first landings on a new
-  repo reach it. Its cursor is the newest outcome's time. News goes only to the verified caller, so a person merging
+  repo reach it. News goes only to the verified caller, so a person merging
   from the dashboard doesn't use up the change agent's news.
 
 ### 2. Conflicts that explain themselves
@@ -214,7 +221,7 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
 ## Tests
 
 Awareness is tested in GitHive's suite, with real git where the suite already uses it: a parser crash or a slow
-parse never touches a landing; notices are told once, capped and expire; the `fix` commands, pasted into an agent's
+parse never touches a landing; notices are told once from a cursor, again after a lost `wait` reply, capped and expire; the `fix` commands, pasted into an agent's
 clone, resolve the conflict; and a change to a function's body alone says nothing.
 
 ## Not included

@@ -98,6 +98,9 @@ function seenOf(seen: string | undefined) {
 
 const seenAt = (state: string, rings: number) => `${state}.${rings.toString(36)}`;
 
+/** The doorbell's count a `seen` was read at, if it carries one. */
+export const seenRings = (seen: unknown) => (typeof seen === "string" ? seenOf(seen)?.rings : undefined);
+
 /**
  * Whether nothing that concerns `agent` rang since `rings`, the count its `seen` was read at. Then what it saw still
  * holds, and the call holds without reading anything first. Unknown (no count, or one older than the doorbell's log)

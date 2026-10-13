@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache, RINGS_KEPT } = await import("../src/repo-cache");
+const { TOLD_KEPT } = await import("../src/news-log");
 const { toolContextFor } = await import("../src/toolkit/env");
 type Notice = import("../src/repo-cache").Notice;
 
@@ -101,12 +102,12 @@ describe("news of what landed", () => {
 			intent: `do ${change}`,
 		});
 		await live.landingSettled("main", [landed("old", "agent-b", "2026-10-10T10:00:00.000Z")]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 		await live.landingSettled("main", [
 			landed("mine", "agent-a", "2026-10-10T10:01:00.000Z"),
 			landed("theirs", "agent-b", "2026-10-10T10:01:00.000Z"),
 		]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([
+		expect(await live.newsFor("main", "agent-a")).toEqual([
 			{
 				kind: "landed",
 				change: "theirs",
@@ -118,24 +119,24 @@ describe("news of what landed", () => {
 			},
 		]);
 		// Told once.
-		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 	});
 
 	it("tells the first landings on a new repo", async () => {
 		const { live } = feed();
-		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 		await live.landingSettled("main", [settled("first", "agent-b", "landed", soon(1))]);
-		expect(await live.landingNews("main", "agent-a")).toMatchObject([{ kind: "landed", change: "first" }]);
+		expect(await live.newsFor("main", "agent-a")).toMatchObject([{ kind: "landed", change: "first" }]);
 	});
 
 	it("the cursor follows the newest outcome, not the last one kept", async () => {
 		const { live } = feed();
-		await live.landingNews("main", "agent-a");
+		await live.newsFor("main", "agent-a");
 		await live.landingSettled("main", [settled("landed", "agent-b", "landed", soon(2))]);
 		// A failure noted later, with an earlier time.
 		await live.landingSettled("main", [settled("failed", "agent-c", "failed", soon(1))]);
-		expect(await live.landingNews("main", "agent-a")).toMatchObject([{ change: "landed" }]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.newsFor("main", "agent-a")).toMatchObject([{ change: "landed" }]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 	});
 });
 
@@ -153,14 +154,12 @@ describe("notices", () => {
 	it("delivers a notice on the agent's first call, with the branch it's about", async () => {
 		const { live } = feed();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("hello") }]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([
-			{ ...notice("hello", expect.any(String)), branch: "main" },
-		]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([{ ...notice("hello", expect.any(String)), branch: "main" }]);
 	});
 
 	it("tells a notice once, after what landed, only to its agent, whichever branch it's about", async () => {
 		const { live } = feed();
-		await live.landingNews("main", "agent-a");
+		await live.newsFor("main", "agent-a");
 		await live.landingSettled("main", [settled("theirs", "agent-b", "landed", soon(1))]);
 		await live.notify("main", [
 			{ agent: "agent-a", notice: notice("second", minutesAgo(2)) },
@@ -169,26 +168,20 @@ describe("notices", () => {
 		]);
 		// A change into a feature branch: its agent hears of it in a reply about the project's branch.
 		await live.notify("feature", [{ agent: "agent-a", notice: notice("on feature", minutesAgo(1)) }]);
-		expect(await live.landingNews("main", "agent-a")).toMatchObject([
+		expect(await live.newsFor("main", "agent-a")).toMatchObject([
 			{ kind: "landed", change: "theirs" },
 			{ kind: "interface", says: "first", branch: "main" },
 			{ kind: "interface", says: "second", branch: "main" },
 			{ kind: "interface", says: "on feature", branch: "feature" },
 		]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([]);
-		expect(await live.landingNews("feature", "agent-a")).toEqual([]);
-		expect(await live.landingNews("main", "agent-ab")).toMatchObject([{ says: "not a's" }]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
+		expect(await live.newsFor("feature", "agent-a")).toEqual([]);
+		expect(await live.newsFor("main", "agent-ab")).toMatchObject([{ says: "not a's" }]);
 	});
 
-	it("keeps at most 50 notices per agent across branches, and none older than a day", async () => {
-		const storage = new FakeStorage();
-		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+	it("tells at most 50 notices at once, the newest, and none older than a day", async () => {
+		const { live } = feed();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("stale", minutesAgo(25 * 60)) }]);
-		// Dropped as a later notify trims.
-		await live.notify("main", [{ agent: "agent-a", notice: notice("fresh", minutesAgo(60)) }]);
-		expect([...(await storage.list<Notice>({ prefix: "notice:" })).values()].map((kept) => kept.says)).toEqual([
-			"fresh",
-		]);
 		const many = (from: number) =>
 			Array.from({ length: 30 }, (_, i) => ({
 				agent: "agent-a",
@@ -196,12 +189,34 @@ describe("notices", () => {
 			}));
 		await live.notify("main", many(0));
 		await live.notify("feature", many(30));
-		expect((await storage.list({ prefix: "notice:" })).size).toBe(50);
-		// One older than a day that no notify has trimmed yet is dropped when the agent is told.
-		storage.data.set("notice:agent-a:2026-01-01T00:00:00.000Z:x", notice("expired", "2026-01-01T00:00:00.000Z"));
-		const told = await live.landingNews("main", "agent-a");
+		const told = await live.newsFor("main", "agent-a");
 		expect(told.map((item) => (item as Notice).says)).toEqual(Array.from({ length: 50 }, (_, i) => `n${i + 10}`));
-		expect((await storage.list({ prefix: "notice:" })).size).toBe(0);
+	});
+
+	it("keeps a notice told in a lost wait reply, and tells a cursor older than the log that it missed some", async () => {
+		const storage = new FakeStorage();
+		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		await live.newsFor("main", "agent-a");
+		const before = await live.rings();
+		await live.notify("main", [{ agent: "agent-a", notice: notice("hello") }]);
+		const now = await live.rings();
+		// A wait reply tells what rang up to its own seen, and leaves the cursor where the call's seen was.
+		const told = await live.newsFor("main", "agent-a", { ack: before, through: now });
+		expect(told.map((item) => (item as Notice).says)).toEqual(["hello"]);
+		// That reply was lost: the next wait brings the older seen again, and is told again.
+		const again = await live.newsFor("main", "agent-a", { ack: before, through: now });
+		expect(again.map((item) => (item as Notice).says)).toEqual(["hello"]);
+		// This time it arrived: the call after brings its seen, and nothing is told twice.
+		expect(await live.newsFor("main", "agent-a", { ack: now, through: now })).toEqual([]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
+		// A cursor the log has trimmed past is told so, beside whatever it still holds.
+		for (let ring = 0; ring < TOLD_KEPT + 50; ring++)
+			await live.notify("main", [{ agent: "agent-b", notice: notice(`for b ${ring}`) }]);
+		// The log stays near its size, trimmed by the oldest.
+		expect((await storage.list({ prefix: "told:" })).size).toBeLessThanOrEqual(TOLD_KEPT + 50);
+		const late = await live.newsFor("main", "agent-a");
+		expect(late).toEqual([expect.objectContaining({ kind: "missed" })]);
+		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 	});
 
 	it("keeps the hive events that come with them, and tells watching pages", async () => {

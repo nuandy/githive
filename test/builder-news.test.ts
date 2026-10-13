@@ -41,7 +41,7 @@ describe("the builder's news", () => {
 });
 
 describe("a change's notices in the repo's cache", () => {
-	it("are taken once by change, and the agent's others stay for its own replies", async () => {
+	it("are read once by change from the builder's own cursor, and the agent's replies still tell them all", async () => {
 		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
 		await cache.notify("main", [
 			{ agent: "bee-1", notice: notice("heads_up", "add-hints", "about add-hints") },
@@ -50,7 +50,7 @@ describe("a change's notices in the repo's cache", () => {
 		]);
 		expect((await cache.changeNotices("bee-1", "add-hints")).map((told) => told.says)).toEqual(["about add-hints"]);
 		expect(await cache.changeNotices("bee-1", "add-hints")).toEqual([]);
-		const rest = await cache.landingNews("main", "bee-1");
-		expect(rest.map((item) => (item as Notice).says)).toEqual(["about add-timer"]);
+		const rest = await cache.newsFor("main", "bee-1");
+		expect(rest.map((item) => (item as Notice).says)).toEqual(["about add-hints", "about add-timer"]);
 	});
 });

@@ -51,10 +51,10 @@ describe("ringing a repo's hive", () => {
 		await cache.notify("main", [{ agent: "bee", notice: { kind: "heads_up", at, says: "a heads-up", change: "c" } }]);
 		expect(await held).toEqual({ rings: mark + 1, reasons: ["notice"] });
 		await vi.waitFor(() => expect(rings).toEqual([["hive:ada--honeycomb", "notice"]]));
-		// Waiting reads when the newest notice came without taking it: the agent's next reply tells it.
+		// Waiting reads when the newest notice came, which telling it doesn't change: the agent's next reply tells it.
 		expect(await cache.newestNotice("bee")).toBe(at);
-		expect((await cache.landingNews("main", "bee")).map((item) => item.kind)).toEqual(["heads_up"]);
-		expect(await cache.newestNotice("bee")).toBeNull();
+		expect((await cache.newsFor("main", "bee")).map((item) => item.kind)).toEqual(["heads_up"]);
+		expect(await cache.newestNotice("bee")).toBe(at);
 	});
 
 	it("stops ringing once no agent runs, but not a hive started again meanwhile", async () => {

@@ -94,7 +94,7 @@ function hive() {
 			event("project", `refs/heads/${branch}`, moved.after, before ? moved.before : undefined),
 		/** What an agent's next reply would tell it: its notices, on every branch. */
 		told: async (agent: string) =>
-			(await repoCache.landingNews("main", agent)).filter((item): item is Notice => item.kind !== "landed"),
+			(await repoCache.newsFor("main", agent)).filter((item): item is Notice => item.kind !== "landed"),
 	};
 }
 

@@ -732,7 +732,7 @@ describe("news goes only to the verified caller", { timeout: 120_000 }, () => {
 	// Agent a's change c-a, pushed and waiting for approval, with news for a: b's landing and a note.
 	const newsForA = async () => {
 		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
-		const tools = toolCalls(() => server, { news: async (_repo, branch, agent) => live.landingNews(branch, agent) });
+		const tools = toolCalls(() => server, { news: async (_repo, branch, agent) => live.newsFor(branch, agent) });
 		await tools.call("settings", { required: 1, vetoes: [] });
 		await tools.register("a", "b");
 		// a's first call starts its news; b's starts b's.

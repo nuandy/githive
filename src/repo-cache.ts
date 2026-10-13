@@ -1,6 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import { Traffic, objectLabel } from "./cache-traffic";
 import { countingRequests, describeCounts } from "./git-http";
+import {
+	changeNoticesFor,
+	type Delivery,
+	NEWS_PREFIXES,
+	newsFor,
+	noticeAtKey,
+	type Told,
+	keepNoticeTimes,
+	toldKey,
+	trimTold,
+} from "./news-log";
 import type { KeptPushHints } from "./push-hints";
 import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
@@ -31,9 +42,6 @@ interface View {
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
 
-/** The most landings one reply tells an agent about; the newest are kept. */
-const NEWS_MOST = 20;
-
 /** A message for one agent about its change, kept until told (see docs/awareness.md, "The news channel"). */
 export interface Notice {
 	/** "interface", "heads_up", ...: an open set, but never "landed", which marks landed news. */
@@ -56,8 +64,6 @@ export interface Notice {
 export type NewsItem = (Landed & { kind: "landed" }) | Notice;
 
 const NOTICE = "notice:";
-/** The most notices kept for one agent, across branches; the oldest are dropped. */
-const NOTICES_KEPT = 50;
 /** How long a notice is kept untold. */
 const NOTICE_MS = 24 * 60 * 60_000;
 
@@ -117,6 +123,7 @@ const KEPT_PREFIXES = [
 	"files:",
 	"news:",
 	"notice:",
+	...NEWS_PREFIXES,
 	"attempts:",
 	"merge:",
 	// Record tips and states, and packs, before they had objects of their own.
@@ -148,7 +155,8 @@ export interface KeptMergeCheck {
 
 /** What a writer publishes (see RepoCache.publish). */
 interface Published {
-	notices?: { agent: string; notice: Notice }[];
+	/** What the ring tells agents, kept in the news log under its count. */
+	told?: Told;
 	events?: HiveEvent[];
 	/** What the dashboard's pages are told changed. */
 	kind?: string;
@@ -560,7 +568,9 @@ export class RepoCache extends DurableObject<Env> {
 		await this.deleteKeys(outcomes.filter((each) => each.how === "landed").map((each) => `${ATTEMPTS}${each.change}`));
 		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
-		await this.publish({ events: settledEvents(outcomes), kind: "landing", ring: "landed" });
+		const landed = asNews(outcomes);
+		const told = landed.length ? { told: { landed: { branch, news: landed } } } : {};
+		await this.publish({ events: settledEvents(outcomes), kind: "landing", ring: "landed", ...told });
 		return stretch && stretchSummary(stretch);
 	}
 
@@ -584,27 +594,13 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
-	 * What `agent` hasn't been told: other agents' changes that landed on `branch` since it was last told, newest
-	 * last, then its notices on every branch, oldest first. Landings start from an agent's first call; notices reach it
-	 * on that call.
+	 * What `agent` hasn't been told: other agents' changes that landed on `branch`, then its notices on every branch,
+	 * read from its cursor in the news log (see news-log.ts). `delivery` is `wait`'s, whose cursor moves only when the
+	 * next call shows the reply arrived.
 	 */
-	async landingNews(branch: string, agent: string): Promise<NewsItem[]> {
-		const { recent } = await this.landing(branch);
-		const key = `news:${branch}:${agent}`;
-		const told = await this.ctx.storage.get<string>(key);
-		// The newest outcome, not the last kept: a failure noted later can carry an earlier time.
-		const newest = recent
-			.map((settled) => settled.at)
-			.sort()
-			.at(-1);
-		// A first call starts the cursor even when nothing has landed, so the first landings on a new repo are told.
-		if (!told) await this.ctx.storage.put(key, newest ?? new Date().toISOString());
-		else if (newest && newest > told) await this.ctx.storage.put(key, newest);
-		const landed = told
-			? asNews(recent.filter((settled) => settled.at > told && settled.agent !== agent)).slice(-NEWS_MOST)
-			: [];
-		const notices = await this.takeNotices(agent);
-		return [...landed.map((news) => ({ kind: "landed" as const, ...news })), ...notices];
+	async newsFor(branch: string, agent: string, delivery: Delivery = {}): Promise<NewsItem[]> {
+		const news = await newsFor(this.ctx.storage, await this.rings(), { branch, agent }, delivery);
+		return [...news, ...(await this.noticesFromBefore(agent))];
 	}
 
 	/**
@@ -614,68 +610,44 @@ export class RepoCache extends DurableObject<Env> {
 	async notify(branch: string, notices: { agent: string; notice: Notice }[], events: HiveEvent[] = []) {
 		const told = notices.map(({ agent, notice }) => ({ agent, notice: { ...notice, branch } }));
 		await this.publish({
-			notices: told,
+			...(told.length ? { told: { notices: told } } : {}),
 			events,
 			...(events.length ? { kind: "awareness" } : {}),
 			...(notices.length ? { ring: "notice", whom: { for: [...new Set(notices.map(({ agent }) => agent))] } } : {}),
 		});
 	}
 
-	/** When `agent`'s newest notice was noted, or null if it has none waiting: what `wait` watches for notices. */
+	/** When `agent`'s newest notice was noted, or null if it has had none: what `wait` watches for notices. */
 	async newestNotice(agent: string) {
-		const [newest] = await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent), reverse: true, limit: 1 });
-		return newest?.[1].at ?? null;
+		return (await this.ctx.storage.get<string>(noticeAtKey(agent))) ?? null;
 	}
 
 	/**
-	 * What every writer tells the repo, in one call, so none leaves a listener out: notices and hive events kept, the
+	 * What every writer tells the repo, in one call, so none leaves a listener out: what it tells agents and hive events kept, the
 	 * dashboard's pages told `kind` (to read again), and the doorbell rung with `ring`, for held `wait` calls and the
 	 * hosted agents. A change that concerns no agent, such as a landing being checked, rings nothing.
 	 */
 	private async publish(published: Published) {
-		await this.keepNotices(published.notices ?? []);
 		await this.keepEvents(published.events ?? []);
 		if (published.kind) this.broadcast(published.kind);
-		if (published.ring) await this.ring(published.ring, published.whom);
+		if (published.ring) await this.ring(published.ring, published.whom, published.told);
 	}
 
-	/** Each agent keeps its newest NOTICES_KEPT, for a day at most. */
-	private async keepNotices(notices: { agent: string; notice: Notice }[]) {
-		// Keyed by agent then time, so an agent's notices on every branch list together, oldest first.
-		const entries = notices.map(
-			({ agent, notice }) => [`${noticesOf(agent)}${notice.at}:${crypto.randomUUID()}`, notice] as const,
-		);
-		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
-			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
-		for (const agent of new Set(notices.map((each) => each.agent))) {
-			const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
-			const dropped = kept.filter(([, notice], index) => index < kept.length - NOTICES_KEPT || expired(notice));
-			await this.deleteKeys(dropped.map(([key]) => key));
-		}
-	}
-
-	// An agent's notices that are still current, oldest first. All of them are deleted: told once, a reply lost on
-	// the way loses them, which is fine for advice.
-	private async takeNotices(agent: string) {
+	// Notices kept one per key before the news log, told once and deleted as they were then. None is newer than a day
+	// before the log came, so once a day has passed there are none to find.
+	private async noticesFromBefore(agent: string) {
 		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
 		if (!kept.length) return [];
 		await this.deleteKeys(kept.map(([key]) => key));
-		return kept
-			.map(([, notice]) => notice)
-			.filter((notice) => !expired(notice))
-			.slice(-NOTICES_KEPT);
+		return kept.map(([, notice]) => notice).filter((notice) => !expired(notice));
 	}
 
 	/**
-	 * `agent`'s notices about `change`, told once and taken from the rest: how GitHive's hosted builder hears about the
-	 * change it builds, since its toolkit calls aren't the agent's own and bring no news.
+	 * `agent`'s notices about `change` that GitHive's hosted builder hasn't had, from a cursor of its own: how it hears
+	 * about the change it builds, since its toolkit calls aren't the agent's own and bring no news.
 	 */
 	async changeNotices(agent: string, change: string): Promise<Notice[]> {
-		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
-		const about = kept.filter(([, notice]) => notice.change === change);
-		if (!about.length) return [];
-		await this.deleteKeys(about.map(([key]) => key));
-		return about.map(([, notice]) => notice).filter((notice) => !expired(notice));
+		return changeNoticesFor(this.ctx.storage, await this.rings(), agent, change);
 	}
 
 	/** Notes an attempt of `change`'s to land, such as a conflict or a failed check, for its merge commit's story. */
@@ -744,11 +716,17 @@ export class RepoCache extends DurableObject<Env> {
 	// Wakes the repo's hosted agents (see HostedAgent.ring), without holding up the write that rang. Ringing is a hint:
 	// one lost costs only the agents' fallback turn. Once none is running, the repo stops ringing.
 	// Counted first, so a call that read the count just before this can't miss it.
-	private async ring(reason: string, whom?: Concerns) {
+	private async ring(reason: string, whom?: Concerns, told?: Told) {
 		const rings = (await this.rings()) + 1;
 		const logged: LoggedRing = { reason, ...(whom ? { for: whom.for } : {}) };
-		await this.ctx.storage.put({ [RINGS]: rings, [ringKey(rings)]: logged });
+		if (told) await keepNoticeTimes(this.ctx.storage, told);
+		await this.ctx.storage.put({
+			[RINGS]: rings,
+			[ringKey(rings)]: logged,
+			...(told ? { [toldKey(rings)]: told } : {}),
+		});
 		if (rings > RINGS_KEPT) await this.ctx.storage.delete(ringKey(rings - RINGS_KEPT));
+		if (told) await trimTold(this.ctx.storage);
 		for (const listener of [...this.listening])
 			if (concerns(logged, listener.agent)) listener.wake({ rings, reasons: [reason] });
 		this.ringHive(reason);
