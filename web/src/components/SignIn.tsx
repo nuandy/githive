@@ -172,7 +172,7 @@ export function SignIn({
 					<Label className="grid w-full gap-1 text-left text-ui text-muted-foreground">
 						<span>Invite code, if you have one</span>
 						<Input
-							className="w-full [font-family:monospace]"
+							className="w-full font-mono"
 							value={invite}
 							onChange={(event) => setInvite(event.target.value)}
 							autoComplete="off"

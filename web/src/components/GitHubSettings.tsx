@@ -95,11 +95,8 @@ export function GitHubSettings({
 	return (
 		<form className={SETTINGS_FORM} onSubmit={submit}>
 			<SettingsSection id="settings-github" title="GitHub">
-				{/* A fieldset, with the frame and side margins a fieldset has. */}
-				<fieldset
-					className={cn(SETTINGS_FIELDS, "mx-0.5 min-w-min px-0.5 py-4 [border:2px_groove_ThreeDFace]")}
-					disabled={busy}
-				>
+				{/* A fieldset, so busy disables every field at once, in a ruled frame. */}
+				<fieldset className={cn(SETTINGS_FIELDS, "min-w-min rounded-md border border-border p-4")} disabled={busy}>
 					<p className="m-0 text-muted-foreground">
 						Connect this repo to a GitHub repo you can write to that has{" "}
 						<a href={GITHUB_APP_URL} target="_blank" rel="noreferrer">

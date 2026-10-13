@@ -1,7 +1,7 @@
 /**
  * GitHive's mark: a comb cell with a track running into it and its lamp lit,
- * centered in the cell. An ink tile with paper lines, flipped on dark (the
- * --mark-* tokens); the lamp is always amber.
+ * centered in the cell. An ink tile with paper lines, flipped on dark, and the
+ * lamp always the logo's honey (the --mark-* tokens).
  */
 export function HiveMark({ size = 24 }: { size?: number }) {
 	return (
@@ -15,7 +15,7 @@ export function HiveMark({ size = 24 }: { size?: number }) {
 				style={{ stroke: "var(--mark-line)" }}
 			/>
 			<path d="M4.4 16H12" strokeWidth="2.6" strokeLinecap="round" style={{ stroke: "var(--mark-line)" }} />
-			<circle cx="16" cy="16" r="4" fill="#e59a0b" />
+			<circle cx="16" cy="16" r="4" style={{ fill: "var(--mark-dot)" }} />
 		</svg>
 	);
 }

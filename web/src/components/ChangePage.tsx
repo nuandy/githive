@@ -399,7 +399,7 @@ function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord
 		<article className={cn("relative min-w-0 rounded-md border border-border bg-card", INDENT)}>
 			{/* Its author's avatar, out in the margin the column is indented by. */}
 			<span
-				className="absolute top-3 -left-11 inline-flex size-8 items-center justify-center rounded-full bg-link-soft text-[#b86e00] to-720:hidden"
+				className="absolute top-3 -left-11 inline-flex size-8 items-center justify-center rounded-full bg-link-soft text-warn to-720:hidden"
 				aria-hidden="true"
 			>
 				<Icon name="user" />

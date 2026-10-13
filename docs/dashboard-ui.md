@@ -30,7 +30,7 @@ markup, drawn from the theme.
   `-soft` background. Text on a solid `good`, `bad`, `warn` or `needs` fill is that color's `-foreground`
   (`bg-good text-good-foreground`), never `text-white`: dark mode's lamps are bright, and take dark text.
 - Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
-  `mark-line`).
+  `mark-line`, `mark-dot`).
 
 Use them as `bg-card`, `text-muted-foreground`, `border-border-strong`, `bg-bad/45`. In SVG or inline styles use the
 variable: `fill="var(--good)"`.
@@ -111,9 +111,9 @@ fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline befo
 ## Writing a screen
 
 - Tailwind's reset (preflight) is on, with GitHive's base over it (`theme.css`, `@layer base`): the body's paper, ink
-  and 15px Overpass, headings' weight, links, the focus ring, `code` and `pre`. Everything else starts bare: a
-  paragraph or list has no margins, a list no bullets, a heading the body's size, an `svg` sits as a block. Say what
-  you want.
+  and 15px Overpass, headings' weight, links, the focus ring, `code` and `pre`, and radios and checkboxes in the link's
+  color. Everything else starts bare: a paragraph or list has no margins, a list no bullets, a heading the body's size,
+  an `svg` sits as a block. Say what you want.
 - A control is a component (`Button`, `Input`, …) or written in full; there are no global button or field styles.
 - Colors, sizes and timings come from the theme. An arbitrary value (`leading-[1.45]`) only where the theme has no
   step, and never a raw color.

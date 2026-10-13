@@ -125,3 +125,20 @@ describe("the theme menu", () => {
 		expect(html).toContain('aria-haspopup="menu"');
 	});
 });
+
+describe("the dashboard's source", () => {
+	// Every file under web/src but the tests, as text.
+	const sources = import.meta.glob<string>(["../../**/*.{ts,tsx}", "!../../**/*.test.{ts,tsx}"], {
+		query: "?raw",
+		import: "default",
+		eager: true,
+	});
+
+	it("uses no raw colors or system styles: every color comes from theme.css", () => {
+		expect(Object.keys(sources).length).toBeGreaterThan(50);
+		const offenders = Object.keys(sources).filter((file) =>
+			/#[0-9a-f]{6}\b|ThreeDFace|font-family:monospace/i.test(sources[file]!),
+		);
+		expect(offenders).toEqual([]);
+	});
+});

@@ -120,9 +120,10 @@
 	--claim-6: #ef4444;
 	--claim-7: #06b6d4;
 
-	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark. */
+	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;
+	--mark-dot: #e59a0b;
 
 	--shadow-raised: 0 10px 28px rgba(30, 43, 51, 0.18);
 
@@ -270,6 +271,7 @@
 	--color-claim-7: var(--claim-7);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
+	--color-mark-dot: var(--mark-dot);
 
 	/* Corners: steps of --radius, so a theme changes one number. At 4px these are 1, 2, 3, 4, 5, 6, 12 and 14px. */
 	--radius-2xs: calc(var(--radius) * 0.25);
@@ -498,6 +500,11 @@
 	}
 	summary {
 		cursor: pointer;
+	}
+	/* Radios and checkboxes in the link's slate, not the system's blue. */
+	input[type="radio"],
+	input[type="checkbox"] {
+		accent-color: var(--link);
 	}
 }
 
