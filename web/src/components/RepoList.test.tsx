@@ -56,7 +56,8 @@ describe("the Repositories page", () => {
 		const html = renderToStaticMarkup(<RepoList rows={[]} loaded canCreate />);
 		expect(html).toContain("No repositories yet");
 		expect(html).toContain("GitHive starts on it at once");
-		expect(html).toContain('href="#/new"');
+		// Once, in the page's header: the empty state doesn't offer it again.
+		expect(html.match(/href="#\/new"/g)).toHaveLength(1);
 		expect(html).toContain("Create an organization");
 	});
 

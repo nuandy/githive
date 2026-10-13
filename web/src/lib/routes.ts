@@ -33,6 +33,17 @@ export const SETTINGS_SECTIONS = [
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
+/** Each settings section's title, in its menu and the window's title. */
+export const SECTION_TITLES: Record<SettingsSection, string> = {
+	general: "General & access",
+	review: "Review",
+	"path-rules": "Path rules",
+	"branch-rules": "Branch rules",
+	checks: "Checks",
+	github: "GitHub",
+	"danger-zone": "Danger zone",
+};
+
 export type Route =
 	| { page: "repos"; /** The repo search. */ q?: string }
 	| { page: "new-repo"; owner?: string }

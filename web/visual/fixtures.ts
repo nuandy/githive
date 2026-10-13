@@ -98,8 +98,9 @@ export function answer(method: string, url: URL, who: Who): Answer | null {
 
 /** What a write answers, as if it worked: a change landed or released says so, the rest answer nothing much. */
 function written(url: URL): unknown {
-	const [, , , , change, action] = url.pathname.split("/").map((part) => decodeURIComponent(part));
-	if (url.pathname.split("/")[4] !== "changes" || !change) return {};
+	// /repos/<owner>/<name>/changes/<change>/<action>
+	const [first, , , what, change, action] = url.pathname.split("/").filter(Boolean).map(decode);
+	if (first !== "repos" || what !== "changes" || !change) return {};
 	if (action === "merge") return { ok: true, commit: sha(`landed-now:${change}`) };
 	if (action === "release")
 		return {

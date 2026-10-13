@@ -35,9 +35,11 @@ describe("the palette", () => {
 		expect(items.find((item) => item.label === "Your agents")!.href).toBe("#/settings/agents");
 	});
 
-	it("leaves out the pages that are a person's, for an Access operator", () => {
-		const theirs = paletteItems({ repos: [], people: false }).map((item) => item.label);
-		expect(theirs).toEqual(["Inbox", "Repositories"]);
+	it("leaves out the pages that are a person's, for an Access operator, and offers them Admin", () => {
+		const theirs = paletteItems({ repos: [], people: false, operator: true });
+		expect(theirs.map((item) => item.label)).toEqual(["Inbox", "Repositories", "Admin"]);
+		expect(theirs.at(-1)!.href).toBe("#/admin");
+		expect(paletteItems({ repos: [], people: true }).map((item) => item.label)).not.toContain("Admin");
 	});
 
 	it("finds by every word typed, a name's start first", () => {

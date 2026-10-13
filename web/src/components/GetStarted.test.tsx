@@ -30,6 +30,14 @@ describe("Get started on Repositories", () => {
 		expect(text).not.toContain("Dismiss");
 	});
 
+	it("leaves a step's way to the page when the page leads there already", () => {
+		const html = renderToStaticMarkup(
+			<GetStartedView start={gettingStarted([], [], [])} onDismiss={() => {}} elsewhere={["#/new"]} />,
+		);
+		expect(html).not.toContain('href="#/new"');
+		expect(html).toContain('href="#/settings/agents"');
+	});
+
 	it("ticks what's done, saying so to a screen reader, and leads to the next step", () => {
 		const html = view([row("robin/notes", { open: 1 })]);
 		const text = visibleText(html);

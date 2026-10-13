@@ -1,10 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { ChangeDiff, ChangeHistory, MergeCheck, RepoLanding, RepoSnapshot } from "../api";
 import type { Claim, Vote } from "../lib/claimStatus";
 import { ago, historyFixture, inlineText, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
 import { landFailure } from "./ChangeActions";
 import { ChangePage, type ChangePageProps } from "./ChangePage";
+import { preloadLazyParts } from "./Lazy";
+
+// The parts a page loads as they're first shown (Lazy.tsx), loaded, so they draw as a page does once they've come.
+beforeAll(preloadLazyParts);
 
 // A change's page: where it stands, and what a person may do about it from there.
 
@@ -137,6 +141,18 @@ describe("the decision box", () => {
 		const text = visibleText(box(render({ claim: waiting, history, snapshot: { ...snapshot, policy } })));
 		expect(text).toMatch(/review: 1 of 2 · rev-1, rev-2/);
 		expect(text).toMatch(/security: waiting/);
+	});
+
+	it("says a change its agent left is abandoned, as the Changes list does", () => {
+		const left: Claim = {
+			...waiting,
+			head: null,
+			active: ago(90),
+			approval: { approved: false, approvals: 0, required: 2, vetoedBy: [], awaiting: ["security"] },
+		};
+		expect(visibleText(box(render({ claim: left, history: { ...historyFixture, commits: [] } })))).toContain(
+			"Abandoned, free to take",
+		);
 	});
 
 	it("is the box the page scrolls to and focuses", () => {

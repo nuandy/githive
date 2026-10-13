@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type KeyPress, readShortcut, typingIn } from "./shortcuts";
+import { type KeyPress, keysTaken, readShortcut, typingIn } from "./shortcuts";
 
 // The keyboard's shortcuts: g i, g r, /, 1 to 8, ?, and ⌘K or Ctrl-K; none while typing or with a modifier.
 
@@ -45,6 +45,14 @@ describe("the keyboard's shortcuts", () => {
 		expect(readShortcut(press("k"), null).shortcut).toBeNull();
 	});
 
+	it("opens no palette over another dialog", () => {
+		expect(readShortcut(press("k", { metaKey: true, dialog: true }), null).shortcut).toBeNull();
+		expect(readShortcut(press("k", { ctrlKey: true, typing: true, dialog: true }), null).shortcut).toBeNull();
+		expect(readShortcut(press("k", { metaKey: true, dialog: false, typing: true }), null).shortcut).toEqual({
+			kind: "palette",
+		});
+	});
+
 	it("leaves keys alone while typing in a field, and with a modifier", () => {
 		expect(readShortcut(press("/", { typing: true }), null).shortcut).toBeNull();
 		expect(readShortcut(press("g", { typing: true }), null).pending).toBeNull();
@@ -68,5 +76,33 @@ describe("the keyboard's shortcuts", () => {
 		expect(typingIn(el("DIV", { isContentEditable: true }))).toBe(true);
 		expect(typingIn(el("A"))).toBe(false);
 		expect(typingIn(null)).toBe(false);
+	});
+
+	it("leaves keys to a form's controls, an open menu or dialog, and anything editable", () => {
+		// An element, and the selectors it's inside of.
+		const el = (tagName: string, within: string[] = [], more: Record<string, unknown> = {}) => ({
+			tagName,
+			isContentEditable: false,
+			closest: (selector: string) =>
+				selector
+					.split(",")
+					.map((each) => each.trim())
+					.some((each) => within.includes(each))
+					? {}
+					: null,
+			...more,
+		});
+		// A verdict's radio, or the vote's submit button: a 2 typed there stays in the vote.
+		expect(keysTaken(el("INPUT", ["form"], { type: "radio" }))).toBe(true);
+		expect(keysTaken(el("BUTTON", ["form"]))).toBe(true);
+		expect(keysTaken(el("BUTTON", ['[role="dialog"]']))).toBe(true);
+		expect(keysTaken(el("BUTTON", ['[role="alertdialog"]']))).toBe(true);
+		expect(keysTaken(el("DIV", ['[role="menu"]']))).toBe(true);
+		expect(keysTaken(el("INPUT", [], { type: "search" }))).toBe(true);
+		expect(keysTaken(el("DIV", [], { isContentEditable: true }))).toBe(true);
+		// A link or a button on the page: the shortcuts are the page's.
+		expect(keysTaken(el("A"))).toBe(false);
+		expect(keysTaken(el("BUTTON"))).toBe(false);
+		expect(keysTaken(null)).toBe(false);
 	});
 });

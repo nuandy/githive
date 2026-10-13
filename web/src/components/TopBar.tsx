@@ -63,8 +63,8 @@ export function UserMenu({
 	}, []);
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
+			{/* Named by what it shows (WCAG 2.5.3), the handle after who's signed in; the initial is a picture of it. */}
 			<DropdownMenuTrigger
-				aria-label={`Signed in as ${me.handle}`}
 				className={cn(
 					"touch-target inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full border border-input bg-transparent",
 					"py-0.75 pr-2.5 pl-0.75 to-560:pr-0.75",
@@ -89,7 +89,8 @@ export function UserMenu({
 						{initial}
 					</span>
 				)}
-				<span className="to-560:hidden">{me.handle}</span>
+				<span className="sr-only">Signed in as </span>
+				<span className="to-560:sr-only">{me.handle}</span>
 			</DropdownMenuTrigger>
 			{/* At least 220px and the button's width, so a long name wraps rather than stretching it. */}
 			<DropdownMenuContent
@@ -137,18 +138,25 @@ const waiting = cn(
 	"aria-[current=page]:border-needs aria-[current=page]:text-needs",
 );
 
-/** The Inbox link, with how many things wait on the reader. It leads the bar's links, named even on a phone. */
+/**
+ * The Inbox link, with how many things wait on the reader. It leads the bar's links, named even on a phone, by what it
+ * shows (WCAG 2.5.3): "Inbox 5", then what the count is.
+ */
 function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefined; inboxCurrent: boolean }) {
 	return (
 		<a
 			className={cn(pill, "ml-auto", inboxCount ? waiting : null)}
 			href={href.inbox()}
 			aria-current={inboxCurrent ? "page" : undefined}
-			aria-label={inboxCount ? `Inbox, ${inboxCount} waiting on you` : "Inbox"}
 		>
 			<Icon name="inbox" size={14} />
-			<span>Inbox</span>
-			{inboxCount ? <PillCount>{inboxCount}</PillCount> : null}
+			<span>Inbox</span>{" "}
+			{inboxCount ? (
+				<>
+					<PillCount>{inboxCount}</PillCount>
+					<span className="sr-only"> waiting on you</span>
+				</>
+			) : null}
 		</a>
 	);
 }
@@ -341,16 +349,15 @@ export function TopBar({
 				)}
 				{me?.kind === "user" ? <AgentsLink agentsCurrent={agentsCurrent} /> : null}
 				{me?.kind === "access" ? (
-					<a
-						className={pill}
-						href={href.admin()}
-						aria-current={adminCurrent ? "page" : undefined}
-						aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}
-					>
+					<a className={pill} href={href.admin()} aria-current={adminCurrent ? "page" : undefined}>
 						<Icon name="settings" size={14} />
-						<span className="to-560:hidden">Admin</span>
-						{/* Neutral: the Inbox's is the one red number. */}
-						{adminRequests ? <PillCount quiet>{adminRequests}</PillCount> : null}
+						<span className="to-560:sr-only">Admin</span> {/* Neutral: the Inbox's is the one red number. */}
+						{adminRequests ? (
+							<>
+								<PillCount quiet>{adminRequests}</PillCount>
+								<span className="sr-only"> requests waiting</span>
+							</>
+						) : null}
 					</a>
 				) : null}
 				{/* On a phone, someone signed in finds light and dark in their menu. */}

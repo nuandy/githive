@@ -191,8 +191,8 @@ function RepoGroup(props: {
 	);
 }
 
-/** No repositories to list: what they're for, and a way to make one. */
-function NoRepos({ canCreate }: { canCreate: boolean }) {
+/** No repositories to list: what they're for. The page's header has the way to make one. */
+function NoRepos() {
 	return (
 		<div className="px-6 py-10 text-center">
 			<Icon name="repo" size={28} className="inline align-baseline text-muted-foreground" />
@@ -202,15 +202,6 @@ function NoRepos({ canCreate }: { canCreate: boolean }) {
 				will change, push their changes to their own forks, and land them after review and checks, just like pull
 				requests.
 			</p>
-			{canCreate ? (
-				<div className="mt-4.5">
-					<Button asChild>
-						<a href={href.newRepo()}>
-							<Icon name="plus" /> New repository
-						</a>
-					</Button>
-				</div>
-			) : null}
 		</div>
 	);
 }
@@ -280,7 +271,9 @@ export function RepoList({
 				{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
 			</PageHeader>
 
-			{start ? <GetStarted rows={rows} loaded={loaded} api={start} /> : null}
+			{start ? (
+				<GetStarted rows={rows} loaded={loaded} api={start} elsewhere={canCreate ? [href.newRepo()] : []} />
+			) : null}
 			{/* Prominent for an account with no repositories; otherwise a line. */}
 			{demo && phase !== "loading" ? <DemoCard api={demo} compact={phase === "list"} /> : null}
 
@@ -310,7 +303,7 @@ export function RepoList({
 						Loading repositories…
 					</p>
 				) : null}
-				{phase === "empty" ? <NoRepos canCreate={canCreate} /> : null}
+				{phase === "empty" ? <NoRepos /> : null}
 				{phase === "list" ? (
 					<Fold open={noMatch}>
 						<p className={NOTE}>No repositories match “{missed}”.</p>

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ChangeDiff, ChangeHistory, ReleaseAnswer, RepoLanding, RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
@@ -19,17 +19,17 @@ import {
 } from "../lib/decision";
 import { shortSha } from "../lib/model";
 import { reducedMotion } from "../lib/motion";
+import { entryKeyOf, firstTimeIn } from "../lib/scrollMemory";
 import { timeAgo } from "../lib/relativeTime";
 import { type ChangeTab, href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { Awareness } from "./Awareness";
 import { type MergeAnswer, type Outcome, OutcomeLine, ReleaseDialog } from "./ChangeActions";
-import { ChangeFiles } from "./ChangeFiles";
 import { ChangeSidebar, type ChangeRecord } from "./ChangeSidebar";
-import { ChangeCommits } from "./Commits";
 import { ConflictPanel } from "./ConflictPanel";
 import { type ChangeEnding, DecisionBox, type PageTarget } from "./DecisionBox";
 import { Icon } from "./Icon";
+import { Lazy, lazyPart } from "./Lazy";
 import { SiteLink } from "./SiteLink";
 import { Tabs } from "./Tabs";
 import { Timeline, TimelineEntry, TimelineList } from "./Timeline";
@@ -61,8 +61,10 @@ export interface ChangePageProps {
 	access?: Reader | undefined;
 	/** What's landing on the change's branch: a change whose head is being checked says Landing. */
 	landing?: RepoLanding | undefined;
-	/** Its files: undefined while loading, null if they couldn't be read. */
+	/** Its files, on the Files tab: undefined while loading (or on another tab), null if they couldn't be read. */
 	diff?: ChangeDiff | null | undefined;
+	/** How many files it changed, once known: the Files tab's count. */
+	fileCount?: number | undefined;
 	diffError?: string | undefined;
 	onDiffRetry?: () => void;
 	/**
@@ -74,9 +76,16 @@ export interface ChangePageProps {
 	release?: (repo: string, change: string, reason: string) => Promise<ReleaseAnswer>;
 	/** Scroll to the decision box and focus it, once the change is read (the address asks the reader to decide). */
 	decide?: boolean;
+	/** After a person lands or releases it here: read the change afresh. */
+	onActed?: () => void;
 	/** The time leases are told against (tests fix it). */
 	now?: number;
 }
+
+// Its other tabs, its commits and its files (a diff's worth of markup), load as they're first shown
+// (components/Lazy.tsx).
+const ChangeCommits = lazyPart(() => import("./Commits").then((module) => module.ChangeCommits));
+const ChangeFiles = lazyPart(() => import("./ChangeFiles").then((module) => module.ChangeFiles));
 
 /** Whether a claim is GitHub's change, brought back by githive-github. */
 export const isGitHubClaim = (claim: Pick<Claim, "agent" | "source">) => isFromGitHub(claim);
@@ -143,6 +152,7 @@ function AttentionCallout({
 	repo,
 	change,
 	release,
+	onActed,
 }: {
 	attention: NonNullable<Claim["attention"]>;
 	answerable: boolean;
@@ -150,6 +160,7 @@ function AttentionCallout({
 	repo: string;
 	change: string;
 	release?: ((reason: string) => Promise<ReleaseAnswer>) | undefined;
+	onActed?: (() => void) | undefined;
 }) {
 	const [outcome, setOutcome] = useState<Outcome | null>(null);
 	const outsideVote = !pushed || attention.agent === "githive-builder";
@@ -174,8 +185,21 @@ function AttentionCallout({
 							A vote can't give it what it asks for. Releasing its claim frees its paths, so another agent can take the
 							work on with what it needs.
 						</p>
-						<ReleaseDialog change={change} release={release} onOutcome={setOutcome}>
-							<Button size="sm">
+						<ReleaseDialog
+							change={change}
+							release={release}
+							onOutcome={(next) => {
+								setOutcome(next);
+								if (next.ok) onActed?.();
+							}}
+							// Released, this callout goes with the claim: focus goes to the decision box, which says so.
+							onCloseAutoFocus={(event, released) => {
+								if (!released) return;
+								event.preventDefault();
+								document.getElementById("decide")?.focus({ preventScroll: true });
+							}}
+						>
+							<Button size="sm" disabled={outcome?.ok}>
 								<Icon name="ban" size={14} />
 								Release claim…
 							</Button>
@@ -264,6 +288,9 @@ function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord
 	);
 }
 
+/** What lands with a change no longer in force: nothing. */
+const NO_BATCH = { changes: [], left: 0, room: 0 };
+
 /** A branch named in the header, in the link's blue. */
 const BRANCH = "bg-link-soft text-caption text-link";
 
@@ -279,6 +306,19 @@ function bringIntoView(id: string) {
 	const found = document.getElementById(id);
 	found?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
 	found?.focus({ preventScroll: true });
+}
+
+/** The history entries whose `decide` was acted on: Back and Forward to one leave its scroll as it was. */
+const decided = new Set<string>();
+
+/**
+ * Asked to decide: the decision box gets the keyboard's place. Beside the tabs on a wide window it's in view already,
+ * sticky, so nothing scrolls; under the header on a narrow one, it's brought into view.
+ */
+function decideNow() {
+	if (window.matchMedia("(min-width: 901px)").matches)
+		document.getElementById("decide")?.focus({ preventScroll: true });
+	else bringIntoView("decide");
 }
 
 /**
@@ -299,11 +339,13 @@ export function ChangePage({
 	access,
 	landing,
 	diff,
+	fileCount,
 	diffError,
 	onDiffRetry,
 	merge,
 	release,
 	decide = false,
+	onActed,
 	now,
 	previewable = false,
 }: ChangePageProps) {
@@ -315,7 +357,8 @@ export function ChangePage({
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	const reader = access ?? {};
 	const { policy, verify } = branchSettings(snapshot, branch);
-	const status = statusOf(claim, history, { settings: snapshot, landing }, votes);
+	// Told against the clock, as the Changes list tells it: a change its agent left says so here too.
+	const status = statusOf(claim, history, { settings: snapshot, landing, now: now ?? Date.now() }, votes);
 	// A change landing a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;
@@ -350,13 +393,10 @@ export function ChangePage({
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [wanted, tab]);
-	// Asked to decide: once the change is read, the box comes into view with the keyboard's place on it, once.
-	const decided = useRef(false);
+	// Asked to decide: once the change is read, the box takes the keyboard's place, once per history entry.
 	useEffect(() => {
-		if (!decide) decided.current = false;
-		if (!decide || decided.current || missing) return;
-		decided.current = true;
-		bringIntoView("decide");
+		if (!decide || missing) return;
+		if (firstTimeIn(decided, entryKeyOf(window.history.state))) decideNow();
 	}, [decide, missing]);
 
 	if (missing)
@@ -404,6 +444,7 @@ export function ChangePage({
 					repo={repo}
 					change={changeId}
 					release={releaseIt}
+					onActed={onActed}
 				/>
 			) : null}
 			<OpeningComment agent={agent} record={record} />
@@ -425,20 +466,24 @@ export function ChangePage({
 			history === null ? (
 				<p className="my-[1em] text-muted-foreground">This change's commits couldn't be read.</p>
 			) : (
-				<ChangeCommits history={history} repo={repo} />
+				<Lazy>
+					<ChangeCommits history={history} repo={repo} />
+				</Lazy>
 			);
 	else if (tab === "files")
 		content = (
-			<ChangeFiles
-				repo={repo}
-				changeId={changeId}
-				diff={diff}
-				error={diffError}
-				onRetry={onDiffRetry}
-				head={claim?.head}
-				into={branch}
-				file={file}
-			/>
+			<Lazy>
+				<ChangeFiles
+					repo={repo}
+					changeId={changeId}
+					diff={diff}
+					error={diffError}
+					onRetry={onDiffRetry}
+					head={claim?.head}
+					into={branch}
+					file={file}
+				/>
+			</Lazy>
 		);
 	else content = conversation;
 
@@ -482,11 +527,12 @@ export function ChangePage({
 						conflict={claim?.head ? conflictOf({ ...claim, into: branch }, history?.merge) : null}
 						meets={claim && history?.awareness ? meetsCount(history.awareness, snapshot.claims) : null}
 						action={action}
-						batch={claim ? landsWith(claim, snapshot, landing).map((each) => each.change) : []}
+						batch={claim ? landsWith(claim, snapshot, landing, verify) : NO_BATCH}
 						land={merge && claim ? () => merge(repo, changeId) : undefined}
 						release={releaseIt}
 						github={!!claim && isGitHubClaim(claim)}
 						onGo={goTo}
+						onActed={onActed}
 					/>
 					{details("mt-5 to-900:hidden")}
 				</div>
@@ -508,7 +554,7 @@ export function ChangePage({
 							label: "Files",
 							icon: "file",
 							href: href.change(repo, changeId, "files"),
-							count: diff?.total,
+							count: fileCount ?? diff?.total,
 						},
 					]}
 				/>

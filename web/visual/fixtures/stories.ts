@@ -188,10 +188,12 @@ function approvalOf(
 			latest.set(vote.reviewer, vote);
 	const counted = [...latest.values()];
 	const approvals = counted.filter((vote) => vote.verdict === "approve").length;
-	const vetoedBy = vetoes.filter((role) => counted.some((vote) => vote.role === role && vote.verdict === "reject"));
-	const awaiting = vetoes.filter(
-		(role) => !vetoedBy.includes(role) && !counted.some((vote) => vote.role === role && vote.verdict === "approve"),
-	);
+	// As the server's approval() has them (src/toolkit/votes.ts): who blocked it, by their names, and the roles no one
+	// has approved as yet, a blocked one among them.
+	const vetoedBy = counted
+		.filter((vote) => vote.verdict === "reject" && vetoes.includes(vote.role))
+		.map((vote) => vote.reviewer);
+	const awaiting = vetoes.filter((role) => !counted.some((vote) => vote.role === role && vote.verdict === "approve"));
 	const approved = approvals >= required && !vetoedBy.length && !awaiting.length;
 	return { approved, approvals, required, vetoedBy, awaiting };
 }

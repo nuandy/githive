@@ -50,14 +50,6 @@ export interface RepoGitHub {
 	};
 }
 
-/** What giving up GitHub's change answers: released, or why not. */
-export interface GiveUpAnswer {
-	ok: boolean;
-	released?: string;
-	note?: string;
-	refused?: string;
-}
-
 /** What github_pr answers: the pull request, and whether it was just opened or rewritten. */
 export interface PullAnswer {
 	pr: string;
@@ -699,9 +691,6 @@ export const api = {
 	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
 	githubPull: (repo: string, refresh = false) =>
 		call<PullAnswer>("POST", `/repos/${repoPath(repo)}/github/pr`, { refresh }),
-	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
-	giveUpGitHub: (repo: string, change: string) =>
-		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
 	/** GitHive's hosted agents on a repo, if it has had any. */
 	hostedAgents: (repo: string) => call<HiveStatus | null>("GET", `/repos/${repoPath(repo)}/hosted-agents`),
 	/** People who can write, and whom an admin lists: start `count` hosted agents for `minutes`. */

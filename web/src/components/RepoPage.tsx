@@ -18,21 +18,18 @@ import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { canVote, canWrite } from "../lib/permissions";
 import { GitHubLink } from "./GitHubLink";
-import { RepoAccessBox, type RepoManageApi } from "./RepoAdmin";
-import { RepoSettings } from "./RepoSettings";
+import type { RepoManageApi } from "./RepoAdmin";
 import { openOn, parseFilter } from "../lib/changeList";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab, type SettingsSection } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { messageOf } from "../lib/errors";
 import { cn } from "../lib/utils";
-import { AgentsTab } from "./Agents";
-import { ClaimsTab } from "./ClaimsMap";
-import { HistoryTab } from "./History";
 import { HiveTab } from "./HiveTab";
 import type { HostedAgentsApi } from "./HostedAgents";
-import { CodeTab, type CodeApi } from "./CodeBrowser";
+import type { CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
+import { Lazy, lazyPart } from "./Lazy";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
 import { COLUMN, Main } from "./Page";
@@ -42,6 +39,15 @@ import type { TabItem } from "./Tabs";
 import { Box, Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Empty } from "./ui/empty";
+
+// The tabs a visit to a repo mostly doesn't open load as they're first shown (components/Lazy.tsx): its settings, its
+// code with Markdown and highlighting, its history, claims and agents. The Hive and Changes come with the page.
+const RepoSettings = lazyPart(() => import("./RepoSettings").then((module) => module.RepoSettings));
+const RepoAccessBox = lazyPart(() => import("./RepoAdmin").then((module) => module.RepoAccessBox));
+const CodeTab = lazyPart(() => import("./CodeBrowser").then((module) => module.CodeTab));
+const HistoryTab = lazyPart(() => import("./History").then((module) => module.HistoryTab));
+const ClaimsTab = lazyPart(() => import("./ClaimsMap").then((module) => module.ClaimsTab));
+const AgentsTab = lazyPart(() => import("./Agents").then((module) => module.AgentsTab));
 
 /** The Agents tab's hosted agents: shown when the dashboard can read them, started and stopped by writers. */
 function hostedAgentsApi(api: RepoPageApi, writes: boolean): HostedAgentsApi | undefined {
@@ -131,6 +137,8 @@ export interface RepoPageProps {
 	onStarted?: () => void;
 	/** After its admins change how changes merge. */
 	onSettingsChanged?: () => void;
+	/** After a person lands or releases a change from its page: read the repo and the change afresh. */
+	onChangeActed?: () => void;
 }
 
 /** Above a repo GitHive hasn't started on: what that means, and for its admins, starting it. */
@@ -210,6 +218,7 @@ interface RepoTabContentProps extends Pick<
 	settings: ReactNode;
 	voting: boolean;
 	onSettingsChanged?: () => void;
+	onChangeActed?: (() => void) | undefined;
 }
 
 /** The current tab's content: before GitHive starts, only Code and Settings have any. */
@@ -227,17 +236,20 @@ function RepoTabContent({
 	settings,
 	voting,
 	onSettingsChanged,
+	onChangeActed,
 }: RepoTabContentProps) {
 	if (current === "code") {
 		return (
-			<CodeTab
-				repo={repo}
-				path={view.kind === "repo" ? (view.path ?? "") : ""}
-				refParam={view.kind === "repo" ? view.ref : undefined}
-				branch={branch}
-				api={api}
-				snapshot={snapshot}
-			/>
+			<Lazy>
+				<CodeTab
+					repo={repo}
+					path={view.kind === "repo" ? (view.path ?? "") : ""}
+					refParam={view.kind === "repo" ? view.ref : undefined}
+					branch={branch}
+					api={api}
+					snapshot={snapshot}
+				/>
+			</Lazy>
 		);
 	}
 	if (current === "settings") return settings ?? <NothingYet repo={repo} />;
@@ -252,6 +264,7 @@ function RepoTabContent({
 				api={api}
 				access={access}
 				voting={voting}
+				onActed={onChangeActed}
 			/>
 		);
 	}
@@ -270,11 +283,23 @@ function RepoTabContent({
 		case "hive":
 			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} writes={canWrite(access?.level)} />;
 		case "history":
-			return <HistoryTab repo={repo} branch={branch} api={api} />;
+			return (
+				<Lazy>
+					<HistoryTab repo={repo} branch={branch} api={api} />
+				</Lazy>
+			);
 		case "claims":
-			return <ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
+			return (
+				<Lazy>
+					<ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />
+				</Lazy>
+			);
 		case "agents":
-			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
+			return (
+				<Lazy>
+					<AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />
+				</Lazy>
+			);
 	}
 	return (
 		<ChangesTab
@@ -302,6 +327,7 @@ function ChangeView({
 	api,
 	access,
 	voting,
+	onActed,
 }: {
 	repo: string;
 	view: Extract<RepoView, { kind: "change" }>;
@@ -310,6 +336,8 @@ function ChangeView({
 	api: RepoPageProps["api"];
 	access: RepoAccess | undefined;
 	voting: boolean;
+	/** After a person lands or releases it here. */
+	onActed?: (() => void) | undefined;
 }) {
 	const claim = snapshot.claims.find((each) => each.change === view.change);
 	const branch = claim?.into ?? changeHistory?.branch ?? snapshot.branch ?? "main";
@@ -318,14 +346,19 @@ function ChangeView({
 		() => api.landing!(repo, branch),
 		5_000,
 	);
-	// Kept by the server like the change's own view, its files can come from an earlier push for a moment: asked again
-	// soon until they're the head's.
+	// Its files, up to about a megabyte of diff, are read only on the Files tab. Kept by the server like the change's own
+	// view, they can come from an earlier push for a moment: asked again soon until they're the head's.
 	const head = claim?.head ?? changeHistory?.released.find((release) => release.mergedAs)?.mergedAs ?? "";
-	const diffKey = api.diff ? `diff:${repo}:${view.change}:${head}` : null;
+	const pushed = `${repo}:${view.change}:${head}`;
+	const diffKey = api.diff && view.tab === "files" ? `diff:${pushed}` : null;
 	const [behind, setBehind] = useState(false);
 	const diff = usePoll(diffKey, () => api.diff!(repo, view.change), behind ? 5_000 : 120_000);
 	const nowBehind = !!claim?.head && diff.data?.of === "head" && !!diff.data.head && diff.data.head !== claim.head;
 	if (nowBehind !== behind) setBehind(nowBehind);
+	// How many files it changed, once read for this push: the Files tab keeps its count on the other tabs.
+	const [counted, setCounted] = useState<{ pushed: string; total: number }>();
+	if (diff.data && (counted?.pushed !== pushed || counted.total !== diff.data.total))
+		setCounted({ pushed, total: diff.data.total });
 	const writes = canWrite(access?.level);
 	return (
 		<ChangePage
@@ -341,11 +374,16 @@ function ChangeView({
 			access={access ? { by: access.by, teams: access.teams } : undefined}
 			landing={landing.data}
 			diff={diff.data ?? (diff.error ? null : undefined)}
+			fileCount={counted?.pushed === pushed ? counted.total : undefined}
 			diffError={diff.error}
 			onDiffRetry={diff.refresh}
 			merge={writes ? api.merge : undefined}
 			release={writes ? api.release : undefined}
 			decide={!!view.decide}
+			onActed={() => {
+				landing.refresh();
+				onActed?.();
+			}}
 			previewable={access?.visibility === "public"}
 		/>
 	);
@@ -513,6 +551,7 @@ export function RepoPage({
 	onDeleted,
 	onStarted,
 	onSettingsChanged,
+	onChangeActed,
 }: RepoPageProps) {
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
@@ -531,23 +570,39 @@ export function RepoPage({
 	let settings: ReactNode = null;
 	if (manage && access?.level === "admin")
 		settings = (
-			<RepoSettings
-				repo={repo}
-				branch={branch}
-				section={view.kind === "repo" ? (view.section ?? "general") : "general"}
-				snapshot={snapshot}
-				access={access}
-				manage={manage}
-				{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
-				onAccessChanged={() => onAccessChanged?.()}
-				onDeleted={() => onDeleted?.()}
-			/>
+			<Lazy>
+				<RepoSettings
+					repo={repo}
+					branch={branch}
+					section={view.kind === "repo" ? (view.section ?? "general") : "general"}
+					snapshot={snapshot}
+					access={access}
+					manage={manage}
+					{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
+					onAccessChanged={() => onAccessChanged?.()}
+					onDeleted={() => onDeleted?.()}
+				/>
+			</Lazy>
 		);
 	else if (snapshot)
 		settings = (
-			<SettingsTab snapshot={snapshot} access={manage ? <RepoAccessBox repo={repo} access={access} /> : null} />
+			<SettingsTab
+				snapshot={snapshot}
+				access={
+					manage ? (
+						<Lazy>
+							<RepoAccessBox repo={repo} access={access} />
+						</Lazy>
+					) : null
+				}
+			/>
 		);
-	else if (manage) settings = <RepoAccessBox repo={repo} access={access} />;
+	else if (manage)
+		settings = (
+			<Lazy>
+				<RepoAccessBox repo={repo} access={access} />
+			</Lazy>
+		);
 	const site = access?.visibility === "public";
 	return (
 		<Main className="flex flex-1 flex-col">
@@ -617,6 +672,7 @@ export function RepoPage({
 							settings={settings}
 							voting={voting}
 							onSettingsChanged={onSettingsChanged}
+							onChangeActed={onChangeActed}
 						/>
 					)}
 				</div>

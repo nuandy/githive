@@ -49,9 +49,8 @@ describe("the Inbox", () => {
 		expect(renderToStaticMarkup(<InboxPage groups={[]} loaded />)).toContain("Nothing waits on you");
 		const bar = renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={3} />);
 		expect(bar).toContain('href="#/inbox"');
-		expect(bar).toContain('aria-label="Inbox, 3 waiting on you"');
-		expect(bar).toMatch(/Inbox<\/span><span[^>]*>3<\/span>/);
-		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toMatch(/Inbox<\/span><span/);
+		expect(bar).toMatch(/Inbox<\/span> <span[^>]*>3<\/span><span class="sr-only"> waiting on you<\/span>/);
+		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toMatch(/Inbox<\/span> ?<span/);
 	});
 });
 

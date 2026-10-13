@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
 import type { Claim, Vote } from "../lib/claimStatus";
-import { ago, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
+import { ago, inlineText, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
+import { voteDraftKey } from "../lib/voteDraft";
 import { VoteForm } from "./VoteForm";
 
 // A person's vote on a change's head, from its page.
@@ -72,6 +73,59 @@ describe("a person's vote", () => {
 		const unknown = render(pushedClaim, { policy: guarded, reader: {} });
 		expect(options(unknown)).toEqual(["review", "security", "payments"]);
 		expect(visibleText(unknown)).toContain("payments counts only from @acme/payments");
+	});
+
+	describe("as the role the change waits on", () => {
+		const guarded: RepoSnapshot["policy"] = {
+			...policy,
+			vetoes: ["security", "payments"],
+			grants: { security: ["person:*"], payments: ["@acme/payments"] },
+		};
+		const waiting: Claim = {
+			...pushedClaim,
+			approval: { ...pushedClaim.approval, awaiting: ["payments"] },
+		};
+		const selected = (html: string) => html.match(/<option value="([^"]+)" selected=""/)?.[1];
+
+		it("starts as the first role it waits on that the reader may vote as", () => {
+			const html = render(waiting, { policy: guarded, reader: { by: "person:ana", teams: ["@acme/payments"] } });
+			expect(selected(html)).toBe("payments");
+			expect(inlineText(html)).not.toContain("which you can't give");
+		});
+
+		it("starts as review when it waits on no role the reader holds, and says who can give the vote", () => {
+			const html = render(waiting, { policy: guarded, reader: { by: "person:bob", teams: ["@acme/web"] } });
+			expect(selected(html)).toBe("review");
+			expect(inlineText(html)).toContain(
+				"This change waits on a payments vote, which you can't give. People in @acme/payments can.",
+			);
+		});
+
+		it("says nothing of a role it doesn't wait on", () => {
+			const html = render(pushedClaim, { policy: guarded, reader: { by: "person:bob", teams: [] } });
+			expect(inlineText(html)).not.toContain("which you can't give");
+		});
+	});
+
+	it("comes back as it was left: the verdict, the role and what was written", () => {
+		const kept = new Map<string, string>();
+		const drafts = {
+			getItem: (key: string) => kept.get(key) ?? null,
+			setItem: (key: string, value: string) => void kept.set(key, value),
+			removeItem: (key: string) => void kept.delete(key),
+		};
+		kept.set(
+			voteDraftKey("acme/docs-site", pushedClaim.change, pushedClaim.head!),
+			JSON.stringify({ choice: "request", role: "security", evidence: "The cache never expires" }),
+		);
+		const html = render(pushedClaim, { drafts });
+		expect(html).toMatch(/<input[^>]*checked="" value="request"/);
+		expect(html).toMatch(/<option value="security" selected=""/);
+		expect(html).toContain("The cache never expires</textarea>");
+		// Another push is another vote: nothing kept for it.
+		const later = render({ ...pushedClaim, head: "c0ffee000000" }, { drafts });
+		expect(later).not.toMatch(/checked=""/);
+		expect(later).not.toContain("The cache never expires");
 	});
 
 	it("folds to what the reader voted once they have, and offers to change it", () => {

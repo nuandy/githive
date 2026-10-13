@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { MyOrg, OrgDetail, RepoAccess } from "../api";
 import { repoSnapshot, stubApi, visibleText } from "../test/fixtures";
 import { newRepoInput, NewRepoView } from "./NewRepoPage";
@@ -15,6 +15,10 @@ import {
 	VisibilityToggle,
 } from "./RepoAdmin";
 import { RepoPage } from "./RepoPage";
+import { preloadLazyParts } from "./Lazy";
+
+// The parts a page loads as they're first shown (Lazy.tsx), loaded, so they draw as a page does once they've come.
+beforeAll(preloadLazyParts);
 
 const noop = async () => ({}) as never;
 const orgActions: OrgActions = {
