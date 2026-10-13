@@ -1,10 +1,11 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FocusEvent, useEffect, useReducer, useRef, useState } from "react";
+import { useFresh } from "../hooks/useFresh";
 import { useGlide } from "../hooks/useGlide";
 import { useLingering } from "../hooks/useLingering";
 import { displayName } from "../lib/agent";
 import { distinctTitles, type Goal, type GoalStep, goalStatus } from "../lib/goals";
 import { agentChip, agentHue, HUE_BORDER } from "../lib/hiveCells";
-import type { GoalMotion, Motion } from "../lib/hiveMotion";
+import { type GoalLayout, type GoalMotion, holdLayout, type Motion, pendingWords } from "../lib/hiveMotion";
 import { briefPaths, shortSha, timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
 import { clockTime, timeAgo } from "../lib/relativeTime";
@@ -29,7 +30,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // The goals panel: one row per goal, in flight on top (newest arrival first), finished below. Story reads in words,
 // with a slim bar on the shared clock; Timeline is the same rows, morphed, the bars taking the room. Rows never jump:
-// a new goal comes in at the top, a landed one stays a minute before it moves down to Finished.
+// a new goal comes in at the top, a landed one stays a minute before it moves down to Finished. And nothing moves
+// under someone reading: while the pointer or focus is in the panel, or a row is open, new goals and goals that
+// finished wait behind a quiet "2 new", which brings them in, as leaving the panel does.
 //
 // The morph is transitions, so a row changes shape instead of being drawn again: switching narrows the words column
 // (--words), packs the rows (--row-pad), folds the second line away and lets the bars take the room, each in 0.45s.
@@ -131,8 +134,29 @@ export function GoalsPanel(props: GoalsPanelProps) {
 		!!goal.finished && (now - finishedAt(goal) < SETTLE_MS || (held === goal.key && now - finishedAt(goal) < HELD_MS));
 	// Every goal keeps its row. One the filter or the range leaves out folds away rather than vanishing, so nothing
 	// appears or disappears at once.
-	const inFlight = goals.filter((goal) => !goal.finished || settling(goal));
-	const done = goals.filter((goal) => goal.finished && !settling(goal)).sort((a, b) => finishedAt(b) - finishedAt(a));
+	const live: GoalLayout = {
+		inFlight: goals.filter((goal) => !goal.finished || settling(goal)).map((goal) => goal.key),
+		done: goals
+			.filter((goal) => goal.finished && !settling(goal))
+			.sort((a, b) => finishedAt(b) - finishedAt(a))
+			.map((goal) => goal.key),
+	};
+	// Held still while someone reads: the pointer or focus is in the panel, or a row is open.
+	const [pointerIn, setPointerIn] = useState(false);
+	const [focusIn, setFocusIn] = useState(false);
+	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
+	// the point there. An open row folded away in it holds nothing still.
+	const finishedShown = timeline || showFinished;
+	const { shown, arrived, finished, apply } = useHeld(
+		live,
+		(drawn) =>
+			pointerIn ||
+			focusIn ||
+			[...open].some((key) => drawn.inFlight.includes(key) || (finishedShown && drawn.done.includes(key))),
+	);
+	const byKey = new Map(goals.map((goal) => [goal.key, goal]));
+	const inFlight = shown.inFlight.flatMap((key) => byKey.get(key) ?? []);
+	const done = shown.done.flatMap((key) => byKey.get(key) ?? []);
 	const inRange = (goal: Goal) => finishedAt(goal) >= axis.start;
 	const flying = inFlight.filter((goal) => matches(goal, filter));
 	const landed = done.filter((goal) => matches(goal, filter) && inRange(goal));
@@ -147,6 +171,8 @@ export function GoalsPanel(props: GoalsPanelProps) {
 		`${inFlight.map((goal) => goal.key).join(" ")} | ${done.map((goal) => goal.key).join(" ")}`,
 		"li[data-key]",
 	);
+	// A row that comes in without a motion of its own (brought in from behind "2 new") fades in where it lands.
+	const fresh = useFresh(true, 400);
 	// Titles that start alike fold their shared start, so what tells them apart comes first.
 	const titles = new Map(
 		distinctTitles(goals.map((goal) => goal.title)).map((title, index) => [goals[index]!.key, title]),
@@ -174,6 +200,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			onToggle={() => toggle(goal.key)}
 			lit={props.lit.has(goal.key)}
 			motion={props.motions.get(goal.key)}
+			appearing={fresh(goal.key)}
 			unseen={props.unseen.has(goal.key)}
 			onHover={(hovering) => {
 				setHeld(hovering ? goal.key : null);
@@ -186,13 +213,16 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			now={now}
 		/>
 	);
-	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
-	// the point there.
-	const finishedShown = timeline || showFinished;
 	return (
 		<section
 			ref={panel}
 			data-view={view}
+			onPointerEnter={() => setPointerIn(true)}
+			onPointerLeave={() => setPointerIn(false)}
+			onFocus={() => setFocusIn(true)}
+			onBlur={(event: FocusEvent) => {
+				if (!event.currentTarget.contains(event.relatedTarget)) setFocusIn(false);
+			}}
 			className={cn(
 				"min-w-0",
 				timeline ? "[--row-pad:2px] [--words:26%]" : "[--row-pad:7px] [--words:calc(100%-130px)] to-640:[--words:100%]",
@@ -251,6 +281,20 @@ export function GoalsPanel(props: GoalsPanelProps) {
 					<AxisRow axis={axis} timeline={timeline} />
 					<div className={cn(SECTION, sectionRoom(timeline))}>
 						<span>In flight · {working}</span>
+						{arrived.length || finished.length ? (
+							// Quiet, and no taller than the heading, so its coming moves nothing.
+							<Button
+								key="pending"
+								className={cn(
+									"order-2 -my-1 animate-hive-pop-in rounded-full border-link/40 bg-link-soft px-2.5 py-0",
+									"text-caption leading-5 font-semibold tracking-normal text-link normal-case",
+								)}
+								onClick={apply}
+								aria-label={`${pendingWords(arrived, finished)}: show them`}
+							>
+								{pendingWords(arrived, finished)}
+							</Button>
+						) : null}
 					</div>
 					<ol className="m-0 list-none p-0">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
 					{flying.length ? null : (
@@ -328,6 +372,24 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			</div>
 		</section>
 	);
+}
+
+/**
+ * The rows as drawn: as they are, or held still while `paused` says so of the rows drawn last (see holdLayout), with
+ * what waits and a way to bring it in now.
+ */
+function useHeld(live: GoalLayout, paused: (drawn: GoalLayout) => boolean) {
+	const drawn = useRef<GoalLayout | undefined>(undefined);
+	const latest = useRef(live);
+	latest.current = live;
+	const [, redraw] = useReducer((count: number) => count + 1, 0);
+	const held = holdLayout(drawn.current, live, !!drawn.current && paused(drawn.current));
+	drawn.current = held.shown;
+	const apply = () => {
+		drawn.current = latest.current;
+		redraw();
+	};
+	return { ...held, apply };
 }
 
 /** Before any goal: a faint sample row, saying what each one will show and where agents come from. */
@@ -470,6 +532,8 @@ interface GoalRowProps {
 	onToggle(): void;
 	lit: boolean;
 	motion: (GoalMotion & { seq: number }) | undefined;
+	/** Only just drawn, with no motion of its own: it fades in. */
+	appearing: boolean;
 	unseen: boolean;
 	onHover(hovering: boolean): void;
 	onAgent(agent: string): void;
@@ -488,6 +552,7 @@ function GoalRow({
 	onToggle,
 	lit,
 	motion,
+	appearing,
 	unseen,
 	onHover,
 	onAgent,
@@ -524,7 +589,7 @@ function GoalRow({
 				hidden ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]",
 				edge,
 				!hidden && (open || lit ? "bg-card" : "hover:bg-card"),
-				motion && ROW_MOTION[motion.motion],
+				motion ? ROW_MOTION[motion.motion] : appearing && "animate-hive-fade-in",
 			)}
 			style={style}
 			data-key={goal.key}

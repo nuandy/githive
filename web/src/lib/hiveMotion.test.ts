@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, NOW } from "../test/fixtures";
 import type { Goal } from "./goals";
-import { goalMotions, MOST_MOTIONS, RIPPLE_MS } from "./hiveMotion";
+import { goalMotions, holdLayout, MOST_MOTIONS, pendingWords, RIPPLE_MS } from "./hiveMotion";
 
 const goal = (change: string, steps: Goal["steps"], extra: Partial<Goal> = {}): Goal => ({
 	key: change,
@@ -50,5 +50,47 @@ describe("what moves on the Hive tab", () => {
 	it("plays at most a few from one read; the rest just appear", () => {
 		const after = Array.from({ length: 30 }, (_, index) => goal(`g${index}`, [{ kind: "claimed", at: ago(index) }]));
 		expect(goalMotions([], after, NOW)).toHaveLength(MOST_MOTIONS);
+	});
+});
+
+describe("the goals panel held still while it's read", () => {
+	const shown = { inFlight: ["c", "b", "a"], done: ["z"] };
+
+	it("follows every change while nobody's reading", () => {
+		const next = { inFlight: ["d", "c", "a"], done: ["b", "z"] };
+		expect(holdLayout(shown, next, false)).toEqual({ shown: next, arrived: [], finished: [] });
+		// And on the first read, there's nothing to hold.
+		expect(holdLayout(undefined, next, true)).toEqual({ shown: next, arrived: [], finished: [] });
+	});
+
+	it("keeps rows where they are while paused, and counts what waits: new goals, and goals that finished", () => {
+		const next = { inFlight: ["d", "c", "a"], done: ["b", "z"] };
+		expect(holdLayout(shown, next, true)).toEqual({
+			shown: { inFlight: ["c", "b", "a"], done: ["z"] },
+			arrived: ["d"],
+			finished: ["b"],
+		});
+	});
+
+	it("holds nothing when nothing's drawn yet: the first goal comes in", () => {
+		const next = { inFlight: ["a"], done: [] };
+		expect(holdLayout({ inFlight: [], done: [] }, next, true).shown).toEqual(next);
+	});
+
+	it("lets a goal that's gone go, even while paused", () => {
+		const next = { inFlight: ["c", "a"], done: ["z"] };
+		expect(holdLayout(shown, next, true).shown).toEqual({ inFlight: ["c", "a"], done: ["z"] });
+	});
+
+	it("holds the same way however often it's asked", () => {
+		const next = { inFlight: ["d", "c", "a"], done: ["b", "z"] };
+		const once = holdLayout(shown, next, true);
+		expect(holdLayout(once.shown, next, true)).toEqual(once);
+	});
+
+	it("says what waits in a few words", () => {
+		expect(pendingWords(["d", "e"], [])).toBe("2 new");
+		expect(pendingWords([], ["b"])).toBe("1 finished");
+		expect(pendingWords(["d"], ["b"])).toBe("1 new · 1 finished");
 	});
 });
