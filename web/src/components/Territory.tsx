@@ -1,9 +1,11 @@
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
-import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, LAMPS, type Region, territory } from "../lib/overview";
+import { type Cell, cellLamp, type Lamp, LAMPS, type Region, territory } from "../lib/overview";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { STATES } from "../lib/status";
 import { cn } from "../lib/utils";
+import { StateMark } from "./StateMark";
 import { Lamp as LampMark } from "./ui/badge";
 
 /** A region with no more entries than this lists them by name; a bigger one is a grid of lamps. */
@@ -15,33 +17,19 @@ function cellLabel(cell: Cell, region: Region): string {
 	const what = `${cell.path}${cell.planned ? " (new)" : ""}`;
 	if (!holder) return `${what}: not claimed`;
 	const others = cell.holders.length > 1 ? `, and ${cell.holders.length - 1} more` : "";
-	return `${what}: ${holder.title} by ${holder.agent}, ${LAMP_WORDS[holder.lamp]}${others}`;
+	return `${what}: ${holder.title} by ${holder.agent}, ${STATES[holder.lamp].short}${others}`;
 }
 
 /**
- * How a held cell lights, in its lamp's color: lit, hatched while nothing's pushed yet, an unlit ring once its agent
- * has gone, and ringed in ink while it's checked to land, like the lamps on the track.
+ * A cell: a dark slot when nobody holds it, its change's state when someone does (its color, pattern and glyph, as
+ * everywhere), changing color smoothly.
  */
-const LIT: Record<Lamp, string> = {
-	attention: "border-bad bg-bad",
-	abandoned: "border-2 border-amber bg-transparent",
-	checking: "border-2 border-foreground bg-amber",
-	approved: "border-good bg-good",
-	review: "border-amber bg-amber",
-	building: "border-amber bg-transparent bg-[repeating-linear-gradient(135deg,var(--amber)_0_2px,transparent_2px_5px)]",
-};
-
-/** A cell: a dark slot when nobody holds it, its lamp's color when someone does, changing color smoothly. */
 function CellMark({ lamp, className }: { lamp: Lamp | undefined; className?: string }) {
 	return (
-		<span
-			className={cn(
-				"block size-3.5 flex-none rounded-xs border border-surface-3 bg-surface-3",
-				"transition-[background-color,border-color] duration-slow",
-				lamp && LIT[lamp],
-				className,
-			)}
-			aria-hidden="true"
+		<StateMark
+			state={lamp}
+			empty="border-surface-3 bg-surface-3"
+			className={cn("grid size-3.5 rounded-xs", className)}
 		/>
 	);
 }
@@ -71,9 +59,9 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 			</h3>
 			{wholeHolder ? (
 				<p className="mt-0 mb-2.5 text-ui-lg">
-					<LampMark color={lampColor(wholeHolder.lamp)} className="mr-1.75 align-[0.05em]" />
+					<LampMark state={wholeHolder.lamp} className="mr-1.75 align-[0.05em]" />
 					<a href={href.change(repo, wholeHolder.change)}>{wholeHolder.title}</a> holds all of it,{" "}
-					{LAMP_WORDS[wholeHolder.lamp]}
+					{STATES[wholeHolder.lamp].short}
 				</p>
 			) : null}
 			{named ? (
@@ -142,7 +130,9 @@ export function Territory({
 	error?: string;
 	landing?: RepoLanding;
 }) {
-	const regions = tree ? territory(tree.files, snapshot.claims, { landing, votes: snapshot.votes }) : [];
+	const regions = tree
+		? territory(tree.files, snapshot.claims, { landing, votes: snapshot.votes, policy: snapshot.policy })
+		: [];
 	const treeStatus = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
 	// What comes once the tree is read (or goes to read another branch's) fades in; what's there at once comes with the
 	// page.
@@ -165,7 +155,7 @@ export function Territory({
 				{LAMPS.map((lamp) => (
 					<li key={lamp} className="inline-flex items-center gap-1.75">
 						<CellMark lamp={lamp} />
-						{LAMP_WORDS[lamp]}
+						{STATES[lamp].short}
 					</li>
 				))}
 				<li className="inline-flex items-center gap-1.75">

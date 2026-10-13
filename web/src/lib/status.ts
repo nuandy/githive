@@ -26,6 +26,8 @@ export const CHANGE_STATES = [
 	"released",
 ] as const;
 export type ChangeState = (typeof CHANGE_STATES)[number];
+/** The states of a change in force: landed and released are how one ends. */
+export type ClaimState = Exclude<ChangeState, "landed" | "released">;
 
 export interface StateLook {
 	/** Its one noun: "Needs a person". */
@@ -171,7 +173,7 @@ export interface StateContext {
  * turn (as staleness.ts frees it); its head being checked to land; rejections on its head before its approval; and a
  * vote only people may give before plain review.
  */
-export function changeState(claim: Claim, context: StateContext = {}): ChangeState {
+export function changeState(claim: Claim, context: StateContext = {}): ClaimState {
 	const { votes = [], landing, policy, now } = context;
 	const waiting = waitingOn(claim, { votes, policy });
 	if (waiting?.kind === "question") return "needs-person";

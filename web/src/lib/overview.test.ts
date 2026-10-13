@@ -20,20 +20,21 @@ const soon = Date.parse("2026-10-09T00:01:00.000Z");
 const approved = { ...pushed, approval: { approved: true, approvals: 1, required: 1, vetoedBy: [] } };
 
 describe("a claim's lamp", () => {
-	it("says where its change is, a person's question or veto first", () => {
+	it("says where its change is, a person's question first, in the states everything else uses", () => {
 		expect(lampOf(claim("a", ["x/"]), { now: soon })).toBe("building");
-		expect(lampOf(claim("a", ["x/"], pushed), { now: soon })).toBe("review");
+		expect(lampOf(claim("a", ["x/"], pushed), { now: soon })).toBe("in-review");
 		expect(lampOf(claim("a", ["x/"], approved), { now: soon })).toBe("approved");
 		const landing = { checking: { base: "m", since: "", changes: [{ change: "a", head: approved.head, agent: "a" }] } };
-		expect(lampOf(claim("a", ["x/"], approved), { landing, now: soon })).toBe("checking");
+		expect(lampOf(claim("a", ["x/"], approved), { landing, now: soon })).toBe("landing");
 		// Only its head as it's being checked: a newer push waits for review again.
-		expect(lampOf(claim("a", ["x/"], { ...pushed, head: "b".repeat(40) }), { landing, now: soon })).toBe("review");
+		expect(lampOf(claim("a", ["x/"], { ...pushed, head: "b".repeat(40) }), { landing, now: soon })).toBe("in-review");
 		expect(
 			lampOf(claim("a", ["x/"], { ...approved, attention: { reason: "?", agent: "a", at: "" } }), {
 				landing,
 				now: soon,
 			}),
-		).toBe("attention");
+		).toBe("needs-person");
+		// A veto sends it back to its agent: changes requested, not a person's to answer.
 		expect(
 			lampOf(
 				claim("a", ["x/"], {
@@ -42,13 +43,20 @@ describe("a claim's lamp", () => {
 				}),
 				{ now: soon },
 			),
-		).toBe("attention");
+		).toBe("changes-requested");
+		// A vote only people may give needs a person.
+		const awaiting = {
+			...pushed,
+			approval: { approved: false, approvals: 1, required: 1, vetoedBy: [], awaiting: ["sec"] },
+		};
+		const policy = { required: 1, vetoes: ["sec"], grants: { sec: ["person:*"] } };
+		expect(lampOf(claim("a", ["x/"], awaiting), { policy, now: soon })).toBe("needs-person");
 	});
 
 	it("shows a change abandoned on its agent's turn, as the toolkit frees it, and never one waiting for review", () => {
 		const hours = (n: number) => Date.parse("2026-10-09T00:00:00.000Z") + n * 3_600_000;
 		expect(lampOf(claim("a", ["x/"]), { now: hours(1) })).toBe("abandoned");
-		expect(lampOf(claim("a", ["x/"], pushed), { now: hours(24) })).toBe("review");
+		expect(lampOf(claim("a", ["x/"], pushed), { now: hours(24) })).toBe("in-review");
 		const votes = [
 			{
 				commit: pushed.head,
@@ -79,7 +87,7 @@ describe("a claim's lamp", () => {
 		const counts = lampCounts([claim("a", ["x/"]), claim("b", ["y/"], pushed), claim("c", ["z/"], pushed)], {
 			now: soon,
 		});
-		expect(counts).toMatchObject({ building: 1, review: 2, approved: 0 });
+		expect(counts).toMatchObject({ building: 1, "in-review": 2, approved: 0 });
 	});
 });
 
@@ -108,7 +116,7 @@ describe("the territory", () => {
 				lib.cells.find((c) => c.name === "router")!,
 				lib,
 			),
-		).toBe("review");
+		).toBe("in-review");
 		expect(
 			cellLamp(
 				lib.cells.find((c) => c.name === "a.js")!,

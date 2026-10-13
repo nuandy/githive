@@ -4,8 +4,11 @@ import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { Territory } from "./Territory";
-import { LAMP_WORDS, lampColor, lampCounts, LAMPS } from "../lib/overview";
+import { needsYou } from "../lib/needsYou";
+import { lampCounts, LAMPS } from "../lib/overview";
+import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { STATES } from "../lib/status";
 import { cn } from "../lib/utils";
 import { Lamp } from "./ui/badge";
 import { Callout } from "./ui/box";
@@ -183,16 +186,32 @@ function NewBranchForm(props: {
 // A summary in a line: a bold count, then lamp-marked counts beside it.
 const SUMMARY = "m-0 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-lead";
 
-/** The claims in force, in a sentence: how many, and where their changes are. */
-function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: RepoLanding }) {
+/**
+ * The claims in force, in a sentence: how many, what needs a person (see needsYou.ts: questions, votes only people
+ * give, and merges the audit flags), and where the rest are.
+ */
+function Summary({ repo, snapshot, landing }: { repo: string; snapshot: RepoSnapshot; landing?: RepoLanding }) {
 	const total = snapshot.claims.length;
+	const needs = needsYou(snapshot, snapshot.audit);
+	const audit = needs.violations ? (
+		<a href={href.repo(repo, "audit")} className="inline-flex items-center gap-1.75">
+			<Lamp state="needs-person" />
+			{counted(needs.violations, "merge")} for the audit to look at
+		</a>
+	) : null;
 	if (!total)
-		return <p className={SUMMARY}>No claims in force. When an agent claims part of the tree, it lights up below.</p>;
-	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes });
-	const parts = LAMPS.filter((lamp) => counts[lamp]).map((lamp) => (
+		return (
+			<p className={SUMMARY}>
+				No claims in force. When an agent claims part of the tree, it lights up below.
+				{audit}
+			</p>
+		);
+	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes, policy: snapshot.policy });
+	const count = (lamp: (typeof LAMPS)[number]) => (lamp === "needs-person" ? needs.changes.length : counts[lamp]);
+	const parts = LAMPS.filter((lamp) => count(lamp)).map((lamp) => (
 		<span key={lamp} className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp color={lampColor(lamp)} />
-			{counts[lamp]} {lamp === "attention" && counts[lamp] > 1 ? "need a person" : LAMP_WORDS[lamp]}
+			<Lamp state={lamp} />
+			{count(lamp)} {lamp === "needs-person" && count(lamp) > 1 ? "need a person" : STATES[lamp].short}
 		</span>
 	));
 	return (
@@ -201,6 +220,7 @@ function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: Repo
 				{total} {total === 1 ? "claim" : "claims"} in force
 			</strong>
 			{parts}
+			{audit}
 		</p>
 	);
 }
@@ -238,7 +258,7 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 					There's no branch {asked} taking changes here: showing {branch}.
 				</Callout>
 			) : null}
-			<Summary snapshot={onBranch} landing={landing.data} />
+			<Summary repo={repo} snapshot={onBranch} landing={landing.data} />
 			<Territory
 				repo={repo}
 				branch={shown}
