@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Settled } from "../src/toolkit/landing";
-import { STRETCH_GAP_MS, extendStretch, stretchSummary } from "../src/toolkit/stretch";
+import { STRETCH_GAP_MS, extendStretch, freshStretch, stretchSummary } from "../src/toolkit/stretch";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache } = await import("../src/repo-cache");
@@ -28,6 +28,23 @@ describe("the last stretch of work", () => {
 		const earlier = extendStretch(undefined, [outcome("ann", 0)]);
 		const later = extendStretch(earlier, [outcome("bob", STRETCH_GAP_MS / 60_000 + 1)]);
 		expect(later).toMatchObject({ landed: 1, agents: ["bob"], from: at(16) });
+	});
+
+	it("begins afresh where work is known to start, leaving out what landed minutes before", async () => {
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		// The last run's landings, then this run's agents start at minute 4 and their first piece lands at 6.
+		await cache.landingSettled("main", [outcome("ann", 0), outcome("bob", 3)]);
+		await cache.startStretch(at(4));
+		expect(await cache.landingView("main")).not.toHaveProperty("stretch");
+		await cache.landingSettled("main", [outcome("cy", 6)]);
+		expect((await cache.landingView("main")).stretch).toEqual({
+			landed: 1,
+			failed: 0,
+			agents: 1,
+			from: at(4),
+			to: at(6),
+		});
+		expect(extendStretch(freshStretch(at(4)), [outcome("cy", 6)])).toMatchObject({ from: at(4), landed: 1 });
 	});
 
 	it("takes a batch's outcomes in time order, whatever order they come in", () => {

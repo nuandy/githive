@@ -50,6 +50,14 @@ export function extendStretch(stretch: Stretch | undefined, outcomes: Settled[])
 	return current;
 }
 
+/**
+ * A stretch begun at `at` with nothing in it yet, for work whose start is known: a demo run's, from when its agents
+ * start, so the last run's landings a few minutes before don't count in it.
+ */
+export function freshStretch(at: string): Stretch {
+	return { landed: 0, failed: 0, agents: [], from: at, to: at };
+}
+
 export function stretchSummary({ landed, failed, agents, from, to }: Stretch): StretchSummary {
 	return { landed, failed, agents: agents.length, from, to };
 }

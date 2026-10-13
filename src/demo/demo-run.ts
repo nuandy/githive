@@ -142,6 +142,11 @@ export class DemoRun extends DurableObject<Env> {
 		return { ...run, agents: hive?.agents ?? [] };
 	}
 
+	/** Begins the repo's stretch of work now (tests note it instead). */
+	protected async startStretch(repo: string) {
+		await this.env.REPO_CACHE.getByName(`repo:${repo}`).startStretch(new Date().toISOString());
+	}
+
 	/** The repo's hosted agents (tests stand in for them). */
 	protected hiveOf(repo: string): Pick<HostedAgent, "start" | "status" | "stopAll"> {
 		return this.env.HOSTED_AGENT.getByName(`hive:${repo}`);
@@ -188,6 +193,10 @@ export class DemoRun extends DurableObject<Env> {
 				return run;
 			}
 			if (run.restore) await this.callTool("settings", { repo: run.repo, ...run.restore });
+			// The dashboard's "all landed" times this run alone, not the last run's landings minutes before.
+			await this.startStretch(run.repo).catch((err) =>
+				console.error(`demo ${run.id}: starting its stretch failed`, statusOf(err).message),
+			);
 			await this.startAgents(run);
 			const { reset: _, restore: __, ...rest } = run;
 			return rest;

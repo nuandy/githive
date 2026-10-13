@@ -87,7 +87,11 @@ function demo(
 	// The reset's claim until it merges (which the first merge does here), and the settings the run sets.
 	const reset = { claimed: true, merges: 0, settings: [] as unknown[] };
 	const env = { DEMO_RUN: { getByName: () => ({ release: async (id: string) => void released.push(id) }) } };
+	const stretches: string[] = [];
 	class TestRun extends DemoRun {
+		protected override async startStretch(repo: string) {
+			stretches.push(`${repo} after ${started.length} starts`);
+		}
 		protected override async setUp(_run: unknown, restore: () => Promise<Gates>) {
 			if (setUp instanceof Error) throw setUp;
 			if (typeof setUp === "function") return setUp(restore);
@@ -115,7 +119,7 @@ function demo(
 	}
 	const run = new TestRun({ storage: new FakeStorage() } as never, env as never);
 	const storage = (run as unknown as { ctx: { storage: FakeStorage } }).ctx.storage;
-	return { run, storage, agents, started, released, reset, stopped: () => stopped };
+	return { run, storage, agents, started, released, reset, stretches, stopped: () => stopped };
 }
 
 /** Begins run 1 and lets its first alarm set it up. */
@@ -184,7 +188,7 @@ describe("a demo run", () => {
 
 	it("lands its reset first, gives the repo its approvals back, and only then starts its agents", async () => {
 		const restore = { required: 1, verify: ["npm test"] };
-		const { run, agents, reset, started } = demo({ repo: "ada--honeycomb", reset: "reset-1", restore });
+		const { run, agents, reset, started, stretches } = demo({ repo: "ada--honeycomb", reset: "reset-1", restore });
 		// The last run's agents, all stopped, don't end this one.
 		agents.push({ name: "githive-forager", done: true });
 		await begin(run);
@@ -196,6 +200,8 @@ describe("a demo run", () => {
 		await run.alarm();
 		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", ...restore }]);
 		expect(started).toHaveLength(1);
+		// Its stretch of work begins as its agents start, so the dashboard times this run alone.
+		expect(stretches).toEqual(["ada--honeycomb after 0 starts"]);
 		expect((await run.status())?.reset).toBeUndefined();
 	});
 
