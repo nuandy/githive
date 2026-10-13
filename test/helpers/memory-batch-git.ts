@@ -86,6 +86,8 @@ function inMemory(remote: Remote): BatchGit {
 				await ws.push();
 				return { commits };
 			} catch (err) {
+				// As the Gate: an error can come after the push applied, and then the branch is at the last merge.
+				if ((await branchHead(remote, branch).catch(() => null)) === commits.at(-1)) return { commits };
 				if (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError) return "moved";
 				throw err;
 			}

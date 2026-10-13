@@ -123,8 +123,22 @@ export async function landMerges(
 	steps.mark("pushed");
 	console.log(`gate landing of ${input.merges.length}: ${steps.done()}`);
 	if (pushed.exitCode === 0) return { commits };
+	// A server error can come after the push applied, so the branch decides, as tree landing does: at the last merge
+	// it landed, and landing it again would merge every change twice.
+	if ((await remoteHead(container, input)) === base) return { commits };
 	if (/rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output)) return { moved: true };
 	return { error: `the push failed: ${clip(pushed.output, 500)}` };
+}
+
+/** Where the project's branch points on the server now, or null if it can't be read. */
+async function remoteHead(container: Container, input: BatchBase) {
+	const listed = await gitWithToken(container, input.base.token, [
+		"ls-remote",
+		input.base.remote,
+		`refs/heads/${input.branch}`,
+	]);
+	if (listed.exitCode !== 0) return null;
+	return listed.output.split(/\s/)[0] || null;
 }
 
 /** The packs merges fetched for their changes while they waited, by change head (see tree-landing.ts). */
