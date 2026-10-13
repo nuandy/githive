@@ -1,5 +1,7 @@
 import git from "isomorphic-git";
+import { diffCommits } from "../../change-diff";
 import { type Remote, Workspace } from "../../git";
+import { fetchCommits } from "../../git-fetch";
 import { projectBranch } from "../../project-branch";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
@@ -178,6 +180,51 @@ async function ownCommits(
 		});
 	}
 	return own;
+}
+
+/**
+ * A change's files for its page's Files tab (see change-diff.ts). Open, or released without landing: its pushed head
+ * against its merge base with the branch it lands on, each file outside its claim flagged. Landed: the commit it
+ * landed as against that commit's first parent, the branch before it, which is what it brought. Nothing pushed (or its
+ * branch gone): no files.
+ */
+export async function changeDiff(ctx: ToolContext, repo: string, change: string) {
+	const timing = ctx.timing ?? new Timing();
+	const registry = (await timing.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
+		.state;
+	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
+	const { claim: record, released } = await timing.time("change", () =>
+		storeFor(ctx, repo, registry).readChange(change),
+	);
+	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
+	const landed = released.find((release) => release.mergedAs);
+	if (!record && landed?.mergedAs) {
+		const mergedAs = landed.mergedAs;
+		// The merge and its parents, with their trees, in one fetch.
+		const project = await ctx.remote(repo, "read");
+		const held = await timing.time("fetch", () => fetchCommits(project, [mergedAs], "/landed", { depth: 2 }));
+		const { commit } = await git.readCommit({ ...held, oid: mergedAs });
+		const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
+		return { change, of: "landed" as const, ...(await timing.time("diff", () => diffCommits(held, before, mergedAs))) };
+	}
+	const agent = record?.agent ?? released.at(-1)!.agent;
+	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+	const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
+	const workspace = await timing
+		.time("clone", async () =>
+			Workspace.clone(await changeSourceFor(ctx, repo)(agent, "read", change, record?.since), `changes/${change}`, {
+				depth: 8,
+			}),
+		)
+		.catch(() => null);
+	if (!workspace) return { change, of: "head" as const, base: null, head: null, files: [], total: 0 };
+	const head = await workspace.head();
+	const projectHead = await timing.time("project", async () =>
+		workspace.fetch("project", await ctx.remote(repo, "read"), branch),
+	);
+	const base = await timing.time("base", () => workspace.mergeBase(projectHead, head));
+	const diff = await timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed }));
+	return { change, of: "head" as const, ...diff };
 }
 
 /**

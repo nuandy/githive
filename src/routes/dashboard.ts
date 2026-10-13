@@ -7,6 +7,7 @@ import {
 	bringGitHubBackAgain,
 	callTool,
 	repoAudit,
+	changeDiff,
 	changeHistory,
 	giveUpAsPerson,
 	makeBranch,
@@ -150,6 +151,15 @@ function changeViewRoutes(app: Hono<AppEnv>) {
 		const change = c.req.param("change");
 		return keptView(c, `repo:${repo.id}`, `change:${change}`, 60_000, (timing) =>
 			changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change),
+		);
+	});
+	// A change's files: each one's diff from where it left its branch to its head, or what it brought once it landed
+	// (see changeDiff), capped at 300 files and about 1 MB of diff text. Kept like the change's own view.
+	app.get("/repos/:owner/:name/changes/:change/diff", async (c) => {
+		const repo = await routeRepo(c, "read");
+		const change = c.req.param("change");
+		return keptView(c, `repo:${repo.id}`, `diff:${change}`, 60_000, (timing) =>
+			changeDiff({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change),
 		);
 	});
 	// The hive's recent events, newest first, for its live feed (see hive-events.ts).
