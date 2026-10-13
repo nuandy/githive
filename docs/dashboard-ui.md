@@ -36,7 +36,8 @@ markup, drawn from the theme.
 - The Hive's stages, `stage-building`, `stage-review`, `stage-landing`, `stage-landed` and `stage-asking`, name the
   lamps a change's state takes (below).
 - Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
-  `mark-line`, `mark-dot`).
+  `mark-line`, `mark-dot`). An agent's chip on the Hive is ringed in a stable hue of its own from the claim colors that
+  no lamp uses (`agentHue` in `lib/hiveCells.ts`), so two agents in a cell are told apart by more than their letters.
 
 Use them as `bg-card`, `text-muted-foreground`, `border-border-strong`, `bg-bad/45`. In SVG or inline styles use the
 variable: `fill="var(--good)"`.
@@ -81,7 +82,9 @@ device" the page follows the system live. Another palette is another block of th
 redrawn), `caption` 12 (the smallest for words: Overpass's x-height is small), `meta` and `ui` 13, `ui-lg` and
 `body-sm` 14, `body` 15, `lead` and `title-sm` 17, `title` and `title-lg` 20, `display-sm` and `display` 26. Roles that
 share a size are told apart by weight, color or face. No `text-[…]` sizes, but in the Hive's marks (the map, the goals'
-chips and clock), where type sits inside shapes of its own size. Long-form text (an intent, a review, an agent's
+chips and clock) and a state's glyph on its lamp or mark, where type sits inside shapes of its own size, and never under
+10px: the map's cells are drawn at their own size and never scaled down, and a name that doesn't fit is cut in the
+middle so its end stays (`cellNames`). Long-form text (an intent, a review, an agent's
 question, an Inbox reason) wraps at `max-w-measure`, 70ch. Fonts: `font-sans` (Overpass) and `font-mono` (Overpass
 Mono).
 
@@ -137,6 +140,9 @@ lucide icons for `Icon`, and restyle it from the theme.
 - Menus and other overlays grow from their trigger and fade, both ways.
 - Swapped content cross-fades; what leaves goes before it's removed (`useLingering`).
 - Changing numbers bump (`animate-bump`, to 1.15 and back); reordered rows glide (FLIP).
+- Live updates don't move what's being read: while the pointer or focus is in the Hive's goals, or a row in view is open,
+  new and finished goals wait behind a quiet "2 new" (`holdLayout` in `lib/hiveMotion.ts`), and come in, gliding, when
+  it's clicked or the reader leaves.
 - Nothing blinks or pulses for long (WCAG 2.2.2): the landing blinks and the live dot's pulse play three times, then
   hold still.
 - Durations come from the theme (`duration-fast` 150ms, `duration-base` 250ms, `duration-slow` 400ms; easings
@@ -174,6 +180,9 @@ fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline befo
 - **One focus ring.** Everything that takes focus shows the base `:focus-visible` outline: 2px of `ring`, 2px out. Don't
   turn it off or draw a border and halo instead. Only what sits inside a group draws it inset (a segmented control's
   choice, a tab, `-outline-offset-2`), a menu's items light up instead, and a hive cell draws it around its hexagon.
+- **A map of many things is one stop for Tab.** The Hive's map takes focus once (a roving `tabIndex`); the arrow keys go
+  to the nearest cell that way (`nearestInDirection`), Enter or Space does what a click does, and a cell's details open
+  in a `Popover` that Escape closes, back to the cell.
 - **Links in running text are underlined** (WCAG 1.4.1): a link in a paragraph, a callout, a `<blockquote>` or
   `<figcaption>`, or a block marked `prose` (a list of sentences, a timeline entry's body) is underlined at 40% of the
   link's color, by the base rule. Links that stand on their own (navigation, tabs, breadcrumbs, pills, a row's title, a
