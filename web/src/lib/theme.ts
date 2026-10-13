@@ -42,6 +42,9 @@ function snapshot() {
 
 function paint(theme: Theme) {
 	document.documentElement.classList.toggle("dark", theme === "dark");
+	// The browser's own bar in the top bar's color (index.html's theme-color, which follows the system until now).
+	const bar = window.getComputedStyle?.(document.documentElement).getPropertyValue("--card").trim();
+	if (bar) for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) meta.content = bar;
 }
 
 /** Shows `theme`, cross-fading the page unless the reader asks for less motion or the browser can't. */

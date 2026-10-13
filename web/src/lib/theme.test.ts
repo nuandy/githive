@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import css from "../theme.css?raw";
+import indexHtml from "../../index.html?raw";
 
 // lib/theme.ts keeps the choice in a module-level store, so each test loads it fresh into a fake window: storage,
 // the system's color scheme (which a test can flip) and <html>'s class and data-theme.
@@ -18,7 +19,8 @@ function fakeWindow({ stored, systemDark = false }: { stored?: string | null; sy
 		},
 		dataset: {} as Record<string, string>,
 	};
-	vi.stubGlobal("document", { documentElement: html });
+	const metas = [{ content: "" }, { content: "" }];
+	vi.stubGlobal("document", { documentElement: html, querySelectorAll: () => metas });
 	vi.stubGlobal("window", {
 		localStorage: {
 			getItem: (key: string) => storage.get(key) ?? null,
@@ -30,11 +32,16 @@ function fakeWindow({ stored, systemDark = false }: { stored?: string | null; sy
 			addEventListener: (_: string, listener: Listener) => schemeListeners.push(listener),
 		}),
 		addEventListener: () => {},
+		getComputedStyle: () => ({
+			getPropertyValue: (name: string) => (name === "--card" ? (classes.has("dark") ? " #dark-card" : "#light-card") : ""),
+		}),
 	});
 	return {
 		storage,
 		dark: () => classes.has("dark"),
 		chosen: () => html.dataset.theme,
+		/** The browser bar's colors, as the theme-color metas say. */
+		barColors: () => metas.map((meta) => meta.content),
 		setSystemDark(dark: boolean) {
 			scheme.matches = dark;
 			for (const listener of schemeListeners) listener();
@@ -81,6 +88,8 @@ describe("the theme", () => {
 		expect(page.storage.get("githive.theme")).toBe("dark");
 		expect(page.dark()).toBe(true);
 		expect(page.chosen()).toBe("dark");
+		// The browser's own bar takes the top bar's dark color.
+		expect(page.barColors()).toEqual(["#dark-card", "#dark-card"]);
 
 		theme.setThemeChoice("system");
 		expect(page.storage.has("githive.theme")).toBe(false);
@@ -121,6 +130,16 @@ const contrast = (a: string, b: string) => {
 	return (light! + 0.05) / (dark! + 0.05);
 };
 const SCHEMES = [":root", ".dark"];
+
+describe("the browser's bar", () => {
+	it("is the top bar's color, light and dark, from before the first paint", () => {
+		const [light, dark] = [value(":root", "card"), value(".dark", "card")];
+		expect(indexHtml).toContain(`media="(prefers-color-scheme: light)" content="${light}"`);
+		expect(indexHtml).toContain(`media="(prefers-color-scheme: dark)" content="${dark}"`);
+		// A choice against the system's, as the page loads.
+		expect(indexHtml).toContain(`meta.content = dark ? "${dark}" : "${light}"`);
+	});
+});
 
 /** Asserts `fore` reads on each of `backs` at `least`, in every scheme. */
 function reads(fore: string, backs: string[], least: number) {

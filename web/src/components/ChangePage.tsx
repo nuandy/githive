@@ -63,6 +63,8 @@ export interface ChangePageProps {
 	giveUp?: (repo: string, change: string) => Promise<GiveUpAnswer>;
 	/** The time leases are told against (tests fix it). */
 	now?: number;
+	/** Opened at its decision (#…/changes/:id?decide): from the Inbox's Answer or Vote. */
+	decide?: boolean;
 }
 
 /** Whether a claim is GitHub's change, brought back by githive-github. */

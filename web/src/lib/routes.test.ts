@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isLoose, repoPath, splitRepo } from "./repoName";
-import { href, parseRoute } from "./routes";
+import { href, parseRoute, readQuery, withQuery } from "./routes";
 
 describe("hash routes", () => {
 	it("parses the pages", () => {
@@ -73,6 +73,56 @@ describe("hash routes", () => {
 			path: "src/x#y.ts",
 			ref: "feature/1",
 		});
+	});
+});
+
+describe("views in the address", () => {
+	it("keeps the repo search on Repositories, as ?q=", () => {
+		expect(parseRoute("#/?q=store")).toEqual({ page: "repos", q: "store" });
+		expect(parseRoute("#/?q=")).toEqual({ page: "repos" });
+		expect(parseRoute("#?q=a%20b")).toEqual({ page: "repos", q: "a b" });
+		expect(href.repos()).toBe("#/");
+		expect(href.repos("")).toBe("#/");
+		expect(href.repos("a b&c")).toBe("#/?q=a%20b%26c");
+		expect(parseRoute(href.repos("a b&c"))).toEqual({ page: "repos", q: "a b&c" });
+	});
+
+	it("opens a change at its decision with ?decide", () => {
+		expect(parseRoute("#/repos/acme/web/changes/add-stats?decide")).toEqual({
+			page: "change",
+			repo: "acme/web",
+			change: "add-stats",
+			tab: "conversation",
+			decide: true,
+		});
+		expect(parseRoute("#/repos/acme/web/changes/add-stats?decide=1")).toMatchObject({ decide: true });
+		expect(parseRoute("#/repos/acme/web/changes/add-stats")).not.toHaveProperty("decide");
+		expect(href.change("acme/web", "add-stats", "conversation", { decide: true })).toBe(
+			"#/repos/acme/web/changes/add-stats?decide",
+		);
+		expect(href.change("acme/web", "add stats", undefined, { decide: true })).toBe(
+			"#/repos/acme/web/changes/add%20stats?decide",
+		);
+		expect(href.change("acme/web", "add-stats", "conversation", { decide: false })).toBe(
+			"#/repos/acme/web/changes/add-stats",
+		);
+		expect(parseRoute(href.change("acme/web", "c d", "commits", { decide: true }))).toEqual({
+			page: "change",
+			repo: "acme/web",
+			change: "c d",
+			tab: "commits",
+			decide: true,
+		});
+	});
+
+	it("writes a query from what's set, leaving out what isn't", () => {
+		expect(withQuery("#/x", {})).toBe("#/x");
+		expect(withQuery("#/x", { a: "1 2", b: undefined, c: true, d: false, e: "" })).toBe("#/x?a=1%202&c");
+		expect(readQuery("a=1%202&c").text("a")).toBe("1 2");
+		expect(readQuery("a=1%202&c").text("b")).toBeUndefined();
+		expect(readQuery("a=&c").text("a")).toBeUndefined();
+		expect(readQuery("a=1%202&c").flag("c")).toBe(true);
+		expect(readQuery("a=1").flag("c")).toBe(false);
 	});
 });
 

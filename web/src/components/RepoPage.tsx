@@ -65,7 +65,7 @@ export type RepoView =
 			ref?: string;
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 	  }
-	| { kind: "change"; change: string; tab: ChangeTab };
+	| { kind: "change"; change: string; tab: ChangeTab; /** Opened at its decision. */ decide?: true };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
 export type RepoPageApi = CodeApi &
@@ -266,6 +266,7 @@ function RepoTabContent({
 				history={changeHistory}
 				repo={repo}
 				tab={view.tab}
+				{...(view.decide ? { decide: true } : {})}
 				api={api}
 				canVote={voting}
 				merge={canWrite(access?.level) ? api.merge : undefined}

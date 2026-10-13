@@ -24,6 +24,9 @@ export interface RepoListProps {
 	canCreate?: boolean;
 	/** Demo runs, which a person signed in can start. */
 	demo?: DemoApi;
+	/** The search, as the address has it (#/?q=…), and keeping it there as it's typed. */
+	query?: string;
+	onQueryChange?: (query: string) => void;
 }
 
 /** A repo's lamp: what needs a person, work being built, or work landed, as a change's lamp says each; quiet is unlit. */
@@ -216,8 +219,8 @@ const NOTE = "my-3.75 border-t border-border px-0.5 py-3 text-muted-foreground";
  * The home page: the reader's own repos (theirs, their orgs' and those shared with them), those that need a person
  * first, then those at work, then the quiet ones; then other people's public repos, apart.
  */
-export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoListProps) {
-	const [query, setQuery] = useState("");
+export function RepoList({ rows: all, loaded, canCreate = false, demo, query: asked = "", onQueryChange }: RepoListProps) {
+	const [query, setQuery] = useState(asked);
 	const rows = all.filter((row) => !row.public);
 	const others = all.filter((row) => row.public);
 	const matching = new Set(filterRepos(all, query).map((row) => row.name));
@@ -278,7 +281,10 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 						className="h-9 w-full pl-8.5"
 						placeholder="Find a repository…"
 						value={query}
-						onChange={(event) => setQuery(event.target.value)}
+						onChange={(event) => {
+							setQuery(event.target.value);
+							onQueryChange?.(event.target.value);
+						}}
 					/>
 				</div>
 			) : null}
