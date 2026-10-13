@@ -241,6 +241,8 @@ export type Args = Record<string, unknown>;
 export interface Doorbell {
 	rings(): Promise<number>;
 	ringAfter(mark: number, ms: number): Promise<number | null>;
+	/** When `agent`'s newest notice still waiting for it was noted, or null if none is (see RepoCache.notify). */
+	newestNotice?(agent: string): Promise<string | null>;
 }
 
 /** What the advice tools (claims, reviews, backlog) read: the claims in force and the changes merged. */

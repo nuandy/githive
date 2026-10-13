@@ -340,8 +340,11 @@ function waitStep(reply: Reply) {
 	}
 	if (what.includes("reviews")) looks.push("`reviews`");
 	if (what.includes("backlog")) looks.push("`backlog`");
-	const look = `Something that concerns you changed: look with ${names(looks)}`;
-	return `${look}, then pass this reply's \`seen\` to \`wait\`.`;
+	const look = looks.length ? `look with ${names(looks)}` : "";
+	// A notice comes in this reply's own news, so there's nothing to look up for it.
+	const read = what.includes("notices") ? "read the notices in this reply's `news`" : "";
+	const steps = [read, look].filter(Boolean).join(" and ");
+	return `Something that concerns you changed: ${steps}, then pass this reply's \`seen\` to \`wait\`.`;
 }
 
 function approvalsMissing(approval: Reply) {

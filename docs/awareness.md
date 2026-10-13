@@ -117,7 +117,7 @@ has none: choosing from it is the agent's.
 | `merge` landed | "Landed as <sha>; your claim is released." |
 | `merge` refused | The fix, the command to reproduce a failed check, or what it waits on. |
 | `reviews` or `backlog` empty | Choose from the other list, or call `wait` to hear when that changes. |
-| `wait` | What changed and which tool shows it (`status` on the change, `reviews`, `backlog`), or to call it again with `seen`. |
+| `wait` | What changed and which tool shows it (`status` on the change, `reviews`, `backlog`), or to read the notices in its `news`, or to call it again with `seen`. |
 
 A refused merge's `next` is worked out from its `why` (`conflict`, `checks`, `outside`, `approvals`, `after` and
 so on, set where it's refused) and the fields beside it, never from the reasons' words, which are for people.

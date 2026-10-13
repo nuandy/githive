@@ -591,7 +591,7 @@ async function waitForWork() {
 	const args = { repo, ...as("agent") };
 	if (flags.seen) args.seen = flags.seen;
 	if (flags.seconds) args.seconds = Number(flags.seconds);
-	const { changed, what = [], yours = [], reviews, backlog, seen } = await tool("wait", args);
+	const { changed, what = [], yours = [], reviews, backlog, seen, news = [] } = await tool("wait", args);
 	if (!changed) {
 		say("nothing that concerns you changed");
 		return next(`githive wait ${repo} --seen ${seen}, or stop if you're done`);
@@ -599,10 +599,13 @@ async function waitForWork() {
 	say(`changed: ${what.join(", ")}`);
 	for (const change of yours) say(`  ${change.change}: ${change.approvals} approved, ${change.rejections} rejected`);
 	say(`  ${reviews} reviews for you, ${backlog} pieces free`);
+	// The news the reply carries: what landed, and the notices that may have woken it.
+	for (const item of news) say(`  ${item.says}`);
 	const looks = [];
 	if (what.includes("yours")) looks.push(`githive status ${repo} <change>`);
 	if (what.includes("reviews")) looks.push(`githive reviews ${repo}`);
 	if (what.includes("backlog")) looks.push(`githive backlog ${repo}`);
+	if (what.includes("notices")) looks.push("read the notices above");
 	next(`${looks.join(", ")}; then githive wait ${repo} --seen ${seen}`);
 }
 

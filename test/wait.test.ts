@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
 import type { Doorbell, ToolContext } from "../src/toolkit/tools/context";
+import { FakeStorage } from "./fakes/env";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
@@ -116,5 +117,78 @@ describe("wait", { timeout: 60_000 }, () => {
 			(err) => statusOf(err).message,
 		);
 		expect(refused).toBe("seconds is a whole number from 1 to 45");
+	});
+});
+
+// A notice (a heads-up, interface news, a hint about a push) rings the repo and ends the hold of the agent it's for, and
+// the reply's news carries it. Here the repo's own RepoCache is the doorbell, the news and the notices.
+describe("wait and notices", { timeout: 60_000 }, () => {
+	const notice = (says: string) => ({ kind: "heads_up", at: new Date().toISOString(), says, change: "c-1" });
+
+	const setUpCache = async () => {
+		const { RepoCache } = await import("../src/repo-cache");
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const doorbell: Doorbell = {
+			rings: () => cache.rings(),
+			ringAfter: (mark, ms) => cache.ringAfter(mark, ms),
+			newestNotice: (agent) => cache.newestNotice(agent),
+		};
+		const tools = toolCalls(() => server, {
+			doorbell: () => doorbell,
+			news: (_repo, branch, agent) => cache.landingNews(branch, agent),
+			ping: (_repo, event, tool) => cache.ping("records", true, event ? [event] : [], tool),
+		});
+		await tools.call("settings", { required: 1 });
+		await tools.register("author", "other");
+		await tools.call("claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" }, "author");
+		return { ...tools, cache };
+	};
+
+	it("ends the hold of the agent a notice is for, with the notice in the reply's news", async () => {
+		const { call, cache } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		const started = Date.now();
+		const held = call("wait", { agent: "author", seen: quiet.seen, seconds: 20 }, "author");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await cache.notify("main", [{ agent: "author", notice: notice("bob's change alters getUser, which c-1 uses") }]);
+		const woken = await held;
+		expect(Date.now() - started).toBeLessThan(10_000);
+		expect(woken).toMatchObject({ changed: true, what: ["notices"] });
+		expect(woken.news).toEqual([expect.objectContaining({ says: "bob's change alters getUser, which c-1 uses" })]);
+		expect(woken.next).toMatch(/^Something that concerns you changed: read the notices in this reply's `news`/);
+		// Told once: the next wait with this seen holds, though the notice it saw is gone.
+		expect(await call("wait", { agent: "author", seen: woken.seen, seconds: 1 }, "author")).toMatchObject({
+			changed: false,
+		});
+	});
+
+	it("holds through a notice for another agent, and catches one left between two calls", async () => {
+		const { call, cache } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		const started = Date.now();
+		const held = call("wait", { agent: "author", seen: quiet.seen, seconds: 2 }, "author");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await cache.notify("main", [{ agent: "other", notice: notice("for someone else") }]);
+		expect(await held).toMatchObject({ changed: false });
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
+		// Reading for seen leaves a notice where it is: the reply that returns is the one that tells it.
+		await cache.notify("main", [{ agent: "author", notice: notice("left between two calls") }]);
+		expect(await cache.newestNotice("author")).not.toBeNull();
+		const caught = await call("wait", { agent: "author", seen: quiet.seen, seconds: 5 }, "author");
+		expect(caught).toMatchObject({ changed: true, what: ["notices"] });
+		expect(caught.news).toEqual([expect.objectContaining({ says: "left between two calls" })]);
+	});
+
+	it("still compares a seen from before notices were part of it", async () => {
+		const { call, cache } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		const older = String(quiet.seen).split(".").slice(0, 3).join(".");
+		expect(await call("wait", { agent: "author", seen: older, seconds: 1 }, "author")).toMatchObject({
+			changed: false,
+		});
+		await cache.notify("main", [{ agent: "author", notice: notice("a heads-up") }]);
+		expect(await call("wait", { agent: "author", seen: older, seconds: 1 }, "author")).toMatchObject({
+			changed: false,
+		});
 	});
 });

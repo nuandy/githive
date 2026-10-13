@@ -143,7 +143,8 @@ what Git said.
   the change's merge outcome and `status` (`environment`, `checksEnvironment`),
   since a new commit won't fix it and a person should hear of it.
 - `wait`: hold, up to 45 seconds, until something that concerns the caller
-  changes (its own change, a review it may give, the backlog free to it), then
+  changes (its own change, a review it may give, the backlog free to it, a
+  notice left for it), then
   say which: an agent with nothing to do waits on it instead of sleeping.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   what GitHive's hosted agents on it are doing, and once something is pushed,
@@ -1350,8 +1351,11 @@ it:
   builder doesn't start reviewers when it finishes: the hive reviews the change,
   hosted agents and outside agents alike. **Rung, not ticking.** The repo's
   RepoCache rings its hive whenever a tool writes (a claim, a release, a vote, a
-  merge, backlog added, a review given back), a batch lands or a push arrives,
-  and the hive rings each agent still running. A ring says only that something
+  merge, backlog added, a review given back), a batch lands, a push arrives or
+  a notice is left for an agent, and the hive rings each agent still running.
+  Every writer goes through one method, `publish`, which keeps the notices and
+  hive events, tells the dashboard's pages and rings, so no writer can leave a
+  listener out. A ring says only that something
   changed, with the tool that changed it; the agent then reads and chooses as
   always, so nothing it's told decides for it. An agent takes at most one turn
   every 5 seconds however often it's rung, and one rung during a turn takes the
@@ -1367,9 +1371,14 @@ it:
   as long as the last, so the whole call keeps within it) until the repo rings,
   then reads what the caller would read:
   its own changes and their votes, the reviews it may give, the backlog free to
-  it. If none changed it holds on; if one did, it returns at once, naming which.
-  Its reply's `seen` is a digest of the three, so a call given the last `seen`
-  returns at once for anything that happened between two calls. RepoCache
+  it, and whether a notice newer than it knew of waits for it (a heads-up,
+  interface news, a hint about its push; the reply's `news` carries it). If none
+  changed it holds on; if one did, it returns at once, naming which. Its
+  reply's `seen` is a digest of the first three and the newest notice's time,
+  so a call given the last `seen` returns at once for anything that happened
+  between two calls. The notices part is a time, not a digest of the notices
+  waiting, since each reply takes the notices it tells; a `seen` from before the
+  part was added still compares by its three. RepoCache
   counts its rings, and a call reads the count before it looks, so a ring
   during the look isn't missed. It only wakes the agent, which then looks and
   chooses as always. Before rings, each agent took a turn

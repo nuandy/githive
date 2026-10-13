@@ -142,6 +142,16 @@ export interface KeptMergeCheck {
 	result: unknown;
 }
 
+/** What a writer publishes (see RepoCache.publish). */
+interface Published {
+	notices?: { agent: string; notice: Notice }[];
+	events?: HiveEvent[];
+	/** What the dashboard's pages are told changed. */
+	kind?: string;
+	/** Why the doorbell rings, for the hosted agents (see HostedAgent.ring); absent when no agent is concerned. */
+	ring?: string;
+}
+
 export class RepoCache extends DurableObject<Env> {
 	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
 	private eventWrites = 0;
@@ -161,9 +171,7 @@ export class RepoCache extends DurableObject<Env> {
 	 */
 	async ping(kind: string, write = true, events: HiveEvent[] = [], tool?: string) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
-		await this.keepEvents(events);
-		this.broadcast(kind);
-		if (write) await this.ring(tool ?? kind);
+		await this.publish({ events, kind, ...(write ? { ring: tool ?? kind } : {}) });
 	}
 
 	/** How many times the doorbell has rung. */
@@ -298,10 +306,8 @@ export class RepoCache extends DurableObject<Env> {
 	async notePushes(pushes: ChangePush[]) {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
 		const events = pushEvents(pushes);
-		await this.keepEvents(events);
 		if (!events.length) return;
-		this.broadcast("pushed");
-		await this.ring("pushed");
+		await this.publish({ events, kind: "pushed", ring: "pushed" });
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
@@ -354,7 +360,7 @@ export class RepoCache extends DurableObject<Env> {
 		const at = Date.now();
 		await this.ctx.storage.put<View>(`view:${name}`, { json, writes, at });
 		await this.ctx.storage.delete(`building:${name}`);
-		this.broadcast(`view:${name}`);
+		await this.publish({ kind: `view:${name}` });
 		return at;
 	}
 
@@ -484,26 +490,24 @@ export class RepoCache extends DurableObject<Env> {
 	/** The lease holder handed the lease on (see toolkit/landing-lease.ts), so nothing is being checked. */
 	async dropLanding(branch: string, _holder: string) {
 		await this.keepLanding(branch, { ...(await this.landing(branch)), checking: null });
-		this.broadcast("landing");
+		await this.publish({ kind: "landing" });
 	}
 
 	async landingChecking(branch: string, batch: Checking | null) {
 		await this.keepLanding(branch, { ...(await this.landing(branch)), checking: batch });
-		this.broadcast("landing");
+		await this.publish({ kind: "landing" });
 	}
 
 	/** Keeps a batch's outcomes, and returns the repo's last stretch of work with them in it (see stretch.ts). */
 	async landingSettled(branch: string, outcomes: Settled[]) {
 		if (!outcomes.length) return undefined;
 		await this.keepLanding(branch, settleOutcomes(await this.landing(branch), outcomes));
-		await this.keepEvents(settledEvents(outcomes));
 		// Attempts are kept by change name, and a name can be claimed again: a landed change's go, so a later claim's
 		// story doesn't start with them.
 		await this.deleteKeys(outcomes.filter((each) => each.how === "landed").map((each) => `${ATTEMPTS}${each.change}`));
 		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
-		this.broadcast("landing");
-		await this.ring("landed");
+		await this.publish({ events: settledEvents(outcomes), kind: "landing", ring: "landed" });
 		return stretch && stretchSummary(stretch);
 	}
 
@@ -552,12 +556,41 @@ export class RepoCache extends DurableObject<Env> {
 
 	/**
 	 * Leave notices for agents about their changes into `branch`, told with their next reply on any branch (see
-	 * landingNews), and the hive events that go with them. Each agent keeps its newest NOTICES_KEPT, for a day at most.
+	 * landingNews), and the hive events that go with them. A notice rings, so an agent in `wait` hears it at once.
 	 */
 	async notify(branch: string, notices: { agent: string; notice: Notice }[], events: HiveEvent[] = []) {
+		const told = notices.map(({ agent, notice }) => ({ agent, notice: { ...notice, branch } }));
+		await this.publish({
+			notices: told,
+			events,
+			...(events.length ? { kind: "awareness" } : {}),
+			...(notices.length ? { ring: "notice" } : {}),
+		});
+	}
+
+	/** When `agent`'s newest notice was noted, or null if it has none waiting: what `wait` watches for notices. */
+	async newestNotice(agent: string) {
+		const [newest] = await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent), reverse: true, limit: 1 });
+		return newest?.[1].at ?? null;
+	}
+
+	/**
+	 * What every writer tells the repo, in one call, so none leaves a listener out: notices and hive events kept, the
+	 * dashboard's pages told `kind` (to read again), and the doorbell rung with `ring`, for held `wait` calls and the
+	 * hosted agents. A change that concerns no agent, such as a landing being checked, rings nothing.
+	 */
+	private async publish(published: Published) {
+		await this.keepNotices(published.notices ?? []);
+		await this.keepEvents(published.events ?? []);
+		if (published.kind) this.broadcast(published.kind);
+		if (published.ring) await this.ring(published.ring);
+	}
+
+	/** Each agent keeps its newest NOTICES_KEPT, for a day at most. */
+	private async keepNotices(notices: { agent: string; notice: Notice }[]) {
 		// Keyed by agent then time, so an agent's notices on every branch list together, oldest first.
 		const entries = notices.map(
-			({ agent, notice }) => [`${noticesOf(agent)}${notice.at}:${crypto.randomUUID()}`, { ...notice, branch }] as const,
+			({ agent, notice }) => [`${noticesOf(agent)}${notice.at}:${crypto.randomUUID()}`, notice] as const,
 		);
 		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
 			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
@@ -566,8 +599,6 @@ export class RepoCache extends DurableObject<Env> {
 			const dropped = kept.filter(([, notice], index) => index < kept.length - NOTICES_KEPT || expired(notice));
 			await this.deleteKeys(dropped.map(([key]) => key));
 		}
-		await this.keepEvents(events);
-		if (events.length) this.broadcast("awareness");
 	}
 
 	// An agent's notices that are still current, oldest first. All of them are deleted: told once, a reply lost on

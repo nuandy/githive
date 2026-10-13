@@ -5,15 +5,19 @@ import { openCall, type ToolCall, type ToolHandlers } from "./context";
 import { reviewOptions } from "./work-tools";
 
 // `wait`: the repo's doorbell for agents outside GitHive. It holds the call until something that concerns the caller
-// changes: its own changes (a vote, a landing), the reviews it may give, or the backlog free to it. It reads what
-// the caller would read itself, and only when the doorbell rings, so nothing is decided for the agent: it is woken,
-// then looks and chooses as it always does.
+// changes: its own changes (a vote, a landing), the reviews it may give, the backlog free to it, or a notice left for
+// it (a heads-up, interface news, a hint about its push), which the reply's news then carries. It reads what the
+// caller would read itself, and only when the doorbell rings, so nothing is decided for the agent: it is woken, then
+// looks and chooses as it always does.
 
 /** The longest hold, and the default: well inside the 60 s that many MCP clients allow one call. */
 export const LONGEST_WAIT_SECONDS = 45;
 
-/** What `seen` is made of, in order: one digest per part, so a reply can say which part changed. */
-export const WAIT_PARTS = ["yours", "reviews", "backlog"] as const;
+/**
+ * What `seen` is made of, in order: one value per part (a digest, or for notices a time), so a reply can say which
+ * part changed. `notices` is last, so a `seen` from before it was added still compares part by part.
+ */
+export const WAIT_PARTS = ["yours", "reviews", "backlog", "notices"] as const;
 
 interface YourChange {
 	change: string;
@@ -35,13 +39,15 @@ export const waitTools: ToolHandlers = {
 		const agent = actAs("agent");
 		const doorbell = ctx.doorbell?.(repo) ?? fail(501, "wait needs the repo's doorbell, which this GitHive lacks");
 		const until = Date.now() + holdSeconds(args.seconds) * 1000;
+		const given = optionalString(args, "seen");
+		const known = given?.split(".")[NOTICES] ?? "";
 		// Read the count before looking, so a ring during the look still wakes the hold.
 		let mark = await doorbell.rings();
 		let looked = Date.now();
-		let look = await lookFor(call, agent);
+		let look = await lookFor(call, agent, known);
 		let lookMs = Date.now() - looked;
-		const before = optionalString(args, "seen") ?? look.seen;
-		while (look.seen === before) {
+		const before = given ?? look.seen;
+		while (!changedParts(before, look.seen).length) {
 			// The whole call keeps within `seconds`: the hold leaves room for one more look, as long as the last.
 			const left = until - Date.now() - lookMs;
 			const rung = left > 0 ? await doorbell.ringAfter(mark, left) : null;
@@ -49,7 +55,7 @@ export const waitTools: ToolHandlers = {
 			mark = rung;
 			looked = Date.now();
 			// A fresh call, since one call reads the claims only once.
-			look = await lookFor(await openCall(args, ctx, call.run), agent);
+			look = await lookFor(await openCall(args, ctx, call.run), agent, known);
 			lookMs = Date.now() - looked;
 		}
 		return answer(look, before);
@@ -66,8 +72,10 @@ function holdSeconds(value: unknown) {
 	return value;
 }
 
-// What concerns `agent` now, and a digest of it per part.
-async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent: string): Promise<Look> {
+const NOTICES = WAIT_PARTS.indexOf("notices");
+
+// What concerns `agent` now, and a digest of it per part. `known` is the notices part of the `seen` the caller brought.
+async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent: string, known: string): Promise<Look> {
 	const { ctx, repo, openWork } = call;
 	const state = await openWork(agent);
 	const heads = state.open.flatMap((entry) => (entry.head ? [entry.head] : []));
@@ -92,7 +100,26 @@ async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent:
 		free.map((item) => item.id),
 	];
 	const digests = await Promise.all(parts.map(digestOf));
-	return { seen: digests.join("."), yours, reviews: reviews.length, backlog: free.length };
+	const notices = noticesPart(known, await ctx.doorbell?.(repo).newestNotice?.(agent));
+	return { seen: [...digests, notices].join("."), yours, reviews: reviews.length, backlog: free.length };
+}
+
+/**
+ * The newest notice time the caller has known of, in base 36 (a "." would split `seen`). It isn't a digest of the
+ * notices waiting: a reply takes the notices it tells, so those would change the part with nothing new. It moves on
+ * only when a notice newer than `known` comes.
+ */
+function noticesPart(known: string, newest: string | null | undefined) {
+	const knownAt = parseInt(known, 36) || 0;
+	const newestAt = newest ? Date.parse(newest) : 0;
+	return Math.max(knownAt, newestAt).toString(36);
+}
+
+// The parts that differ. A part `before` doesn't have, from a `seen` made before the part was added, doesn't count.
+function changedParts(before: string, now: string) {
+	const was = before.split(".");
+	const is = now.split(".");
+	return WAIT_PARTS.filter((_, index) => index < was.length && was[index] !== is[index]);
 }
 
 // Sorted, so the order a list comes in (each agent's own) doesn't count as a change.
@@ -102,9 +129,7 @@ async function digestOf(part: unknown[]) {
 }
 
 function answer(look: Look, before: string) {
-	const was = before.split(".");
-	const now = look.seen.split(".");
-	const what = WAIT_PARTS.filter((_, index) => was[index] !== now[index]);
+	const what = changedParts(before, look.seen);
 	return {
 		changed: what.length > 0,
 		...(what.length ? { what } : {}),

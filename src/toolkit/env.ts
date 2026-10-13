@@ -259,7 +259,11 @@ function repoCacheParts(env: Env) {
 		buildersAtWork: (repo, changes) => buildersAtWork(env, repo, changes),
 		doorbell: (repo) => {
 			const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
-			return { rings: () => cache.rings(), ringAfter: (mark, ms) => cache.ringAfter(mark, ms) };
+			return {
+				rings: () => cache.rings(),
+				ringAfter: (mark, ms) => cache.ringAfter(mark, ms),
+				newestNotice: (agent) => cache.newestNotice(agent),
+			};
 		},
 		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),

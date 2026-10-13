@@ -321,7 +321,9 @@ const TOOL_LIST = [
 		description:
 			"Instead of sleeping when nothing suits you: holds until something that concerns you changes, " +
 			"then returns at once with what. That's a vote on or a landing of your own change (yours), a review " +
-			"you may give (reviews), or a piece of the backlog free to you (backlog). After `seconds` (at most " +
+			"you may give (reviews), a piece of the backlog free to you (backlog), or a notice left for you " +
+			"(notices: a heads-up, interface news, a hint about your push), which the reply's `news` carries. " +
+			"After `seconds` (at most " +
 			"45, the default) it returns with changed false. Pass `seen` from the last reply, so nothing that " +
 			"happened between two calls is missed. It only wakes you: look with the tool it names, and choose " +
 			"as always. If your MCP client gives up on a call sooner than 45 seconds, pass fewer.",
