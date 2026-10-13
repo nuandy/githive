@@ -25,9 +25,11 @@ agents' work: the review holds and each branch's landing lease (which merge
 lands the next batch, see Landing) are records in Git like the claims and
 votes, and what's ready to land is read from the votes. Durable Objects keep
 only copies and hints: the dashboard's views, the records' tips and states
-(RepoCache, RecordCache), changes' heads and packs (ChangeCache), the queue
-that makes forks, how each branch's landings turned out, awareness's
-footprints and notices (FootprintCache), and a GitHub-connected repo's sync
+(RepoCache, RecordCache), the news agents are told, kept in a log each reads
+from a cursor of its own, and the rings that wake waiting agents (RepoCache),
+changes' heads and packs (ChangeCache), the queue that makes forks, how each
+branch's landings turned out, awareness's footprints (FootprintCache), and a
+GitHub-connected repo's sync
 job and pull request (GitHubSync). They also run containers and GitHive's
 hosted agents. Losing
 any of it, or a repo's RepoCache not answering, costs speed, never a decision,
@@ -171,9 +173,12 @@ what Git said.
   pull request into GitHub's branch, or say where it is (see Connected to
   GitHub).
 
-Every object reply also carries `news` (what landed since the agent last
-asked, and awareness's notices: see [awareness.md](awareness.md)) and `next`,
-the caller's own next step, in GitHive's words only.
+Every object reply to the agent the call is verified as (not `register`'s)
+also carries `news`, read from its cursor in the repo's news log: what landed
+on the project's branch since it was last told, and awareness's notices (see
+[awareness.md](awareness.md)). A `wait` reply's cursor moves only when the
+next `wait` brings its `seen` back, so a lost reply loses nothing. Most replies
+also carry `next`, the caller's own next step, in GitHive's words only.
 
 Neither the toolkit nor the audit decides anything that binds an agent. An
 agent can skip the toolkit and use plain git, and the audit sees the same
@@ -207,7 +212,7 @@ In the project repo:
   by commit into 16 buckets (waits on blocking roles in
   `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
   in which role, marked by the reviewer
-  (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A hold lasts until its agent votes, gives the review back (`leave_review`, which a hosted reviewer that fails calls itself), or 15 minutes pass. A vote counts with or without one, and the audit never reads them. Once the repo
+  (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A hold lasts until a minute after its agent votes (so the vote shows everywhere first), until it gives the review back (`leave_review`, which a hosted reviewer that fails calls itself), or 15 minutes pass. A vote counts with or without one, and the audit never reads them. Once the repo
   has records repos, each bucket is kept in one of them instead, picked by a
   hash of the bucket, and the waits record in one more: every review handed
   out writes a bucket, and in the project repo those writes kept the repo busy
@@ -254,10 +259,14 @@ checked against a schema of the fields the code relies on
 (`src/record-schemas.ts`): a record someone wrote by hand with plain git fails
 as an error naming its ref, not somewhere deeper. The pinned shapes don't yet
 cover fields only some repos write: sharding (`autoShard`, shard indexes, vote
-buckets), branches and branch rules, `skipChecks`, `after` and `source`, and
-releases' `mergedAs`, `into` and `stale`. D1 migrations only ever add, and no
-Durable Object class is deleted beyond those decided before there were users:
-tests fail on anything else. ## Identity and stamps
+buckets), branches and branch rules, `skipChecks`, `after` and `source`,
+releases' `mergedAs`, `into` and `stale`, Clef's marks (votes' `thin`,
+questions' `urgency`, backlog items' `big`), and backlog items' `owner`,
+`after` and `landsAfter`. D1 migrations only ever add, and no Durable Object
+class is deleted beyond those decided before there were users: tests fail on
+anything else.
+
+## Identity and stamps
 
 Every record the toolkit writes (claims, votes, questions, merges, reverts,
 branches and agent registrations) carries `by`: the caller's verified
@@ -321,7 +330,7 @@ so an older repo can join an org as it is, records and all.
 What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
-looking, review for `reviews`, `credentials` for a change and `vote`, write for claiming,
+looking, review for `reviews`, `wait`, `vote`, `leave_review` and `credentials` for a change, write for claiming,
 pushing and merging, admin for `settings` and deleting. A repo the
 caller can't see answers as if it didn't exist. Someone signed out may read a
 public repo, its dashboard pages included; for any other repo, existing or
@@ -948,7 +957,10 @@ trusted neither with what a change touched nor with the token that writes the
 branch. The push names the commit the branch must still be at
 (`--force-with-lease`): a plain push refuses only what isn't a fast-forward,
 and a change branched from a newer main would make a batch on an older one a
-fast-forward of it. Each fetches a batch's forks 16 at a time, in one
+fast-forward of it. A server error can come after a push applied, so a failed
+push is followed by a read of the branch: if it's at the batch's last merge,
+the batch landed, and landing it again would merge every change twice. Tree
+landing does the same. Each fetches a batch's forks 16 at a time, in one
 command, each fetch tried three times: the repo's Gate to read and land it,
 and the batch's check container, which fetches only what it doesn't have yet
 (one at a time, the fetches were most of a big batch's check).
@@ -983,8 +995,10 @@ each change against them.
 **A batch's merges hear it landed as soon as it's pushed**, and its claims are
 released once the lease is handed on: a write per change, a few at a time, it
 grew with the batch and held up the next one. Until a claim is released, no
-batch takes its change up again: the lease's recent outcomes say it landed at
-that head, and a merge asked again meanwhile finds it landed. Each batch asks
+batch takes its change up again: the branch's recent outcomes (in the
+RepoCache) say it landed at that head. A merge asked again meanwhile finds it
+landed, and releases its claim, naming the merge, if it's still held: a
+release cut short would otherwise leave changes that land after it waiting. Each batch asks
 for its forks' read access 6 at a time: a Worker request holds 6 connections
 open.
 
@@ -1024,7 +1038,8 @@ an account gets events: githive.app's. Another, such as the bench, gets none
 and reads forks as before.
 
 **The same events drive awareness** ([awareness.md](awareness.md)), so a
-Worker without them has no footprints, interface news or heads-ups. It runs
+Worker without them has no footprints, interface news, heads-ups or push hints
+(see Clef on a push). It runs
 once a batch's heads are noted and its messages acked: that work is advice, so a
 failure in it is logged and never has a push delivered again. A push to
 `changes/<change>` on the fork of the agent holding its claim (read from the
@@ -1112,7 +1127,8 @@ A merge holding the lease starts no new batch past its 10 minutes either. Main's
 compare-and-swap keeps the branch right: a batch whose push finds main moved
 checks again on top of it, up to three tries in all; then `merge` refuses,
 asking to merge again. Asked again about a
-change that already landed, `merge` answers with its commit. Each branch has its own lease: a
+change that already landed, `merge` answers with its commit, and releases its
+claim if it's still held. Each branch has its own lease: a
 change lands on the branch its claim names, with that branch's other ready
 changes.
 
@@ -1983,8 +1999,11 @@ show its changes (one branch at a time; a change's page shows any conflict,
 with the commits on the branch that touched its files and the conflicting
 lines, and the names it alters or uses that other changes touch), what landed on a branch and why
 (History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
-the audit, and what's landing (the batch being checked, and what landed or
-failed lately), with people's inbox. People vote and merge from it, make
+the audit, and its settings. The Hive also shows what's landing (the batch
+being checked, and what landed or failed lately). People's Inbox is a page of
+its own: every change, in every repo, that waits on the reader. How `web/` is
+styled (Tailwind CSS v4, the theme, motion) is in
+[dashboard-ui.md](dashboard-ui.md). People vote and merge from it, make
 branches, and change the settings: review policy, checks, branch rules, the
 GitHub link, visibility, collaborators. A repo connected to GitHub shows its
 GitHub repo by its name, with the standing pull request or a button to open

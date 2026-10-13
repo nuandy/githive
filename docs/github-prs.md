@@ -73,7 +73,7 @@ people pushed there directly. They come back through GitHive's own path, so the 
    landing looks again. In mirror mode a push GitHub took means its main is GitHive's, so the read is made only
    when the push was refused. The `github_pr` tool, and so the dashboard's pull request button, notice it as well;
    showing the repo page doesn't. GitHive never polls: no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
-   `github_pr` asks with `refresh`, which never takes back a give-up: see step 6). A job that waited goes on from
+   `github_pr` asks with `refresh`, which never takes back a give-up: see step 5). A job that waited goes on from
    the step it waited at; one that failed starts
    again an hour on, or when asked, so a commit that can't come in doesn't start a container at every landing.
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
@@ -125,7 +125,7 @@ people pushed there directly. They come back through GitHive's own path, so the 
    `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below). Only
    a conflict or a failed check goes to a person: a merge refused for anything else, such as a change Artifacts
    couldn't read while busy, is tried again later, as a step that throws is (below).
-6. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
+5. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
    a claim, which no one can act as. So a person who can write may give it up from the dashboard ("Give up GitHub's
    changes", on the change's page; `POST /repos/:owner/:name/changes/:change/give-up`), and a repo admin through
    `release` (naming the change, as their own agent; the MCP front door tells the toolkit the caller's level). It's
@@ -135,7 +135,7 @@ people pushed there directly. They come back through GitHive's own path, so the 
    and waits: GitHub's branch moving starts it again, as does a person asking from the dashboard ("Bring them in
    again", `POST /repos/:owner/:name/github/again`, which only a person may call). `github_pr` with `refresh`, which
    any agent who can write may send, doesn't take a give-up back. Only GitHub's changes are given up this way.
-7. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
+6. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
    trailers.
 
 Once GitHub's commit is on `main`, the next PR shows only what's new, even after a squash merge, and a mirror's push
@@ -168,7 +168,7 @@ is a fast-forward again.
   asks a person instead ("needs a person", saying why), who reviews it, approves and merges it from its page, or
   gives it up. With trust off, the job waits for review as before.
 - **Known limits.** A person's veto counts for nothing while a GitHub change is trusted: it needs no votes, and a clean
-  one lands at once, so the window is small; give it up (step 6) to stop one. The import record and a released older
+  one lands at once, so the window is small; give it up (step 5) to stop one. The import record and a released older
   GitHub change's question to people stay as written; nothing reads that question once its claim is gone.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
   resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v16`), with an alarm
@@ -192,7 +192,7 @@ is a fast-forward again.
   a pull request on GitHub" button. When bringing GitHub's changes back needs a person, waits, was given up or
   failed, it says so there, linking to the change; once it stopped (a person, given up, failed), people who can write
   get "Bring them in again".
-- GitHub's change's page offers people who can write "Give up GitHub's changes" (step 6).
+- GitHub's change's page offers people who can write "Give up GitHub's changes" (step 5).
 - The Settings tab: the GitHub repo, how GitHive's work reaches it (`github_sync`), and whether its changes are
   trusted (`github_trust`), for admins; the same in words for everyone else.
 - The Changes tab labels GitHub's change "from GitHub, trusted"; its page and sidebar say it needs no review instead

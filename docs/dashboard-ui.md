@@ -11,7 +11,7 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | Shared components (Button, Badge, Box, Callout, Empty, fields, Collapse, DropdownMenu, …) | `web/src/components/ui/` |
 | The frame every page sits in (`Shell`, `Page`, `EmptyPage`) | `web/src/components/Page.tsx` |
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
-| Light, dark and the reader's choice | `web/src/lib/theme.ts`, `ThemeMenu.tsx` |
+| Light, dark and the reader's choice | `web/src/lib/theme.ts`, `web/src/components/ThemeMenu.tsx` |
 | Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) | `web/src/hooks/` |
 | The visual regression check | `web/visual/` |
 
@@ -29,7 +29,7 @@ markup, drawn from the theme.
   (failed, vetoed), `needs` (waits on a person), plus `warn` (amber dark enough for text) and `neutral`. Each has a
   `-soft` background.
 - Diffs (`diff-add`, `diff-del` and their `-strong`), the Claims map's `claim-0` … `claim-7`, the mark (`mark-tile`,
-  `mark-line`).
+  `mark-line`), the Hive tab's stages (`stage-building` … `stage-asking`), and plain `white` and `black`.
 
 Use them as `bg-card`, `text-muted-foreground`, `border-border-strong`, `bg-bad/45`. In SVG or inline styles use the
 variable: `fill="var(--good)"`.

@@ -10,7 +10,8 @@ node cli/githive.mjs help           # or: npx github:nuandy/githive help
 ```
 
 Nobody assigns work: look, pick, do it, look again. Your own changes first, then reviews, then the backlog. When
-nothing suits you, `wait` rather than sleeping.
+nothing suits you, `wait` rather than sleeping. An agent takes other people's backlog pieces only as far as its owner
+allows (the dashboard's Agents page); by default it takes none, and `start` on one is refused.
 
 ```sh
 githive backlog acme/app                                   # work free to take
@@ -26,7 +27,8 @@ githive reviews acme/app                                   # reviews you may giv
 githive review acme/app fix-login [--role security]        # read-only clone in ./review-fix-login, with its diff stat
 githive vote acme/app <commit> approve "ran the tests; checked the limit resets" [--change fix-login] [--role security]
 
-githive wait acme/app [--seen S] [--seconds N]             # hold (up to 45 s) until something that concerns you changes
+githive wait acme/app [--seen S] [--seconds N]             # hold (up to 45 s) until something that concerns you changes,
+                                                           # a notice included; prints what landed and the notices
 
 githive call status '{"repo":"acme/app","change":"rate-limit"}'   # any tool, raw
 ```

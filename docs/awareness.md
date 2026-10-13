@@ -1,8 +1,9 @@
 # Awareness: agents hear what matters to their change
 
 Merged on 12 October 2026 ([#1](https://github.com/nuandy/githive/pull/1)). This adds to [design.md](design.md) and
-changes none of its rules. It runs from Artifacts' push events, so a GitHive without a push-event subscription has
-none of it (see [operating.md](operating.md)).
+changes none of its rules. Footprints, heads-ups, interface news and Clef's hints on pushes run from Artifacts' push
+events, so a GitHive without a push-event subscription has none of those (see [operating.md](operating.md)); landed
+news, conflicts that explain themselves, `next` and leases work without them.
 
 ## Why
 
@@ -14,12 +15,12 @@ things that break its change without touching its files:
 
 Those are semantic conflicts, which the README lists as a known gap; this narrows it for TypeScript and JavaScript.
 
-This adds awareness without adding a leader. Everything here is advice derived from Git, or a record agents write
-in Git. Nothing decides, orders work or blocks a landing.
+This adds awareness without adding a leader. Everything here is advice derived from Git, Clef's reading of it, or a
+record agents write in Git. Nothing decides, orders work or blocks a landing.
 
 ## Rules
 
-- **Facts, not decisions.** Ported features report what Git says. A merge, a claim and a vote still decide alone,
+- **Facts, not decisions.** Ported features report what Git says, or, for Clef's hints, what a model makes of it. A merge, a claim and a vote still decide alone,
   from their own reads. If every piece of awareness is lost, agents work exactly as they would without it.
 - **Off the hot paths.** The analysis runs in the repo's FootprintCache, which the push-event queue consumer hands
   each batch of pushes, never in a tool call or a landing. Nothing in a request waits on a parser.
@@ -47,6 +48,7 @@ in Git. Nothing decides, orders work or blocks a landing.
                  - files parsed once per blob hash: exports + signatures, imports + uses
                  - each open change's footprint at its head
                  - main's interface changes per landed commit
+                 - Clef's hints on each change's push (a model's reading, told as `clef`)
                             │ notices
                             ▼
                  RepoCache news log (per repo; each agent reads from its own cursor)
@@ -64,7 +66,7 @@ Each object reply carries `news`: what others landed since the agent was last to
 
   | Kind | Says |
   |---|---|
-  | `landed` | Another change landed on a branch the agent works on. |
+  | `landed` | Another agent's change landed on the project's branch. Landings into other branches aren't told as news. |
   | `interface` | A landed change altered a name the agent's change uses. |
   | `heads_up` | Another open change alters a name the agent's change uses, or uses a name the agent's change alters. |
   | `clef` | Clef's hints about the agent's latest push. |
@@ -72,13 +74,14 @@ Each object reply carries `news`: what others landed since the agent was last to
 
 - **One log, read from cursors.** Each ring that tells something (notices, a landing) leaves an entry in RepoCache's
   news log under the ring's count, and each agent reads from its own cursor, so nothing is deleted on the way out.
-  The log keeps its last 1,000 entries; a reply tells at most 50 notices and 20 landings, none older than a day.
+  The log keeps its last 1,000 entries; a reply tells at most 50 notices, none older than a day, and the 20 newest
+  landings.
   Notices are across branches (each says which branch it's about), so a notice about a change into a feature branch
   reaches its agent too, and unlike landed news they reach an agent on its first call.
 - **A reply's cursor.** Most replies move the agent's cursor as they're made, so one lost on the way loses its news,
-  as before. A `wait` reply tells only what rang up to its own `seen`, and the cursor moves there when the next call
-  brings that `seen` back: a lost `wait` reply loses nothing, since the next call, with the older `seen`, is told it
-  again.
+  as before. A `wait` reply tells only what rang up to its own `seen`, and the cursor moves there when the next
+  `wait` brings that `seen` back: a lost `wait` reply loses nothing, since the next `wait`, with the older `seen`, is
+  told it again, and so is any other call made first.
 - **GitHive's hosted builder** hears them too. Its toolkit calls aren't the agent's own, so they bring no news;
   before each turn it reads the notices about the change it builds from a cursor of its own (`RepoCache.changeNotices`) and tells its model
   in a few lines, with an interface change's next step worded for its own clone (`src/builder-news.ts`). When it
@@ -111,8 +114,10 @@ gives `touchedBy` and the hunks, from a test merge of its own.
 
 ### 3. `next` in every reply
 
-Every object reply carries `next`, about the caller's own change, or where to look next. A list with something in it
-has none: choosing from it is the agent's.
+Most object replies carry `next`, about the caller's own change, or where to look next; `settings`, `register`,
+`audit` and `revert` have none, nor does `add_work` unless a piece seems to need another first. A list never chooses
+for the agent: a `reviews` or `backlog` with something in it has a `next` only to say that the agent holds changes
+with nothing pushed, or that its owner's limit leaves it none of that kind of work.
 
 | Reply | `next` |
 |---|---|
@@ -121,7 +126,8 @@ has none: choosing from it is the agent's.
 | `status`: approvals missing | How many, that `reviews` lists who may give them, and to work or `wait` meanwhile. |
 | `status`: conflicts | The `fix` commands. |
 | `status`: files outside the claim | Claim them too, or move them out of this change. |
-| `merge` landed | "Landed as <sha>; your claim is released." |
+| `merge` landed | "Landed as <sha>; your claim is released. Choose your next work from `backlog` or `reviews`." |
+| `merge` pending | "Call `merge` again; it lands with the next batch." |
 | `merge` refused | The fix, the command to reproduce a failed check, or what it waits on. |
 | `reviews` or `backlog` empty | Choose from the other list, or call `wait` to hear when that changes. |
 | `wait` | What changed and which tool shows it (`status` on the change, `reviews`, `backlog`), or to read the notices in its `news`, or to call it again with `seen`. |
@@ -148,7 +154,8 @@ with no intent still has its reviews in the story.
 
 ### 5. How long a claim lasts
 
-A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for. `status`
+A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks
+failed, or it was approved and not merged. While it waits on reviewers, a landing or a person, it never frees. `status`
 says so in `lease: { waitingOn, freeAfter }`, the claim reply carries `freeAfter`, and the dashboard's claims show
 "free after 14:30". The claim's `freeAfter` is the soonest it can free up (30 minutes after
 the claim); once something is pushed it lasts longer, and status's `lease` says exactly.
@@ -212,8 +219,8 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
 
 ### 7. The dashboard
 
-- The Hive feed shows interface changes, heads-ups and conflicts: one conflict event per change and head, however
-  often its agent merges it again.
+- The Hive tab shows interface changes, heads-ups and conflicts as steps of the goal (the change) they concern, with
+  one conflict step per change and head, however often its agent merges it again.
 - The change page shows a conflict panel (`touchedBy` and the hunks), and the names
   the change alters or uses that others touch.
 - Claims show when they free up.
