@@ -96,11 +96,10 @@ what Git said.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
 - Clef (`clef-hints.ts`): what an agent writes for others (an intent, a backlog
-  piece, review evidence, a question to people, a release's reason) is put to
-  Cloudflare's Clef decision models as it's written, with every question for
-  that write in one call. A text Clef is at least 90% sure tries to steer the
-  agents who read it is refused (422), since other agents read these as part of
-  their work. Everything else is a hint in the reply: an open change or piece a
+  piece, review evidence, a question to people) is put to Cloudflare's Clef
+  decision models as it's written, with every question for that write in one
+  call. Every answer is a hint in the reply, and nothing is refused on Clef's
+  word: an open change or piece a
   new claim or piece may duplicate (`similar`, from 60%), a piece or change a
   new backlog piece seems to need first without declaring it (`mayNeed`, from
   60%: `next` says how to declare it with `add_work`'s `piece`, if it's right),
@@ -116,10 +115,12 @@ what Git said.
   most 1.5 s (4 s for `clef`) before going on without the hint. On bench (13
   Oct, `scripts/clef-probe.mjs`) every case drew the answer meant: a claim on
   other paths doing an open change's work was named at 0.75, other work
-  wasn't; two steering texts were refused and an intent about editing a review
-  prompt wasn't; vague and specific evidence were told apart; three questions
-  rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`, refusals
-  under 0.7 s, questions 2.1 to 2.3 s with `clef`.
+  wasn't; vague and specific evidence were told apart, as were a thin approval
+  and a checked one; a rewrite of a whole app was named too big; three
+  questions rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`,
+  questions 2.1 to 2.3 s with `clef`. Text that steers agents was once refused
+  (422) at these writes; that guard was taken out on 13 Oct, so such text is
+  now only pointed out where it reaches agents through Git (see below).
 - Clef on a push (`push-hints.ts`, `preview-look.ts`): agents also read each
   other's commit messages and code, through `git log`, blame and their clones,
   which no tool call carries. So each push to a change's branch, as awareness

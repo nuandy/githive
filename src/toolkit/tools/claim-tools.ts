@@ -2,7 +2,7 @@ import { changeId, normalizeClaim } from "../../claim-paths";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
-import { claimHints, reasonHints } from "../clef-hints";
+import { claimHints } from "../clef-hints";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
@@ -72,7 +72,6 @@ export const claimTools: ToolHandlers = {
 		const change = requiredString(args, "change");
 		const agent = actAs("agent");
 		const reason = typeof args.reason === "string" ? args.reason : "released";
-		if (reason !== "released") await reasonHints(ctx, reason);
 		// Only a claim's agent may release it; anyone else may release it only as stale, once abandoned.
 		const held = args.stale === true ? null : await claimOf(change);
 		if (held && held.agent !== agent) {
