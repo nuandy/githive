@@ -139,6 +139,7 @@ export async function readBranchCommits(remote: Remote, baseline: string, branch
 			commit: oid,
 			parents: commit.parent,
 			author: commit.author.name,
+			at: new Date(commit.committer.timestamp * 1000).toISOString(),
 			message: commit.message,
 			files: first ? await workspace.changedPaths(first, oid) : [],
 		});
@@ -152,6 +153,8 @@ export interface BranchCommit {
 	commit: string;
 	parents: string[];
 	author: string;
+	/** When it was committed, which for a merge is when it landed. */
+	at?: string;
 	message: string;
 	files: string[];
 }
@@ -176,5 +179,6 @@ export function mergeRecordOf(branchCommit: BranchCommit): MergeRecord {
 		base: first,
 		head: second,
 		files: branchCommit.files,
+		...(branchCommit.at ? { at: branchCommit.at } : {}),
 	};
 }

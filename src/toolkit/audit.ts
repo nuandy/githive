@@ -26,6 +26,8 @@ export interface MergeRecord {
 	votesTip?: string;
 	/** Main before the merge, its first parent. */
 	base?: string;
+	/** When it landed: the merge commit's time. */
+	at?: string;
 	/** GitHive-Tested trailer: the main the checks passed on. */
 	testedOn?: string;
 	/** GitHive-Tested-After trailer, on merges from before batches: heads merged ahead of it in the check. */
@@ -367,7 +369,8 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
 }
 
 // The cited claim must still have been held at merge time: the first later state without it must hold a release
-// naming this merge. Otherwise the agent merged after giving its claim up.
+// naming this merge, or one made clearly after the merge landed (a claim can outlast its landing, and an ordinary
+// release then frees it). Otherwise the agent merged after giving its claim up.
 function checkReleasedAfter(
 	history: History,
 	tip: string,
@@ -380,13 +383,23 @@ function checkReleasedAfter(
 	for (const later of history.slice(from + 1)) {
 		if (later.state.claims.some((c) => c.change === merge.change)) continue;
 		const release = later.state.released.findLast((r) => r.change === merge.change);
-		if (release?.mergedAs !== merge.commit)
+		if (release?.mergedAs !== merge.commit && !releasedLate(release, merge))
 			report(
 				"released-before-merge",
 				`${merge.change}'s claim was released at ${later.tip} without naming ${merge.commit} as its merge`,
 			);
 		return;
 	}
+}
+
+// Releases are timed by the Worker's clock and merges by whatever wrote the merge commit (the Worker or a Gate
+// container), so only a release well after the merge counts as late.
+const CLOCKS_DIFFER_BY_MS = 60_000;
+
+/** Whether a release came well after the merge landed, rather than before it. */
+function releasedLate(release: { at: string } | undefined, merge: MergeRecord) {
+	if (!release || !merge.at) return false;
+	return Date.parse(release.at) - Date.parse(merge.at) > CLOCKS_DIFFER_BY_MS;
 }
 
 // The votes a merge cites in GitHive-Votes: a votes record tip, or when sharded `=tip` for the record plus

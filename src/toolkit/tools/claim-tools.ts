@@ -7,6 +7,7 @@ import { giveBackPartClaim, withoutLeftovers } from "./claim-leftovers";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
+import type { ClaimRecord } from "../claims";
 import { BUILDING_IDLE_MS } from "../staleness";
 import type { Args, ToolCall, ToolHandlers } from "./context";
 import { giveUpGitHubChange } from "./github-tools";
@@ -81,7 +82,8 @@ export const claimTools: ToolHandlers = {
 		if (!outcome.ok) return reply;
 		return similar ? { ...reply, similar } : reply;
 	},
-	async release({ args, ctx, repo, votes, registered, actAs, stamper, store, claimOf }) {
+	async release(call) {
+		const { args, ctx, repo, votes, registered, actAs, stamper, store, claimOf } = call;
 		const change = requiredString(args, "change");
 		const agent = actAs("agent");
 		const reason = typeof args.reason === "string" ? args.reason : "released";
@@ -104,7 +106,8 @@ export const claimTools: ToolHandlers = {
 				{ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) },
 				stamper,
 			);
-		return store.release({ change, agent, reason }, stamper);
+		const mergedAs = held ? await landedAs(call, held) : undefined;
+		return store.release({ change, agent, reason, ...(mergedAs ? { mergedAs } : {}) }, stamper);
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
 		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");
@@ -143,6 +146,23 @@ async function sameWorkAs(call: ToolCall, claim: { change: string; agent: string
 	if (!match) return undefined;
 	const intent = match.intent.split("\n")[0] ?? "";
 	return { change: match.change, agent: match.agent, intent, likelihood: same.likelihood };
+}
+
+/**
+ * The commit a held claim's change landed as while it was held, if it did. A claim can outlast its landing, and its
+ * release then names the merge as merge's own release does, so the audit doesn't read it as given up first.
+ */
+async function landedAs(call: ToolCall, held: ClaimRecord) {
+	const branch = held.into ?? call.branch;
+	const view = await call.ctx
+		.landing?.(call.repo, branch)
+		.view()
+		.catch(() => null);
+	const landed = view?.recent.findLast((outcome) => outcome.change === held.change && outcome.how === "landed");
+	if (!landed) return undefined;
+	// A landing before this claim was made is an earlier change under the same name.
+	if (landed.at < held.since) return undefined;
+	return landed.commit;
 }
 
 /**

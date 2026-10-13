@@ -68,6 +68,8 @@ export interface CommitRead {
 	message: string;
 	author: { name: string };
 	parents: string[];
+	/** When it was committed, in Unix seconds. */
+	committedAt?: number;
 }
 
 /** Commits of history a workspace starts with. It fetches more only when Git needs older commits. */
@@ -394,6 +396,7 @@ export class Workspace {
 				message: commit.message,
 				author: { name: commit.author.name },
 				parents: commit.parent,
+				committedAt: commit.committer.timestamp,
 			});
 			oid = commit.parent[0];
 		}

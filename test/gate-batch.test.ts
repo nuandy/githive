@@ -270,16 +270,17 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		// Artifacts' log, readCommit and readTree, answered by git on the server.
 		let treesRead = 0;
 		const meta = (line: string) => {
-			const [hash, treeHash, name, parents, message] = line.split("\x1f") as [string, string, string, string, string];
+			const [hash = "", treeHash = "", name = "", parents = "", committed = "", message = ""] = line.split("\x1f");
 			return {
 				hash,
 				treeHash,
 				author: { name },
 				parents: parents.split(" ").filter(Boolean),
+				committedAt: Number(committed),
 				message: message.replace(/\n$/, ""),
 			};
 		};
-		const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
+		const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%ct%x1f%B%x1e";
 		const history: HistorySource = {
 			log: async (ref, limit, offset) =>
 				server

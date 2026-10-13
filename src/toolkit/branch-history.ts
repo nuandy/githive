@@ -13,6 +13,8 @@ export interface CommitMeta {
 	message: string;
 	author: { name: string };
 	parents: string[];
+	/** When it was committed, in Unix seconds. */
+	committedAt?: number;
 }
 
 export interface TreeEntry {
@@ -82,6 +84,7 @@ export async function readBranchHistory(
 		commit: commit.hash,
 		parents: commit.parents,
 		author: commit.author.name,
+		...(commit.committedAt ? { at: new Date(commit.committedAt * 1000).toISOString() } : {}),
 		message: commit.message.replace(/\n+$/, ""),
 		files: files[commit.hash] ?? [],
 	}));

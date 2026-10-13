@@ -11,16 +11,20 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 // first parent. The result must match git exactly. Here git on a test server
 // answers as Artifacts would, and git diff-tree is the reference.
 
+// A commit as FORMAT prints it: hash, tree, author, parents, commit time and message.
+type LogFields = [string, string, string, string, string, string];
+
 /** Artifacts' log, readCommit and readTree, answered by git on the server. */
 export function gitHistory(server: GitServer): HistorySource {
-	const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
+	const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%ct%x1f%B%x1e";
 	const meta = (line: string) => {
-		const [hash, treeHash, name, parents, message] = line.split("\x1f") as [string, string, string, string, string];
+		const [hash, treeHash, name, parents, committed, message] = line.split("\x1f") as LogFields;
 		return {
 			hash,
 			treeHash,
 			author: { name },
 			parents: parents.split(" ").filter(Boolean),
+			committedAt: Number(committed),
 			message: message.replace(/\n$/, ""),
 		};
 	};
@@ -96,6 +100,11 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 			"a folder becomes a file",
 			"and back",
 		]);
+		// Each commit's time, which for a merge is when it landed.
+		for (const c of read) {
+			const seconds = Number(server.git("log", "-1", "--format=%ct", c.commit).trim());
+			expect(c.at).toBe(new Date(seconds * 1000).toISOString());
+		}
 		for (const c of read)
 			expect(c.files).toEqual(
 				server

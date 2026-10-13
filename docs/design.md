@@ -446,7 +446,11 @@ the floor: no stale release sooner than 30 minutes after the claim's agent last
 claimed. Every release the turn rule allows passes it; the audit can't replay
 the rest (a head lives in its agent's fork, not in the records).
 
-A release names the merge it follows (`mergedAs`), when it follows one.
+A release names the merge it follows (`mergedAs`), when it follows one: the
+merge's own release, and any later release of a claim whose change landed while
+it was held. A claim can outlast its landing: in demo run 17 one did for two
+hours, until the next run's reset released it without naming the merge, and the
+audit flagged it as given up before the merge.
 
 ## Branches
 
@@ -1205,7 +1209,10 @@ and author, and `by` when the commit was stamped:
   also what a rewritten record looks like, or a file no cited claims shard
   covers.
 - `released-before-merge`: the cited claim was released before the merge
-  without naming it, so the agent merged after giving its claim up.
+  without naming it, so the agent merged after giving its claim up. A release
+  more than a minute after the merge commit's time is late, not early, and
+  passes: the Worker times releases and whatever wrote the merge commit (the
+  Worker or a Gate container) times merges, so closer than that is reported.
 - `unapproved`: too few approvals at the cited votes tip, a veto, or a veto
   role that hadn't approved.
 - `untested`: checks configured, but none recorded, or the merge didn't land

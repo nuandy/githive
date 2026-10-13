@@ -1,7 +1,7 @@
 import type { ReadHistory } from "../../src/toolkit/batch-reads";
 
 // Fields split by unit separators and commits by record separators, since a message spans lines.
-const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
+const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%ct%x1f%B%x1e";
 
 /**
  * Artifacts' history API (log, readTree, readBlob) over a test server's repo, answered by git itself (`git` runs it
@@ -17,7 +17,8 @@ export const gitHistory =
 					.map((entry) => entry.replace(/^\n/, ""))
 					.filter(Boolean)
 					.map((entry) => {
-						const [hash = "", treeHash = "", name = "", parents = "", message = ""] = entry.split("\x1f");
+						const fields = entry.split("\x1f");
+						const [hash = "", treeHash = "", name = "", parents = "", committed = "", message = ""] = fields;
 						return {
 							hash,
 							treeHash,
@@ -25,6 +26,7 @@ export const gitHistory =
 							message: message.replace(/\n$/, ""),
 							author: { name },
 							parents: parents.split(" ").filter(Boolean),
+							committedAt: Number(committed),
 						};
 					}),
 			readCommit: async () => null,

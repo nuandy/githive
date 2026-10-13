@@ -181,6 +181,28 @@ describe("the audit", () => {
 		expect(await audit(records([merge({ claimsTip: "r2" })], afterMerge))).toEqual([]);
 	});
 
+	it("lets a claim that outlasted its landing be released later without naming the merge", async () => {
+		const landedAt = "2026-10-13T12:59:00.000Z";
+		const released = (when: string) => ({
+			change: "stats-1a2b",
+			agent: "agent-a",
+			by: "agent-a",
+			at: when,
+			reason: "demo run 18 starts over",
+			lastActive: claimA.active,
+		});
+		const releasedAt = (when: string) => [...registry, { tip: "r3", state: at([claimB], [released(when)]) }];
+		const landed = merge({ claimsTip: "r2", at: landedAt });
+		// Two hours after it landed: the claim was left behind, not given up before the merge.
+		expect(await audit(records([landed], releasedAt("2026-10-13T14:55:00.000Z")))).toEqual([]);
+		// Released before it landed, or too close to tell apart across clocks, it's still reported.
+		for (const early of ["2026-10-13T12:50:00.000Z", "2026-10-13T12:59:30.000Z"])
+			expect(await audit(records([landed], releasedAt(early)))).toMatchObject([{ rule: "released-before-merge" }]);
+		// A merge whose time isn't known is held to the release naming it, as before.
+		const untimed = merge({ claimsTip: "r2" });
+		expect(await audit(records([untimed], releasedAt("2026-10-13T14:55:00.000Z")))).toHaveLength(1);
+	});
+
 	it("reports another agent releasing a claim that wasn't stale", async () => {
 		const takenEarly = {
 			change: "docs-3c4d",
