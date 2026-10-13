@@ -14,6 +14,7 @@ import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
+import { onlyAPersonCanReview } from "./no-reviewer";
 import { giveUpGitHubChange } from "./github-tools";
 import type { HostedStatus, ToolContext } from "./context";
 import {
@@ -286,6 +287,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			held.claims.map((record) => claimInto(record, projectBranch(state))),
 		),
 	);
+	const notReviewing = limitsOnce(ctx, state);
 	const claims = await timing.time("status", () =>
 		Promise.all(
 			held.claims.map((record) =>
@@ -297,6 +299,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 					held.released,
 					record,
 					landings.get(claimInto(record, projectBranch(state))),
+					notReviewing,
 				),
 			),
 		),
@@ -388,6 +391,24 @@ interface ClaimSnapshot extends ClaimRecord {
 	lease?: ReturnType<typeof leaseFor>;
 }
 
+/**
+ * Which of the repo's agents may review no other person's change today, read once a snapshot and only if a change
+ * asks. One that can't be read counts every agent as able, so a lookup that fails sends nothing to the inbox.
+ */
+function limitsOnce(ctx: ToolContext, state: Registry) {
+	let barred: Promise<Set<string>> | undefined;
+	const everyone = Object.values(state.agents ?? {}).map((record) => record.agent);
+	return () => {
+		barred ??= Promise.resolve()
+			.then(() => ctx.notReviewing?.(everyone) ?? new Set<string>())
+			.catch((err: unknown) => {
+				console.error("reading agents' review limits for the dashboard failed", String(err));
+				return new Set<string>();
+			});
+		return barred;
+	};
+}
+
 /** The batch being checked on each of these branches, read once a branch; null where it can't be read. */
 async function landingViews(ctx: ToolContext, repo: string, branches: string[]) {
 	const views = new Map<string, LandingView | null>();
@@ -412,6 +433,7 @@ async function claimSnapshot(
 	released: ReleaseRecord[],
 	record: ClaimRecord,
 	landing: LandingView | null | undefined,
+	notReviewing: () => Promise<Set<string>>,
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
 	const { status, counted } = await changeState(ctx, repo, state, async () => votes.votes, claim.change, claim);
@@ -420,7 +442,22 @@ async function claimSnapshot(
 	// it closes once that role signs off.
 	const asked = openFlag(votes, claim.change, head);
 	const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
-	const attention = attentionFor(flag, hosted, claim);
+	// Where it stands, worked out as status does, from the votes changeState already counted. Advice: left out if it
+	// can't be.
+	const signs = await Promise.resolve()
+		.then(() => {
+			const policy = branchSettings(state, claim.into).policy;
+			return changeSigns({ claim, head, counted, record: votes, landing, policy });
+		})
+		.catch((err: unknown) => {
+			console.error(`working out where ${claim.change} stands for the dashboard failed`, String(err));
+			return undefined;
+		});
+	const agents = Object.values(state.agents ?? {});
+	const onlyAPerson = signs
+		? await onlyAPersonCanReview(claim, { signs, approval, hosted, trusted }, agents, notReviewing)
+		: null;
+	const attention = attentionFor(flag, hosted, claim, onlyAPerson);
 	// Dependencies not yet merged into the branch this change lands on.
 	const into = claim.into ?? projectBranch(state);
 	const mergedInto = (dependency: string) =>
@@ -433,30 +470,29 @@ async function claimSnapshot(
 	if (hosted) snapshot.hosted = hosted;
 	if (attention) snapshot.attention = attention;
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;
-	// How long it lasts if its agent goes quiet, worked out as status does. Advice: left out if it can't be.
-	// From the votes changeState already counted, so no stamp is checked twice.
-	const lease = await Promise.resolve()
-		.then(async () => {
-			const policy = branchSettings(state, claim.into).policy;
-			return leaseFor(changeSigns({ claim, head, counted, record: votes, landing, policy }));
-		})
-		.catch((err: unknown) => {
-			console.error(`working out ${claim.change}'s lease for the dashboard failed`, String(err));
-			return undefined;
-		});
-	if (lease) snapshot.lease = lease;
+	// How long it lasts if its agent goes quiet.
+	if (signs) snapshot.lease = leaseFor(signs);
 	return snapshot;
 }
 
-// What needs a person on a claim: an open question, or a hosted builder that failed.
-function attentionFor(flag: FlagRecord | null, hosted: HostedStatus | undefined, claim: ClaimRecord): Attention | null {
+// What needs a person on a claim: an open question, which says the most, then a hosted builder that failed, then a
+// review only a person can give.
+function attentionFor(
+	flag: FlagRecord | null,
+	hosted: HostedStatus | undefined,
+	claim: ClaimRecord,
+	onlyAPerson: string | null,
+): Attention | null {
 	if (flag) {
 		const asked = { reason: flag.reason, agent: flag.agent, at: flag.at };
 		return flag.urgency === undefined ? asked : { ...asked, urgency: flag.urgency };
 	}
-	if (hosted?.builder?.status !== "failed") return null;
-	const error = hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : "";
-	return { reason: `GitHive's builder failed${error}`, agent: "githive-builder", at: claim.active };
+	if (hosted?.builder?.status === "failed") {
+		const error = hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : "";
+		return { reason: `GitHive's builder failed${error}`, agent: "githive-builder", at: claim.active };
+	}
+	if (onlyAPerson) return { reason: onlyAPerson, agent: "githive", at: claim.active };
+	return null;
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */

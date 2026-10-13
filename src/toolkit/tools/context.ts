@@ -87,6 +87,11 @@ export interface ToolContext {
 	 * person's agent: people, GitHive's own agents and Access callers do what their permission allows.
 	 */
 	ownerLimits?: OwnerLimits;
+	/**
+	 * Of these agents (<handle>/<agent>), those whose owners don't let them review another person's change today, or
+	 * that were revoked. Without it, every agent is taken as able to review.
+	 */
+	notReviewing?: (agents: string[]) => Promise<Set<string>>;
 	/** Whether the caller may start hosted agents (build, request_review), which spend its model account. */
 	mayUseHosted?: () => Promise<boolean>;
 	/** The caller's teams in the repo's org (@<org>/<team>), recorded in their votes. */

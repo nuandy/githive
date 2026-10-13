@@ -1,5 +1,5 @@
 import type { ChangeAwareness } from "../footprint-cache";
-import type { OwnerLimits } from "../auth/agent-limits";
+import { AgentLimitStore, type OwnerLimits } from "../auth/agent-limits";
 import { clefOn } from "../clef";
 import type { Conversation } from "../sandbox";
 import { type GitHubImportResult, githubGate } from "../gate-github";
@@ -241,6 +241,7 @@ export function toolContextFor(
 		...githubApp(env),
 		...githubSyncParts(env),
 		...(env.AI ? { clef: clefOn(env.AI) } : {}),
+		...(env.DB ? { notReviewing: (agents: string[]) => new AgentLimitStore(env.DB).notReviewing(agents) } : {}),
 		stamper: async (agent) => {
 			if (!env.STAMP_KEY || !by) return undefined;
 			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);

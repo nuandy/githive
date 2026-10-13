@@ -126,6 +126,7 @@ describe("the queue consumer", () => {
 	const envWith = (
 		notePushes: (project: string, pushes: unknown[]) => Promise<void>,
 		namespace: string | null = "blueprint",
+		summarize: (key: string, patch: object) => Promise<void> = async () => undefined,
 	) =>
 		({
 			...(namespace ? { ARTIFACTS_NAMESPACE: namespace } : {}),
@@ -134,6 +135,7 @@ describe("the queue consumer", () => {
 					notePushes: (pushes: unknown[]) => notePushes(name.replace(/^repo:/, ""), pushes),
 				}),
 			},
+			REPO_INDEX: { getByName: () => ({ summarize }) },
 		}) as unknown as Env;
 
 	it("notes a batch's pushes with one call a project, and acks every message", async () => {
@@ -152,6 +154,22 @@ describe("the queue consumer", () => {
 			["p", 2],
 			["q", 1],
 		]);
+		for (const m of messages) expect([m.ack.mock.calls.length, m.retry.mock.calls.length]).toEqual([1, 0]);
+	});
+
+	it("notes a project's pushes as its activity, so its inbox is worked out again, and never retries for it", async () => {
+		const noted: [string, object][] = [];
+		const messages = [
+			message(event("fork--p--agent--a", "refs/heads/changes/c1", A)),
+			message(event("fork--q--agent--a", "refs/heads/changes/c3", A)),
+		];
+		const summarize = async (key: string, patch: object) => {
+			if (key === "repo:q") throw new Error("RepoIndex is overloaded");
+			noted.push([key, patch]);
+		};
+		const env = envWith(async () => undefined, "blueprint", summarize);
+		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env);
+		expect(noted).toEqual([["repo:p", { lastActivity: expect.stringMatching(/^2026-/) }]]);
 		for (const m of messages) expect([m.ack.mock.calls.length, m.retry.mock.calls.length]).toEqual([1, 0]);
 	});
 

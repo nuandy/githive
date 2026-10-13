@@ -6,10 +6,16 @@ import worker from "../src/index";
 vi.mock("../src/access", () => ({
 	verifyAccessRequest: vi.fn(async () => ({ kind: "service", value: "token-1" })),
 }));
-const counts = vi.hoisted(() => ({ openCount: vi.fn(async () => 4) }));
+// A recount takes the repo's snapshot, which writes its summary itself; one GitHive hasn't started on refuses.
+const counts = vi.hoisted(() => ({
+	repoSnapshot: vi.fn(async (_tools: unknown, repo: string) => {
+		if (repo === "c") throw new Error("GitHive hasn't started on c");
+		return {};
+	}),
+}));
 vi.mock("../src/toolkit/mcp", async (importOriginal) => ({
 	...(await importOriginal<object>()),
-	openCount: counts.openCount,
+	repoSnapshot: counts.repoSnapshot,
 }));
 
 const post = (env: never, path: string, body: unknown) =>
@@ -69,8 +75,9 @@ describe("the dashboard's repos", () => {
 			["_/c", "c"],
 		]);
 		await Promise.all(waits);
-		expect(index.summarize.mock.calls.map(([key]) => key).sort()).toEqual(["repo:b", "repo:c"]);
-		expect(index.summarize).toHaveBeenCalledWith("repo:b", { open: 4, countedAt: expect.any(String) });
+		expect(counts.repoSnapshot.mock.calls.map(([, repo]) => repo).sort()).toEqual(["b", "c"]);
+		// Only the one that couldn't be read is marked counted here, so it isn't tried again on every read.
+		expect(index.summarize.mock.calls).toEqual([["repo:c", { countedAt: expect.any(String) }]]);
 	});
 });
 

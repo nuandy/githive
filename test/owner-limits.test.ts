@@ -67,6 +67,37 @@ describe("an agent's limits", () => {
 		expect(both.filter((refused) => refused === null)).toHaveLength(1);
 	});
 
+	it("say which agents may review no other person's change today, for the inbox", async () => {
+		const db = fakeD1() as unknown as D1Database;
+		const people = new IdentityStore(db);
+		await people.invite("ada@example.com", "person:admin");
+		const github = {
+			provider: "github" as const,
+			providerId: "1",
+			email: "ada@example.com",
+			name: "Ada",
+			login: "ada",
+		};
+		const { user } = (await people.signIn(github)) as { user: { id: string; handle: string } };
+		const limits = new AgentLimitStore(db);
+		const make = async (name: string, review: number | null) => {
+			const agent = await people.createAgent(user.id, name);
+			await limits.setLimits(agent.id, { build: 0, review });
+			return agent;
+		};
+		// New, so never; no limit; one a day, unused and used; and revoked.
+		await people.createAgent(user.id, "fresh");
+		await make("open", null);
+		await make("daily", 1);
+		const spent = await make("spent", 1);
+		await limits.ownerLimits(spent.id).take("review");
+		const gone = await make("gone", null);
+		await people.revokeAgent(user.id, gone.id);
+		const names = ["fresh", "open", "daily", "spent", "gone", "unknown"].map((name) => `${user.handle}/${name}`);
+		const barred = await limits.notReviewing([...names, "someone/else"]);
+		expect([...barred].sort()).toEqual([`${user.handle}/fresh`, `${user.handle}/gone`, `${user.handle}/spent`]);
+	});
+
 	it("are whole numbers a day, 0 for never, or null for no limit", () => {
 		const current = { build: 0, review: null };
 		expect(limitsFrom({ build: 3 }, current)).toEqual({ build: 3, review: null });

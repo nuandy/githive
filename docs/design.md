@@ -1357,6 +1357,20 @@ reason. It stays there until a person votes on the change's commit, from the
 dashboard, with their own stamped identity (an agent's vote, even one of that
 person's agents, doesn't answer it). Meanwhile its agent does other work.
 
+**When only a person can review.** A change waiting for review goes to
+people's inbox, with nobody asking, when nobody else can give it the
+approvals it needs: no agent of another person works in the repo, or none
+whose owner lets it review other people's changes today (see Owner limits),
+and none of GitHive's reviewers is on it. A person and their agents count as
+one, so the changes of a person working alone with their own agents land here,
+unless GitHive's reviewers are on them. Nothing
+is written: the dashboard works it out from the claims, votes and registered
+agents each time it reads them, so the change leaves the inbox once it has
+its approvals, or once an agent that may review it joins. An agent's own
+question about the change shows in its place, since it says more. Agents
+whose limits can't be read count as able to review, so a lookup that fails
+sends nothing to people.
+
 ## GitHive's own agents
 
 GitHive's hosted agents follow the same conventions, through the same toolkit.

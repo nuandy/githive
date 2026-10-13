@@ -5,7 +5,7 @@ import { type Org, OrgStore, validRepoName } from "../auth/orgs";
 import { ensureRepo, forkAndWait, leftoversOf, listRepoNames, remoteFor } from "../artifacts";
 import { fail } from "../errors";
 import { retryTransient } from "../retry";
-import { type ToolContext, callTool, openCount } from "../toolkit/mcp";
+import { type ToolContext, callTool, repoSnapshot } from "../toolkit/mcp";
 import { type InitOptions, initialFiles, parseInit, writeFirstCommit } from "../repo-init";
 import type { RepoSummary } from "../repo-index";
 import { checkImportUrl } from "../private-import";
@@ -142,7 +142,10 @@ const needsRecount = (listing: RepoListing) =>
 
 const lastActive = (listing: RepoListing) => listing.summary?.lastActivity ?? listing.since;
 
-/** Recounts a few summaries older than their repo's last activity, the most recently active first. */
+/**
+ * Recounts a few summaries older than their repo's last activity, the most recently active first: what's open, and
+ * what waits on a person, which is what people's inbox shows.
+ */
 async function recountStale(index: ReturnType<typeof repoIndex>, tools: ToolContext, listings: RepoListing[]) {
 	const now = new Date().toISOString();
 	// The most recently active first: those are the rows people look at.
@@ -153,8 +156,12 @@ async function recountStale(index: ReturnType<typeof repoIndex>, tools: ToolCont
 		.slice(0, 3);
 	await Promise.allSettled(
 		stale.map(async (listing) => {
-			const open = await openCount(tools, listing.id).catch(() => null);
-			await index.summarize(`repo:${listing.id}`, open === null ? { countedAt: now } : { open, countedAt: now });
+			// The snapshot writes the summary itself; one that can't be read is marked counted, so it isn't retried.
+			const counted = await repoSnapshot(tools, listing.id).then(
+				() => true,
+				() => false,
+			);
+			if (!counted) await index.summarize(`repo:${listing.id}`, { countedAt: now });
 		}),
 	);
 }

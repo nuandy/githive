@@ -126,6 +126,7 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env, han
 		[...byProject].map(async ([project, { pushes, messages }]) => {
 			try {
 				await rpc(env.REPO_CACHE.getByName(`repo:${project}`).notePushes(pushes));
+				await noteActivity(env, project, pushes);
 			} catch (err) {
 				console.error(`noting ${pushes.length} pushes in ${project}'s RepoCache failed: ${String(err)}`);
 				for (const message of messages) failed.add(message);
@@ -152,6 +153,17 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env, han
 			),
 		),
 	);
+}
+
+// A push is activity, so the repo's summary counts as stale and people's inbox is worked out again on its next
+// read (see recountStale): a change pushed with nobody else to review it goes there without anyone opening the repo.
+// It's advice, so a failure is logged and never has the push delivered again.
+async function noteActivity(env: Env, project: string, pushes: ChangePush[]) {
+	const newest = Math.max(...pushes.map((push) => push.at));
+	const lastActivity = new Date(newest).toISOString();
+	await Promise.resolve()
+		.then(() => env.REPO_INDEX.getByName("all").summarize(`repo:${project}`, { lastActivity }))
+		.catch((err: unknown) => console.error(`noting ${project}'s pushes as activity failed: ${String(err)}`));
 }
 
 // Each repo's pushes for awareness. A push to a fork is handed to every project its name may belong to; only the

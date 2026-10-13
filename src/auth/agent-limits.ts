@@ -88,6 +88,35 @@ export class AgentLimitStore {
 		return counts;
 	}
 
+	/**
+	 * Of these agents (<handle>/<agent>), those that may review no other person's change today: revoked, never
+	 * allowed to, or past their owner's daily limit. Agents it doesn't know are left out, as may review.
+	 */
+	async notReviewing(names: string[]): Promise<Set<string>> {
+		const out = new Set<string>();
+		const limited: { name: string; id: string; limit: number }[] = [];
+		// D1 binds at most 100 values a statement.
+		for (let from = 0; from < names.length; from += 90) {
+			const chunk = names.slice(from, from + 90);
+			const { results } = await this.db
+				.prepare(
+					"SELECT users.handle || '/' || agents.name AS name, agents.id, agents.review_limit, agents.revoked_at " +
+						"FROM agents JOIN users ON users.id = agents.owner_id " +
+						`WHERE users.handle || '/' || agents.name IN (${chunk.map(() => "?").join(", ")})`,
+				)
+				.bind(...chunk)
+				.all<{ name: string; id: string; review_limit: number | null; revoked_at: string | null }>();
+			for (const row of results) {
+				if (row.revoked_at || row.review_limit === 0) out.add(row.name);
+				else if (row.review_limit !== null) limited.push({ name: row.name, id: row.id, limit: row.review_limit });
+			}
+		}
+		if (!limited.length) return out;
+		const counts = await this.countsToday(limited.map((agent) => agent.id));
+		for (const agent of limited) if (counts[agent.id]!.review >= agent.limit) out.add(agent.name);
+		return out;
+	}
+
 	/** The limits of one agent, as GitHive's tools ask them. */
 	ownerLimits(agentId: string): OwnerLimits {
 		return {
