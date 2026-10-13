@@ -315,7 +315,8 @@ export function ChangePage({
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	const reader = access ?? {};
 	const { policy, verify } = branchSettings(snapshot, branch);
-	const status = statusOf(claim, history, { policy, landing }, votes);
+	// Told against the clock, as the Changes list tells it: a change its agent left says so here too.
+	const status = statusOf(claim, history, { policy, landing, now: now ?? Date.now() }, votes);
 	// A change landing a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;

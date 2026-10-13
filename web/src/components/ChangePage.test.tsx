@@ -130,6 +130,18 @@ describe("the decision box", () => {
 		expect(text).toMatch(/security: waiting/);
 	});
 
+	it("says a change its agent left is abandoned, as the Changes list does", () => {
+		const left: Claim = {
+			...waiting,
+			head: null,
+			active: ago(90),
+			approval: { approved: false, approvals: 0, required: 2, vetoedBy: [], awaiting: ["security"] },
+		};
+		expect(visibleText(box(render({ claim: left, history: { ...historyFixture, commits: [] } })))).toContain(
+			"Abandoned, free to take",
+		);
+	});
+
 	it("is the box the page scrolls to and focuses", () => {
 		expect(box(render({}))).toMatch(/^<section id="decide" tabindex="-1"/);
 	});
