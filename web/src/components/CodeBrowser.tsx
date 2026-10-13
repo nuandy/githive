@@ -6,7 +6,7 @@ import { useStagger } from "../hooks/useStagger";
 import { type ClaimHolder, holderOf, holdersFromSnapshot } from "../lib/claimsMap";
 import { languageOf } from "../lib/highlight";
 import { lastChangeTo } from "../lib/landed";
-import { isMarkdown } from "../lib/markdown";
+import { FORMAT_MOST, isMarkdown } from "../lib/markdown";
 import { shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
@@ -340,7 +340,7 @@ function FolderView({ files, path, link }: { files: string[]; path: string; link
 
 /**
  * A file: its size, then its lines numbered and in their syntax colors, or a Markdown file formatted, with its source
- * a click away.
+ * a click away. A Markdown file too long to format, or one that can't be, shows its source, saying why.
  */
 function FileView({
 	repo,
@@ -376,7 +376,9 @@ function FileView({
 		);
 	const lines = file.text !== undefined ? file.text.replace(/\n$/, "").split("\n") : [];
 	const lineCount = file.text !== undefined ? `${counted(lines.length, "line")} · ` : "";
-	const formatted = isMarkdown(path) && file.text !== undefined && !file.binary && !file.tooBig;
+	const markdown = isMarkdown(path) && file.text !== undefined && !file.binary && !file.tooBig;
+	const formatted = markdown && file.text!.length <= FORMAT_MOST;
+	const dir = path.split("/").slice(0, -1).join("/");
 	return (
 		<Box asChild className="overflow-hidden">
 			<div>
@@ -404,11 +406,25 @@ function FileView({
 						className="animate-fade px-1 py-5"
 						source={file.text!}
 						repo={repo}
-						dir={path.split("/").slice(0, -1).join("/")}
+						dir={dir}
 						gitRef={refParam}
+						fallback={
+							<FileContents
+								file={file}
+								lines={lines}
+								path={path}
+								note="This file couldn't be formatted, so it's shown as its source."
+							/>
+						}
 					/>
 				) : (
-					<FileContents key="source" file={file} lines={lines} path={path} />
+					<FileContents
+						key="source"
+						file={file}
+						lines={lines}
+						path={path}
+						note={markdown && !formatted ? "This file is too long to format, so it's shown as its source." : undefined}
+					/>
 				)}
 			</div>
 		</Box>
@@ -418,30 +434,34 @@ function FileView({
 /** A line under the file's header saying why its contents aren't shown. */
 const NOT_SHOWN = "my-3.75 px-0.5 py-3 text-muted-foreground";
 
-function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; path: string }) {
+/** A file's lines, numbered and in their syntax colors, under a `note` saying why they're shown, if there's one. */
+function FileContents({ file, lines, path, note }: { file: RepoFile; lines: string[]; path: string; note?: string }) {
 	const highlighted = useHighlighted(file.binary || file.tooBig ? undefined : file.text, languageOf(path));
 	if (file.binary) return <p className={NOT_SHOWN}>This is a binary file, so it isn't shown.</p>;
 	if (file.tooBig) return <p className={NOT_SHOWN}>This file is too big to show here.</p>;
 	return (
-		<div className="max-h-[75vh] overflow-auto" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
-			<table className="w-full border-collapse font-mono text-caption leading-[1.6] [tab-size:2]">
-				<tbody>
-					{lines.map((line, index) => (
-						<tr key={index} className="transition-colors duration-fast hover:bg-surface-2">
-							<td
-								className="w-[1%] min-w-11 px-3 py-0 text-right align-top whitespace-nowrap text-muted-foreground select-none"
-								aria-hidden="true"
-							>
-								{index + 1}
-							</td>
-							<td className="px-3 py-0 whitespace-pre">
-								{highlighted?.[index]?.length ? <TokenLine tokens={highlighted[index]} /> : line || " "}
-							</td>
-						</tr>
-					))}
-				</tbody>
-			</table>
-		</div>
+		<>
+			{note ? <p className="m-0 border-b border-border px-4 py-2.5 text-ui text-muted-foreground">{note}</p> : null}
+			<div className="max-h-[75vh] overflow-auto" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
+				<table className="w-full border-collapse font-mono text-caption leading-[1.6] [tab-size:2]">
+					<tbody>
+						{lines.map((line, index) => (
+							<tr key={index} className="transition-colors duration-fast hover:bg-surface-2">
+								<td
+									className="w-[1%] min-w-11 px-3 py-0 text-right align-top whitespace-nowrap text-muted-foreground select-none"
+									aria-hidden="true"
+								>
+									{index + 1}
+								</td>
+								<td className="px-3 py-0 whitespace-pre">
+									{highlighted?.[index]?.length ? <TokenLine tokens={highlighted[index]} /> : line || " "}
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+		</>
 	);
 }
 

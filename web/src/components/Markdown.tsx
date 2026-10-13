@@ -1,11 +1,12 @@
-import { Fragment, type ReactNode } from "react";
+import { Component, type ErrorInfo, Fragment, type ReactNode, useMemo } from "react";
 import { languageOf } from "../lib/highlight";
 import { type Block, type Inline, linkTarget, parseMarkdown } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import { TokenLine, useHighlighted } from "./Highlighted";
 
 // A Markdown file as formatted text (lib/markdown.ts reads it): React elements only, so nothing in the file reaches
-// the page as HTML. Links go where linkTarget lets them, or show as their words.
+// the page as HTML. Links go where linkTarget lets them, or show as their words. Its headings sit a level under the
+// page's, and a file that can't be drawn shows its fallback (its source) rather than taking the page down.
 
 export interface MarkdownProps {
 	source: string;
@@ -14,10 +15,13 @@ export interface MarkdownProps {
 	dir: string;
 	gitRef?: string;
 	className?: string;
+	/** What shows in its place if it can't be formatted: its source, say. */
+	fallback?: ReactNode;
 }
 
 type Where = Pick<MarkdownProps, "repo" | "dir"> & { ref: string | undefined };
 
+/** Each heading's look, by its level in the file (it's drawn a level down: see BlockView). */
 const HEADING = [
 	"",
 	"mt-6 mb-3 border-b border-border pb-1.5 text-display-sm first:mt-0",
@@ -82,6 +86,18 @@ function Inlines({ inlines, where }: { inlines: Inline[]; where: Where }) {
 						);
 					case "break":
 						return <br key={index} />;
+					case "task":
+						// A task list's box: it says whether it's ticked, and can't be changed here. It hangs where the
+						// item's bullet would be.
+						return (
+							<input
+								key={index}
+								type="checkbox"
+								disabled
+								checked={inline.checked}
+								className="mr-1.5 -ml-5.5 size-3.5 align-[-2px]"
+							/>
+						);
 				}
 			})}
 		</>
@@ -122,7 +138,8 @@ const TEXT = "max-w-measure";
 function BlockView({ block, where, tight }: { block: Block; where: Where; tight: boolean }) {
 	switch (block.kind) {
 		case "heading": {
-			const Tag = `h${Math.min(block.level, 6)}` as "h1";
+			// A level under the file's own, so its "# Title" sits under the page's h1 (the repo's name).
+			const Tag = `h${Math.min(block.level + 1, 6)}` as "h2";
 			return (
 				<Tag className={cn("font-semibold", HEADING[block.level])}>
 					<Inlines inlines={block.children} where={where} />
@@ -149,7 +166,7 @@ function BlockView({ block, where, tight }: { block: Block; where: Where; tight:
 			// A list whose items are each a line is tight: no room between them.
 			const tightList = block.items.every((item) => item.filter((each) => each.kind === "paragraph").length <= 1);
 			const items = block.items.map((item, index) => (
-				<li key={index} className="mt-1 first:mt-0">
+				<li key={index} className={cn("mt-1 first:mt-0", isTask(item) && "list-none")}>
 					<Blocks blocks={item} where={where} tight={tightList} />
 				</li>
 			));
@@ -192,6 +209,10 @@ function BlockView({ block, where, tight }: { block: Block; where: Where; tight:
 											<Inlines inlines={cell} where={where} />
 										</td>
 									))}
+									{/* The cells a short row lacks, as one empty cell across them. */}
+									{row.length < block.head.length ? (
+										<td colSpan={block.head.length - row.length} className="border border-border" />
+									) : null}
 								</tr>
 							))}
 						</tbody>
@@ -202,11 +223,54 @@ function BlockView({ block, where, tight }: { block: Block; where: Where; tight:
 	}
 }
 
+/** Whether a list item is a task list's: its box first in its paragraph. */
+const isTask = (item: Block[]) => item[0]?.kind === "paragraph" && item[0].children[0]?.kind === "task";
+
 /** A Markdown file, formatted: its links underlined as in any running text (`prose`). */
-export function Markdown({ source, repo, dir, gitRef, className }: MarkdownProps) {
+export function Markdown({ fallback = null, ...props }: MarkdownProps) {
+	return (
+		<FormatBoundary source={props.source} fallback={fallback}>
+			<Formatted {...props} />
+		</FormatBoundary>
+	);
+}
+
+function Formatted({ source, repo, dir, gitRef, className }: Omit<MarkdownProps, "fallback">) {
+	// Read once for each text, not again each time a poll draws the page.
+	const blocks = useMemo(() => parseMarkdown(source), [source]);
 	return (
 		<div className={cn("prose min-w-0 text-body wrap-anywhere", className)} data-markdown="">
-			<Blocks blocks={parseMarkdown(source)} where={{ repo, dir, ref: gitRef }} />
+			<Blocks blocks={blocks} where={{ repo, dir, ref: gitRef }} />
 		</div>
 	);
+}
+
+interface FormatBoundaryProps {
+	source: string;
+	fallback: ReactNode;
+	children: ReactNode;
+}
+
+/**
+ * Keeps a file that can't be drawn (something in it nothing expected) to itself: its fallback shows instead, and the
+ * rest of the page, Source among it, goes on working. Another text tries again.
+ */
+export class FormatBoundary extends Component<FormatBoundaryProps, { source: string; failed: boolean }> {
+	state = { source: this.props.source, failed: false };
+
+	static getDerivedStateFromError(): { failed: boolean } {
+		return { failed: true };
+	}
+
+	static getDerivedStateFromProps(props: FormatBoundaryProps, state: { source: string }) {
+		return props.source === state.source ? null : { source: props.source, failed: false };
+	}
+
+	componentDidCatch(error: Error, _info: ErrorInfo) {
+		console.error("Unable to format this Markdown", error);
+	}
+
+	render() {
+		return this.state.failed ? this.props.fallback : this.props.children;
+	}
 }

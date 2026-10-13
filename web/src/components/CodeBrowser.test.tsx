@@ -99,7 +99,7 @@ describe("the Code tab", () => {
 			text: "# My app\n\nSee [the stats](src/stats/page.tsx).\n",
 		};
 		const html = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} />);
-		expect(html).toMatch(/<h1 class="[^"]*">My app<\/h1>/);
+		expect(html).toMatch(/<h2 class="[^"]*">My app<\/h2>/);
 		expect(html).toContain('<a href="#/repos/acme/my-app/code/src/stats/page.tsx">the stats</a>');
 		expect(html).toMatch(
 			/<button[^>]*aria-pressed="true"[^>]*>Formatted<\/button><button[^>]*aria-pressed="false"[^>]*>Source/,
@@ -107,7 +107,16 @@ describe("the Code tab", () => {
 		expect(html).not.toContain("<table");
 		const source = renderToStaticMarkup(<CodeView {...base} path="README.md" file={readme} source />);
 		expect(source).toMatch(/aria-hidden="true">1<\/td><td class="[^"]*"># My app<\/td>/);
-		expect(source).not.toContain("<h1");
+		expect(source).not.toContain("My app</h2>");
+	});
+
+	it("shows a Markdown file too long to format as its source, and says so", () => {
+		const text = `# Long\n\n${"A line of the changelog.\n".repeat(5_000)}`;
+		const long = { ref: "master", commit: "abc", path: "README.md", size: text.length, text };
+		const html = renderToStaticMarkup(<CodeView {...base} path="README.md" file={long} />);
+		expect(visibleText(html)).toContain("This file is too long to format, so it s shown as its source.");
+		expect(html).toMatch(/aria-hidden="true">1<\/td><td class="[^"]*"># Long<\/td>/);
+		expect(html).not.toContain(">Formatted<");
 	});
 
 	it("says who holds a file, and the last change to touch it", () => {
