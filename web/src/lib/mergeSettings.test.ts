@@ -145,6 +145,16 @@ describe("the merge settings, a section at a time", () => {
 		expect(partInput("checks", { ...draft, required: "x" }, base).problems).toEqual([]);
 	});
 
+	it("drops who may vote as a role Review no longer has block, unless the saved rules still use it", () => {
+		const draft = { ...base, vetoes: "" };
+		// security blocked repo-wide as saved, and no rule uses it: its grant goes with it, as it did before sections.
+		expect(partInput("review", draft, base).input).toEqual({ required: 1, vetoes: [], grants: { ops: ["githive"] } });
+		const ruled = { ...base, escalate: [{ paths: "src/", required: "", vetoes: "security" }] };
+		expect(partInput("review", { ...ruled, vetoes: "" }, ruled).input?.grants).toEqual({
+			security: ["@acme/security"],
+		});
+	});
+
 	it("after a save, takes the server's settings where they weren't being edited, keeping edits elsewhere", () => {
 		const editing = { ...base, required: "3", verify: ["npm test", "npm run lint"] };
 		const saved = draftFrom({ ...policy, required: 3, escalate: [] }, ["npm test"], ["*.md"]);

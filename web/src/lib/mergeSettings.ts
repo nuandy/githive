@@ -156,7 +156,8 @@ export function settingsFrom(
 
 /**
  * What one section saves, from the draft, or what's wrong with it there. Review sends who may vote for every role
- * that blocks in the draft or as saved (`base`), so saving it never drops a grant the saved path rules still use.
+ * that blocks in the draft, or in the path rules as saved (`base`), so saving it never drops a grant the saved rules
+ * still use; a role it no longer has block, that no rule uses, loses its grant.
  */
 export function partInput(
 	part: MergePart,
@@ -167,7 +168,7 @@ export function partInput(
 	if (problems.length) return { problems };
 	if (part === "path-rules") return { input: { escalate: escalateOf(draft) }, problems: [] };
 	if (part === "checks") return { input: checksOf(draft), problems: [] };
-	const roles = [...new Set([...blockingRolesOf(draft), ...blockingRolesOf(base)])];
+	const roles = [...new Set([...blockingRolesOf(draft), ...blockingRolesOf({ vetoes: "", escalate: base.escalate })])];
 	return {
 		input: { required: whole(draft.required)!, vetoes: splitList(draft.vetoes), grants: grantsFor(draft, roles) },
 		problems: [],
