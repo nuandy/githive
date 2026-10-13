@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Undo } from "../../hooks/useUndo";
+import { sentence } from "../../lib/errors";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
 
@@ -38,7 +39,7 @@ export function UndoLine({ undo, where, className }: { undo: Undo; where: string
 						</Button>
 					)}
 					{shown.kind === "offered" && shown.error ? (
-						<span className="basis-full text-bad">Couldn't undo: {shown.error}. Try again.</span>
+						<span className="basis-full text-bad">{sentence(`Couldn't undo: ${shown.error}`)} Try again.</span>
 					) : null}
 				</p>
 			) : null}

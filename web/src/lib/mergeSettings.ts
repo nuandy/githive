@@ -156,7 +156,8 @@ export function settingsFrom(
 
 /**
  * What one section saves, from the draft, or what's wrong with it there. Review sends who may vote for every role
- * that blocks in the draft or as saved (`base`), so saving it never drops a grant the saved path rules still use.
+ * that blocks in the draft, or in the path rules as saved (`base`), so saving it never drops a grant the saved rules
+ * still use; a role it no longer has block, that no rule uses, loses its grant.
  */
 export function partInput(
 	part: MergePart,
@@ -167,7 +168,7 @@ export function partInput(
 	if (problems.length) return { problems };
 	if (part === "path-rules") return { input: { escalate: escalateOf(draft) }, problems: [] };
 	if (part === "checks") return { input: checksOf(draft), problems: [] };
-	const roles = [...new Set([...blockingRolesOf(draft), ...blockingRolesOf(base)])];
+	const roles = [...new Set([...blockingRolesOf(draft), ...blockingRolesOf({ vetoes: "", escalate: base.escalate })])];
 	return {
 		input: { required: whole(draft.required)!, vetoes: splitList(draft.vetoes), grants: grantsFor(draft, roles) },
 		problems: [],
@@ -181,15 +182,24 @@ export const partDirty = (part: MergePart, draft: MergeDraft, base: MergeDraft) 
 	partKey(part, draft) !== partKey(part, base);
 
 /**
- * The draft once `saved` (the server's settings after a save of `part`) is the base: the section saved, and every
- * section that had no edits, take the server's settings; one with edits keeps them.
+ * The draft once `saved` (the server's settings after a save of `part`, or as they are now) is the base: the section
+ * saved, and every section that had no edits, take the server's settings; one with edits keeps them.
  */
-export function rebase(draft: MergeDraft, base: MergeDraft, saved: MergeDraft, part: MergePart): MergeDraft {
+export function rebase(draft: MergeDraft, base: MergeDraft, saved: MergeDraft, part?: MergePart): MergeDraft {
 	const next = { ...draft };
 	for (const each of PARTS)
 		if (each === part || !partDirty(each, draft, base))
 			for (const field of FIELDS[each]) Object.assign(next, { [field]: saved[field] });
 	return next;
+}
+
+/**
+ * A held draft with the server's settings as they are now (`fresh`): each section without edits shows them, and is
+ * made from them; one with edits keeps its edits and what they were made from. (Whether a section has edits reads the
+ * same either way round, so the base rebases as the draft does.)
+ */
+export function withFresh<T extends { draft: MergeDraft; base: MergeDraft }>(held: T, fresh: MergeDraft): T {
+	return { ...held, draft: rebase(held.draft, held.base, fresh), base: rebase(held.base, held.draft, fresh) };
 }
 
 /** The draft as a policy, as far as it reads (a role that isn't one is left out), to say what it means. */

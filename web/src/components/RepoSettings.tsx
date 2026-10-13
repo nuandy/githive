@@ -3,7 +3,7 @@ import type { MyAgent, OrgDetail, RepoAccess, RepoSnapshot, SettingsInput } from
 import { useChanged } from "../hooks/useChanged";
 import { splitRepo } from "../lib/repoName";
 import { href, SETTINGS_SECTIONS, type SettingsSection } from "../lib/routes";
-import { type DraftStore, dirtySections, settingsDrafts } from "../lib/settingsDrafts";
+import { type DraftStore, dirtySections, forgetDrafts, settingsDrafts } from "../lib/settingsDrafts";
 import { holderOptions, roleOptions } from "../lib/tokens";
 import { cn } from "../lib/utils";
 import { BranchRulesSection } from "./BranchRules";
@@ -99,7 +99,17 @@ export function RepoSettings({
 			/>
 		);
 	} else if (section === "danger-zone") {
-		shown = <DangerZone repo={repo} deleteRepo={() => manage.deleteRepo(repo)} onDeleted={onDeleted} />;
+		shown = (
+			<DangerZone
+				repo={repo}
+				deleteRepo={() => manage.deleteRepo(repo)}
+				onDeleted={() => {
+					// Its edits go with it.
+					forgetDrafts(drafts, repo);
+					onDeleted();
+				}}
+			/>
+		);
 	} else if (snapshot && manage.changeSettings) {
 		const context: SettingsContext = {
 			repo,

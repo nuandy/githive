@@ -166,7 +166,7 @@ function AgentMenu(props: { fullName: string; apps: Connection[]; busy: boolean;
 }
 
 /** The apps that sign in as the agent, each with when it connected and a way to disconnect it. */
-function SignsInFrom({ apps, now, actions, run, busy, confirming, setConfirming, setError }: AgentCardProps) {
+function SignsInFrom({ apps, fullName, now, actions, run, busy, confirming, setConfirming, setError }: AgentCardProps) {
 	if (!apps.length) return null;
 	return (
 		<ul className="m-0 grid list-none gap-1.5 p-0">
@@ -183,7 +183,8 @@ function SignsInFrom({ apps, now, actions, run, busy, confirming, setConfirming,
 							confirming={confirming}
 							setConfirming={setConfirming}
 							label="Disconnect"
-							question={`Disconnect ${app.client}?`}
+							question={`Disconnect ${app.client}? It can't act as ${fullName} until it signs in again.`}
+							keep="Keep it connected"
 							busy={busy === key}
 							onConfirm={() => run(key, () => actions.disconnect(app.id), setError)}
 						/>

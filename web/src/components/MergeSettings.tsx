@@ -15,6 +15,7 @@ import {
 	type Problem,
 	problemsOf,
 	rebase,
+	withFresh,
 } from "../lib/mergeSettings";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
@@ -25,11 +26,11 @@ import { Icon } from "./Icon";
 import { MergeChecks } from "./MergeChecks";
 import { MergePolicyTerms } from "./PolicyTerms";
 import {
-	failedStatus,
 	problemsFor,
-	problemsStatus,
 	REMOVE,
 	RULE,
+	type Said,
+	saveBarSays,
 	savedStatus,
 	SETTINGS_FIELDS,
 	SettingField,
@@ -108,19 +109,21 @@ function savedWords(part: MergePart, saved: SavedMergeSettings): ReactNode {
 
 /**
  * One section's share of the merge settings: the draft (held, so it outlives the section), changing it, and saving or
- * discarding this section's fields alone. Problems show once a save was tried, and as they're put right.
+ * discarding this section's fields alone. Problems show once a save was tried, and as they're put right. (Exported
+ * for its tests.)
  */
-function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, drafts }: SettingsContext) {
+export function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, drafts }: SettingsContext) {
 	const fresh = draftFrom(snapshot.policy, snapshot.verify, snapshot.skipChecks);
-	const held = useHeldDraft(drafts, draftKey(repo, "merge"), fresh, mergeDirty);
+	// A section without edits follows the server's settings while another has some.
+	const held = useHeldDraft(drafts, draftKey(repo, "merge"), fresh, mergeDirty, withFresh);
 	const [busy, setBusy] = useState(false);
 	const [tried, setTried] = useState(false);
-	const [status, setStatus] = useState<ReactNode>(null);
+	const [said, setSaid] = useState<Said>(null);
 	const { draft, base } = held;
 	const problems = tried ? problemsOf(draft).filter((problem) => problem.part === part) : [];
 
 	const update = (patch: Partial<MergeDraft>) => {
-		setStatus(null);
+		setSaid(null);
 		held.edit((current) => ({ ...current, ...patch }));
 	};
 	const submit = async (event: FormEvent) => {
@@ -129,16 +132,17 @@ function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, draft
 		const result = partInput(part, draft, base);
 		if (!result.input) return;
 		setBusy(true);
-		setStatus(null);
+		setSaid(null);
 		try {
 			const done = await save(result.input);
 			const saved = draftFrom(done.policy, done.verify, done.skipChecks);
-			held.reset(saved, rebase(draft, base, saved, part));
+			// From the draft as it is now: edits made while it saved stay.
+			held.saved(saved, (current) => rebase(current.draft, current.base, saved, part));
 			setTried(false);
-			setStatus(savedWords(part, done));
+			setSaid({ saved: savedWords(part, done) });
 			onSaved?.();
 		} catch (err) {
-			setStatus(failedStatus(messageOf(err)));
+			setSaid({ failed: messageOf(err) });
 		} finally {
 			setBusy(false);
 		}
@@ -146,7 +150,7 @@ function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, draft
 	const discard = () => {
 		held.edit((current) => rebase(current, base, base, part));
 		setTried(false);
-		setStatus(null);
+		setSaid(null);
 	};
 	return {
 		draft,
@@ -154,7 +158,7 @@ function useMergeSection(part: MergePart, { repo, snapshot, save, onSaved, draft
 		busy,
 		problems,
 		dirty: partDirty(part, draft, base),
-		status: problems.length ? problemsStatus(problems) : status,
+		says: saveBarSays(said, problems),
 		submit,
 		discard,
 	};
@@ -230,7 +234,7 @@ export function ReviewSection(context: SettingsContext) {
 				</fieldset>
 			</SettingsPart>
 			<WhatThisMeans draft={draft} />
-			<SaveBar status={form.status} dirty={form.dirty} busy={busy} onDiscard={form.discard} />
+			<SaveBar {...form.says} dirty={form.dirty} busy={busy} onDiscard={form.discard} />
 		</form>
 	);
 }
@@ -323,7 +327,7 @@ export function PathRulesSection(context: SettingsContext) {
 				</div>
 			</SettingsPart>
 			<WhatThisMeans draft={draft} />
-			<SaveBar status={form.status} dirty={form.dirty} busy={busy} onDiscard={form.discard} />
+			<SaveBar {...form.says} dirty={form.dirty} busy={busy} onDiscard={form.discard} />
 		</form>
 	);
 }
@@ -416,7 +420,7 @@ export function ChecksSection(context: SettingsContext) {
 					branch={context.branch}
 				/>
 			</SettingsPart>
-			<SaveBar status={form.status} dirty={form.dirty} busy={form.busy} onDiscard={form.discard} />
+			<SaveBar {...form.says} dirty={form.dirty} busy={form.busy} onDiscard={form.discard} />
 		</form>
 	);
 }

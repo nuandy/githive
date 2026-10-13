@@ -3,6 +3,7 @@ import { draftFrom, settingsFrom } from "./mergeSettings";
 import {
 	addTyped,
 	ANY_PERSON,
+	enterChoice,
 	GITHIVE_REVIEWERS,
 	holderLabel,
 	holderOptions,
@@ -78,6 +79,18 @@ describe("who may vote as a role", () => {
 		expect(suggest(options, "person", []).map((option) => option.value)).toEqual(["person:*"]);
 		// What starts with what's typed comes first.
 		expect(suggest(options, "g", []).map((option) => option.value)).toEqual(["githive"]);
+	});
+
+	it("adds what's typed on Enter: an option only once the arrows light it, or when it's typed in full", () => {
+		const options = roleOptions(["payments", "security"], []);
+		// "pay" stays "pay", though payments is offered first.
+		expect(enterChoice("pay", options, undefined)).toBe("pay");
+		expect(enterChoice("pay", options, options[0])).toBe("payments");
+		expect(enterChoice(" Security ", options, undefined)).toBe("security");
+		const holders = holderOptions({ teams: [], org: "acme", agents: [] });
+		expect(enterChoice("any person", holders, undefined)).toBe(ANY_PERSON);
+		// Nothing typed or lit: Enter submits the form.
+		expect(enterChoice("  ", options, undefined)).toBeNull();
 	});
 });
 

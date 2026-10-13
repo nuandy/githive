@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import type { ReleaseAnswer } from "../api";
-import { messageOf } from "../lib/errors";
+import { messageOf, reasonOf, sentence } from "../lib/errors";
 import { listed } from "../lib/decision";
 import { shortSha } from "../lib/model";
 import { cn } from "../lib/utils";
@@ -43,6 +43,12 @@ export function OutcomeLine({ outcome, className }: { outcome: Outcome | null; c
 
 export type MergeAnswer = { ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] };
 
+/** Why a change couldn't land, when the call failed: the server's words, as they came, in a sentence. */
+export const landFailure = (err: unknown): Outcome => ({
+	ok: false,
+	text: sentence(`It couldn't land: ${reasonOf(err)}`),
+});
+
 /**
  * Land now, for a person who can write, once the change can land: a confirm names the changes that land with it and
  * the checks that run first, then it lands as its agent would (the same batch, checked first), stamped with their
@@ -74,7 +80,7 @@ export function LandNow({
 					: { ok: false, text: `It couldn't land: ${(landed.reasons ?? ["no reason was given"]).join(" ")}` },
 			);
 		} catch (err) {
-			onOutcome({ ok: false, text: `It couldn't land: ${messageOf(err)}` });
+			onOutcome(landFailure(err));
 		} finally {
 			setBusy(false);
 		}

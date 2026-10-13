@@ -10,7 +10,7 @@ import { useSavedNote } from "../hooks/useSavedNote";
 import { useStagger } from "../hooks/useStagger";
 import { type Undo, useUndo } from "../hooks/useUndo";
 import { cn } from "../lib/utils";
-import { ConfirmButton } from "./Confirm";
+import { ConfirmButton, Question } from "./Confirm";
 import { SettingsPart, SettingsSubhead } from "./SettingsParts";
 import {
 	AlertDialog,
@@ -60,6 +60,10 @@ interface RunProps {
 }
 
 const label = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
+
+/** The question before making a collaborator an admin: what they'll be able to do. */
+export const adminQuestion = (handle: string, repo: string) =>
+	`Make ${handle} an admin of ${repo}? Admins change settings and collaborators, and can delete the repo.`;
 
 function LevelOptions() {
 	return (
@@ -354,7 +358,10 @@ interface CollaboratorRowProps extends RunProps {
 	onSaved(): void;
 }
 
-/** A collaborator: their permission, what it lets them do, and removing them (with Undo). */
+/**
+ * A collaborator: their permission, what it lets them do, and removing them (with Undo). Making them an admin asks
+ * first, in place of the controls, as an org's promotions do.
+ */
 function CollaboratorRow({
 	repo,
 	collaborator,
@@ -372,12 +379,17 @@ function CollaboratorRow({
 }: CollaboratorRowProps) {
 	const { handle, permission } = collaborator;
 	const key = `collab:${handle}`;
+	const [promoting, setPromoting] = useState(false);
+	const select = useRef<HTMLSelectElement>(null);
 	const setPermission = (next: Level) =>
 		run(key, () => manage.setCollaborator(repo, handle, next)).then(async (ok) => {
+			setPromoting(false);
 			if (!ok) return;
 			await reload();
 			onSaved();
 		});
+	const choose = (next: Level) =>
+		next === "admin" && permission !== "admin" ? setPromoting(true) : void setPermission(next);
 	const remove = () =>
 		run(key, () => manage.removeCollaborator(repo, handle)).then(async (ok) => {
 			if (!ok) return;
@@ -401,31 +413,50 @@ function CollaboratorRow({
 					</span>
 				</div>
 				<div className={ROW_ACTIONS}>
-					<label className="sr-only" htmlFor={`collab-${handle}`}>
-						{handle}'s permission
-					</label>
-					<NativeSelect
-						id={`collab-${handle}`}
-						value={permission}
-						disabled={busy === key}
-						aria-describedby={`collab-${handle}-means`}
-						onChange={(event) => void setPermission(event.target.value as Level)}
-					>
-						<LevelOptions />
-					</NativeSelect>
-					<span className={SAVED_NOTE} role="status">
-						{saved ? "Saved" : ""}
-					</span>
-					<ConfirmButton
-						id={key}
-						confirming={confirming}
-						setConfirming={setConfirming}
-						label="Remove"
-						question={`Remove ${handle}? They and their agents lose ${label(permission)} access to ${repo}.`}
-						keep={`Keep ${handle}`}
-						busy={busy === key}
-						onConfirm={remove}
-					/>
+					{promoting ? (
+						<Question
+							question={adminQuestion(handle, repo)}
+							yes="Yes, make admin"
+							keep={`Keep ${handle} at ${label(permission)}`}
+							yesVariant="primary"
+							busy={busy === key}
+							onYes={() => void setPermission("admin")}
+							onKeep={() => {
+								setPromoting(false);
+								// Focus goes back to the select, once it's back.
+								requestAnimationFrame(() => select.current?.focus());
+							}}
+						/>
+					) : (
+						<>
+							<label className="sr-only" htmlFor={`collab-${handle}`}>
+								{handle}'s permission
+							</label>
+							<NativeSelect
+								ref={select}
+								id={`collab-${handle}`}
+								value={permission}
+								disabled={busy === key}
+								aria-describedby={`collab-${handle}-means`}
+								onChange={(event) => choose(event.target.value as Level)}
+							>
+								<LevelOptions />
+							</NativeSelect>
+							<span className={SAVED_NOTE} role="status">
+								{saved ? "Saved" : ""}
+							</span>
+							<ConfirmButton
+								id={key}
+								confirming={confirming}
+								setConfirming={setConfirming}
+								label="Remove"
+								question={`Remove ${handle}? They and their agents lose ${label(permission)} access to ${repo}.`}
+								keep={`Keep ${handle}`}
+								busy={busy === key}
+								onConfirm={remove}
+							/>
+						</>
+					)}
 				</div>
 			</div>
 			{errorFor(key)}

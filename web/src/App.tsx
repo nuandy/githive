@@ -147,6 +147,9 @@ export function App() {
 // The history entry the visitor's Sign in pushes: Back from the sign-in screen returns to what they were reading.
 const SIGNING_IN = "githive:signing-in";
 
+/** What the sign-in card says to someone signed out who opened a repo they can't read. */
+export const unreadableRepoNotice = (repo: string) => `${repo} is private, or doesn't exist. Sign in to see it.`;
+
 /**
  * Someone signed out: a public repo's pages when the address names one, and the sign-in screen otherwise, or once
  * they ask to sign in there (or their session ended there). Going anywhere else from it, Back included, reads on.
@@ -172,9 +175,9 @@ function SignedOut({
 	}, []);
 	// Signing in returns to the page they were on; not to the fragment a request to join came back with.
 	const hash = signinAccountOf(window.location.hash) ? "" : window.location.hash;
-	const signIn = <SignIn {...options} hash={hash} />;
+	const signIn = (notice = options.notice) => <SignIn {...options} notice={notice} hash={hash} />;
 	const reading = route.page === "repo" || route.page === "change";
-	if (!reading || askedAt === place) return signIn;
+	if (!reading || askedAt === place) return signIn();
 	const askToSignIn = () => {
 		window.history.pushState({ [SIGNING_IN]: true }, "");
 		setAskedAt(place);
@@ -182,7 +185,7 @@ function SignedOut({
 	return <Visitor route={route} onSignIn={askToSignIn} signIn={signIn} />;
 }
 
-/** A public repo, read by someone signed out. A repo they can't read asks them to sign in. */
+/** A public repo, read by someone signed out. A repo they can't read asks them to sign in, saying why. */
 function Visitor({
 	route,
 	onSignIn,
@@ -190,7 +193,7 @@ function Visitor({
 }: {
 	route: Extract<Route, { page: "repo" | "change" }>;
 	onSignIn: () => void;
-	signIn: ReactNode;
+	signIn: (notice: string) => ReactNode;
 }) {
 	const changeId = route.page === "change" ? route.change : null;
 	const data = useRepoData(route.repo, changeId);
@@ -200,7 +203,7 @@ function Visitor({
 		document.title = title;
 	}, [title]);
 	const view = repoViewOf(route);
-	if (data.snapshot.error === SIGNED_OUT_MESSAGE) return signIn;
+	if (data.snapshot.error === SIGNED_OUT_MESSAGE) return signIn(unreadableRepoNotice(route.repo));
 	// An owner's page is for people signed in, so the trail names the owner without leading there.
 	const trail = crumbs.map((crumb) => (crumb.repo ? crumb : { label: crumb.label }));
 	return (

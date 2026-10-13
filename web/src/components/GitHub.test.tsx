@@ -6,7 +6,7 @@ import { repoSnapshot } from "../test/fixtures";
 import { ChangePage } from "./ChangePage";
 import { GitHubLink } from "./GitHubLink";
 import { createDraftStore, draftKey } from "../lib/settingsDrafts";
-import { githubDraft, githubInput, GitHubSection } from "./GitHubSettings";
+import { disconnects, githubDraft, githubForm, githubInput, GitHubSection, savedLink } from "./GitHubSettings";
 import { ChangeLabels, githubTerms } from "./RepoTabs";
 
 // A repo connected to GitHub shows it by its name: the GitHub repo, and in pr
@@ -196,5 +196,50 @@ describe("the GitHub settings", () => {
 		expect(text(html)).toContain("Nothing reaches GitHub's main until someone merges it there.");
 		expect(text(html)).toContain("Pushed to main After every landing GitHive pushes main to GitHub");
 		expect(text(section(undefined))).toContain("Connect");
+	});
+
+	it("asks before a repo left blank disconnects it: Save asks Disconnect's question", () => {
+		expect(disconnects({ repo: " ", sync: "pr", trust: true }, github())).toBe(true);
+		expect(disconnects({ repo: "acme/shop", sync: "mirror", trust: true }, github())).toBe(false);
+		expect(disconnects({ repo: "", sync: "pr", trust: true }, undefined)).toBe(false);
+		const drafts = createDraftStore();
+		const form = { ...githubDraft(github()), repo: "", editing: true, touched: true };
+		drafts.set(draftKey("acme/web", "github"), { draft: form, base: githubForm(github()), dirty: true });
+		const html = section(github(), drafts);
+		expect(html).toMatch(/<button[^>]*type="submit"[^>]*>Disconnect…<\/button>/);
+		expect(text(html)).toContain("Left blank, it disconnects acme/shop: Save asks first.");
+	});
+
+	it("shows the link as saved until the repo is read again", () => {
+		const was = github({ pull: { number: 128, url: "https://github.com/acme/shop/pull/128" } });
+		const mirrored = savedLink(was, { github_sync: "mirror" }, { repo: "acme/shop", sync: "mirror", trust: true });
+		expect(mirrored).toEqual({ ...was, sync: "mirror" });
+		expect(savedLink(was, { github: "acme/new" }, { repo: "acme/new", sync: "pr", trust: false })).toEqual({
+			repo: "acme/new",
+			sync: "pr",
+			trust: false,
+			inbound: true,
+			pull: null,
+		});
+		expect(savedLink(was, { github: "" }, { repo: "", sync: "pr", trust: true })).toBeUndefined();
+
+		const drafts = createDraftStore();
+		const hold = (link: RepoGitHub | undefined) =>
+			drafts.set(draftKey("acme/web", "github"), {
+				draft: githubForm(link, true),
+				base: githubForm(link, true),
+				dirty: false,
+				against: githubForm(was),
+			});
+		hold(mirrored);
+		// The repo's settings still say a pull request: the section says what was saved, with nothing more to save.
+		expect(text(section(was, drafts))).toContain("Pushed to main after every landing");
+		expect(text(section(was, drafts))).toContain("Pull request #128");
+		hold(undefined);
+		const disconnected = section(was, drafts);
+		expect(disconnected).toContain('id="github-repo"');
+		expect(disconnected).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*>Connect<\/button>/);
+		// Read again, it shows them as they are.
+		expect(text(section(github({ repo: "acme/other" }), drafts))).toContain("Connected to acme/other");
 	});
 });

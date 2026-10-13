@@ -6,7 +6,14 @@ import { newRepoInput, NewRepoView } from "./NewRepoPage";
 import { promotionQuestion, roleMeans } from "./OrgMembers";
 import { type OrgActions, OrgView } from "./OrgPage";
 import { OrgsView } from "./OrgsPage";
-import { DangerZone, GeneralSection, RepoAccessBox, type RepoManageApi, VisibilityToggle } from "./RepoAdmin";
+import {
+	adminQuestion,
+	DangerZone,
+	GeneralSection,
+	RepoAccessBox,
+	type RepoManageApi,
+	VisibilityToggle,
+} from "./RepoAdmin";
 import { RepoPage } from "./RepoPage";
 
 const noop = async () => ({}) as never;
@@ -233,6 +240,10 @@ describe("an organization's page", () => {
 		);
 		expect(promotionQuestion("sol", "acme", "admin")).toMatch(/^Make sol an admin of acme\? Admins can delete/);
 		expect(roleMeans("admin", { defaultPermission: "write" })).toMatch(/^Admin: add and remove people/);
+		// A repo's collaborator too.
+		expect(adminQuestion("sol", "acme/storefront")).toBe(
+			"Make sol an admin of acme/storefront? Admins change settings and collaborators, and can delete the repo.",
+		);
 	});
 
 	it("shows members the people and teams, without managing, and lets them leave", () => {

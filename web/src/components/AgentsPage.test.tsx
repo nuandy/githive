@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { Connection, MyAgent } from "../api";
 import { calendarDate } from "../lib/myAgents";
-import { NOW, ago, visibleText } from "../test/fixtures";
+import { NOW, ago, inlineText, visibleText } from "../test/fixtures";
 import { AgentLimitsPanel, LimitField, nextLimit } from "./AgentLimitsPanel";
-import { TokenMade, revokeWords } from "./AgentRow";
+import { AgentCard, TokenMade, revokeWords } from "./AgentRow";
 import { ConnectSection } from "./AgentsConnect";
 import { AgentsView, type AgentActions } from "./AgentsPage";
 import { CopyBlock } from "./CopyBlock";
@@ -175,6 +175,29 @@ describe("Your agents", () => {
 		expect(text).toContain("New token…");
 		// The expiry is chosen in the new token's dialog, not beside the agent as if it were the agent's.
 		expect(html).not.toContain("Expires in 90 days");
+	});
+
+	it("asks before disconnecting an app, saying it can't act as the agent until it signs in again", () => {
+		const html = renderToStaticMarkup(
+			<AgentCard
+				agent={agents[0]!}
+				fullName="ada/builder"
+				apps={connections}
+				error={null}
+				setError={() => undefined}
+				client="claude-code"
+				origin="https://githive.app"
+				actions={actions}
+				run={async () => true}
+				busy={null}
+				confirming="conn:g1"
+				setConfirming={() => undefined}
+				now={NOW}
+			/>,
+		);
+		expect(inlineText(html)).toContain("Disconnect Claude Code? It can't act as ada/builder until it signs in again.");
+		expect(html).toMatch(/<button[^>]*>Keep it connected<\/button>/);
+		expect(html).toMatch(/<button[^>]*>Yes, disconnect<\/button>/);
 	});
 
 	it("says an agent with no tokens signs in from its connected app, or just that it has none yet", () => {

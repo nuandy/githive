@@ -97,6 +97,18 @@ export function problemsStatus(problems: FieldProblem[]): ReactNode {
 	);
 }
 
+/** What a form's last save said: what it did (in words for the save bar), or why it failed. */
+export type Said = { saved: ReactNode } | { failed: string } | null;
+
+/**
+ * What a save bar says: what a save did, politely (`status`); why it failed, or the form's problems, at once (`alert`).
+ */
+export function saveBarSays(said: Said, problems: FieldProblem[] = []): { status?: ReactNode; alert?: ReactNode } {
+	if (problems.length) return { alert: problemsStatus(problems) };
+	if (!said) return {};
+	return "failed" in said ? { alert: failedStatus(said.failed) } : { status: said.saved };
+}
+
 /** What a save bar says once saved, or why a save failed. */
 export function savedStatus(words: ReactNode) {
 	return (
