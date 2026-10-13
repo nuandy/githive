@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { MyAgent, OrgDetail, RepoAccess, RepoSnapshot, SettingsInput } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { splitRepo } from "../lib/repoName";
-import { href, SETTINGS_SECTIONS, type SettingsSection } from "../lib/routes";
+import { href, SECTION_TITLES, SETTINGS_SECTIONS, type SettingsSection } from "../lib/routes";
 import { type DraftStore, dirtySections, settingsDrafts } from "../lib/settingsDrafts";
 import { holderOptions, roleOptions } from "../lib/tokens";
 import { cn } from "../lib/utils";
@@ -18,17 +18,6 @@ import { TERMS } from "./ui/manage";
 // A repo's Settings, for its admins: a page per section, chosen from a nav beside them (a strip above them on a narrow
 // window), each saving on its own. Edits are held for the session (settingsDrafts), so moving between sections or tabs
 // keeps them; a section with edits has a dot in the nav, and closing the window with any asks first.
-
-/** Each section's name, in the nav and the window's title. */
-export const SECTION_TITLES: Record<SettingsSection, string> = {
-	general: "General & access",
-	review: "Review",
-	"path-rules": "Path rules",
-	"branch-rules": "Branch rules",
-	checks: "Checks",
-	github: "GitHub",
-	"danger-zone": "Danger zone",
-};
 
 /** The sections a repo has: all of them once GitHive has started on it; before, only who may do what, and deleting. */
 export const sectionsOf = (started: boolean): readonly SettingsSection[] =>

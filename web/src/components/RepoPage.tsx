@@ -18,21 +18,18 @@ import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { canVote, canWrite } from "../lib/permissions";
 import { GitHubLink } from "./GitHubLink";
-import { RepoAccessBox, type RepoManageApi } from "./RepoAdmin";
-import { RepoSettings } from "./RepoSettings";
+import type { RepoManageApi } from "./RepoAdmin";
 import { openOn, parseFilter } from "../lib/changeList";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab, type SettingsSection } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { messageOf } from "../lib/errors";
 import { cn } from "../lib/utils";
-import { AgentsTab } from "./Agents";
-import { ClaimsTab } from "./ClaimsMap";
-import { HistoryTab } from "./History";
 import { HiveTab } from "./HiveTab";
 import type { HostedAgentsApi } from "./HostedAgents";
-import { CodeTab, type CodeApi } from "./CodeBrowser";
+import type { CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
+import { Lazy, lazyPart } from "./Lazy";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
 import { COLUMN, Main } from "./Page";
@@ -42,6 +39,15 @@ import type { TabItem } from "./Tabs";
 import { Box, Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Empty } from "./ui/empty";
+
+// The tabs a visit to a repo mostly doesn't open load as they're first shown (components/Lazy.tsx): its settings, its
+// code with Markdown and highlighting, its history, claims and agents. The Hive and Changes come with the page.
+const RepoSettings = lazyPart(() => import("./RepoSettings").then((module) => module.RepoSettings));
+const RepoAccessBox = lazyPart(() => import("./RepoAdmin").then((module) => module.RepoAccessBox));
+const CodeTab = lazyPart(() => import("./CodeBrowser").then((module) => module.CodeTab));
+const HistoryTab = lazyPart(() => import("./History").then((module) => module.HistoryTab));
+const ClaimsTab = lazyPart(() => import("./ClaimsMap").then((module) => module.ClaimsTab));
+const AgentsTab = lazyPart(() => import("./Agents").then((module) => module.AgentsTab));
 
 /** The Agents tab's hosted agents: shown when the dashboard can read them, started and stopped by writers. */
 function hostedAgentsApi(api: RepoPageApi, writes: boolean): HostedAgentsApi | undefined {
@@ -234,14 +240,16 @@ function RepoTabContent({
 }: RepoTabContentProps) {
 	if (current === "code") {
 		return (
-			<CodeTab
-				repo={repo}
-				path={view.kind === "repo" ? (view.path ?? "") : ""}
-				refParam={view.kind === "repo" ? view.ref : undefined}
-				branch={branch}
-				api={api}
-				snapshot={snapshot}
-			/>
+			<Lazy>
+				<CodeTab
+					repo={repo}
+					path={view.kind === "repo" ? (view.path ?? "") : ""}
+					refParam={view.kind === "repo" ? view.ref : undefined}
+					branch={branch}
+					api={api}
+					snapshot={snapshot}
+				/>
+			</Lazy>
 		);
 	}
 	if (current === "settings") return settings ?? <NothingYet repo={repo} />;
@@ -275,11 +283,23 @@ function RepoTabContent({
 		case "hive":
 			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} writes={canWrite(access?.level)} />;
 		case "history":
-			return <HistoryTab repo={repo} branch={branch} api={api} />;
+			return (
+				<Lazy>
+					<HistoryTab repo={repo} branch={branch} api={api} />
+				</Lazy>
+			);
 		case "claims":
-			return <ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
+			return (
+				<Lazy>
+					<ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />
+				</Lazy>
+			);
 		case "agents":
-			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
+			return (
+				<Lazy>
+					<AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />
+				</Lazy>
+			);
 	}
 	return (
 		<ChangesTab
@@ -547,23 +567,39 @@ export function RepoPage({
 	let settings: ReactNode = null;
 	if (manage && access?.level === "admin")
 		settings = (
-			<RepoSettings
-				repo={repo}
-				branch={branch}
-				section={view.kind === "repo" ? (view.section ?? "general") : "general"}
-				snapshot={snapshot}
-				access={access}
-				manage={manage}
-				{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
-				onAccessChanged={() => onAccessChanged?.()}
-				onDeleted={() => onDeleted?.()}
-			/>
+			<Lazy>
+				<RepoSettings
+					repo={repo}
+					branch={branch}
+					section={view.kind === "repo" ? (view.section ?? "general") : "general"}
+					snapshot={snapshot}
+					access={access}
+					manage={manage}
+					{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
+					onAccessChanged={() => onAccessChanged?.()}
+					onDeleted={() => onDeleted?.()}
+				/>
+			</Lazy>
 		);
 	else if (snapshot)
 		settings = (
-			<SettingsTab snapshot={snapshot} access={manage ? <RepoAccessBox repo={repo} access={access} /> : null} />
+			<SettingsTab
+				snapshot={snapshot}
+				access={
+					manage ? (
+						<Lazy>
+							<RepoAccessBox repo={repo} access={access} />
+						</Lazy>
+					) : null
+				}
+			/>
 		);
-	else if (manage) settings = <RepoAccessBox repo={repo} access={access} />;
+	else if (manage)
+		settings = (
+			<Lazy>
+				<RepoAccessBox repo={repo} access={access} />
+			</Lazy>
+		);
 	const site = access?.visibility === "public";
 	return (
 		<Main className="flex flex-1 flex-col">

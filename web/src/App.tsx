@@ -14,19 +14,13 @@ import {
 	type Me,
 	type RepoSnapshot,
 } from "./api";
-import { AdminPage } from "./components/AdminPage";
-import { AgentsPage } from "./components/AgentsPage";
+import { DashboardKeys } from "./components/DashboardKeys";
 import { InboxPage } from "./components/InboxPage";
-import { DashboardKeys } from "./components/Keyboard";
-import { NewRepoPage } from "./components/NewRepoPage";
-import { OrgPage } from "./components/OrgPage";
-import { OrgsPage } from "./components/OrgsPage";
-import { EmptyPage, Shell, SkipLink } from "./components/Page";
+import { Lazy, LoadingLine, lazyPart } from "./components/Lazy";
+import { EmptyPage, Page, Shell, SkipLink } from "./components/Page";
 import { PageBoundary } from "./components/PageBoundary";
-import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
 import { RepoPage, type RepoView } from "./components/RepoPage";
-import { SECTION_TITLES } from "./components/RepoSettings";
 import { TopBar, type Crumb } from "./components/TopBar";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
@@ -38,7 +32,7 @@ import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { isLoose, splitRepo } from "./lib/repoName";
 import { buildRepoRows } from "./lib/repos";
-import { href, parseRoute, type RepoTab, type Route } from "./lib/routes";
+import { href, parseRoute, type RepoTab, type Route, SECTION_TITLES } from "./lib/routes";
 import {
 	type Provider,
 	inviteOf,
@@ -48,6 +42,31 @@ import {
 	withoutSigninError,
 } from "./lib/session";
 import { cn } from "./lib/utils";
+
+// Pages most visits never reach load as they're first shown (components/Lazy.tsx).
+const AdminPage = lazyPart(() => import("./components/AdminPage").then((module) => module.AdminPage));
+const AgentsPage = lazyPart(() => import("./components/AgentsPage").then((module) => module.AgentsPage));
+const NewRepoPage = lazyPart(() => import("./components/NewRepoPage").then((module) => module.NewRepoPage));
+const OrgPage = lazyPart(() => import("./components/OrgPage").then((module) => module.OrgPage));
+const OrgsPage = lazyPart(() => import("./components/OrgsPage").then((module) => module.OrgsPage));
+// Signing in is once in a while: its screen loads as it's needed, while it asks how one may sign in.
+const SignIn = lazyPart(() => import("./components/SignIn").then((module) => module.SignIn));
+
+/** A page that loads as it's first shown: its frame says "Loading…" until it's here. */
+function LazyPage({ children }: { children: ReactNode }) {
+	return (
+		<Lazy
+			className="flex flex-1 flex-col"
+			fallback={
+				<Page>
+					<LoadingLine />
+				</Page>
+			}
+		>
+			{children}
+		</Lazy>
+	);
+}
 
 /** What couldn't be refreshed, in a bar under the top bar: it folds open, and folds away once all is well again. */
 function PageErrors({ errors }: { errors: string[] }) {
@@ -172,7 +191,17 @@ function SignedOut({
 	}, []);
 	// Signing in returns to the page they were on; not to the fragment a request to join came back with.
 	const hash = signinAccountOf(window.location.hash) ? "" : window.location.hash;
-	const signIn = <SignIn {...options} hash={hash} />;
+	const signIn = (
+		<Lazy
+			fallback={
+				<main id="main" className="grid min-h-dvh place-items-center bg-background">
+					<LoadingLine />
+				</main>
+			}
+		>
+			<SignIn {...options} hash={hash} />
+		</Lazy>
+	);
 	const reading = route.page === "repo" || route.page === "change";
 	if (!reading || askedAt === place) return signIn;
 	const askToSignIn = () => {
@@ -293,6 +322,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else {
 		page = <PageNotFound />;
 	}
+	if (LAZY_PAGES.has(route.page)) page = <LazyPage>{page}</LazyPage>;
 
 	return (
 		<Shell>
@@ -325,6 +355,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		</Shell>
 	);
 }
+
+/** The pages that load as they're first shown. */
+const LAZY_PAGES = new Set<Route["page"]>(["admin", "new-repo", "orgs", "org", "agents-settings"]);
 
 /**
  * A repo's data for its page: its snapshot, audit, the reader's access, and the change shown, if any. While the

@@ -25,12 +25,11 @@ import { type ChangeTab, href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { Awareness } from "./Awareness";
 import { type MergeAnswer, type Outcome, OutcomeLine, ReleaseDialog } from "./ChangeActions";
-import { ChangeFiles } from "./ChangeFiles";
 import { ChangeSidebar, type ChangeRecord } from "./ChangeSidebar";
-import { ChangeCommits } from "./Commits";
 import { ConflictPanel } from "./ConflictPanel";
 import { type ChangeEnding, DecisionBox, type PageTarget } from "./DecisionBox";
 import { Icon } from "./Icon";
+import { Lazy, lazyPart } from "./Lazy";
 import { SiteLink } from "./SiteLink";
 import { Tabs } from "./Tabs";
 import { Timeline, TimelineEntry, TimelineList } from "./Timeline";
@@ -82,6 +81,11 @@ export interface ChangePageProps {
 	/** The time leases are told against (tests fix it). */
 	now?: number;
 }
+
+// Its other tabs, its commits and its files (a diff's worth of markup), load as they're first shown
+// (components/Lazy.tsx).
+const ChangeCommits = lazyPart(() => import("./Commits").then((module) => module.ChangeCommits));
+const ChangeFiles = lazyPart(() => import("./ChangeFiles").then((module) => module.ChangeFiles));
 
 /** Whether a claim is GitHub's change, brought back by githive-github. */
 export const isGitHubClaim = (claim: Pick<Claim, "agent" | "source">) => isFromGitHub(claim);
@@ -462,20 +466,24 @@ export function ChangePage({
 			history === null ? (
 				<p className="my-[1em] text-muted-foreground">This change's commits couldn't be read.</p>
 			) : (
-				<ChangeCommits history={history} repo={repo} />
+				<Lazy>
+					<ChangeCommits history={history} repo={repo} />
+				</Lazy>
 			);
 	else if (tab === "files")
 		content = (
-			<ChangeFiles
-				repo={repo}
-				changeId={changeId}
-				diff={diff}
-				error={diffError}
-				onRetry={onDiffRetry}
-				head={claim?.head}
-				into={branch}
-				file={file}
-			/>
+			<Lazy>
+				<ChangeFiles
+					repo={repo}
+					changeId={changeId}
+					diff={diff}
+					error={diffError}
+					onRetry={onDiffRetry}
+					head={claim?.head}
+					into={branch}
+					file={file}
+				/>
+			</Lazy>
 		);
 	else content = conversation;
 

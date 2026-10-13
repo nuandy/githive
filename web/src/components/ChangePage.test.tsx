@@ -1,9 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { ChangeDiff, ChangeHistory, MergeCheck, RepoLanding, RepoSnapshot } from "../api";
 import type { Claim, Vote } from "../lib/claimStatus";
 import { ago, historyFixture, inlineText, repoSnapshot as snapshot, visibleText } from "../test/fixtures";
 import { ChangePage, type ChangePageProps } from "./ChangePage";
+import { preloadLazyParts } from "./Lazy";
+
+// The parts a page loads as they're first shown (Lazy.tsx), loaded, so they draw as a page does once they've come.
+beforeAll(preloadLazyParts);
 
 // A change's page: where it stands, and what a person may do about it from there.
 

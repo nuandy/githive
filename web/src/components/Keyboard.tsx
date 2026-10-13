@@ -1,18 +1,12 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
-import type { RepoSnapshot } from "../api";
 import { useReturnFocus } from "../hooks/useReturnFocus";
-import { useShortcuts } from "../hooks/useShortcuts";
-import { claimTitle } from "../lib/claimStatus";
 import { filterPalette, type PaletteItem, paletteItems } from "../lib/palette";
-import { href, type Route } from "../lib/routes";
-import type { Shortcut } from "../lib/shortcuts";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
-import { repoTabs } from "./RepoPage";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 // What the keyboard can do beyond Tab: a palette (⌘K or Ctrl-K) that jumps to a repo, an open change or a page, and
-// the list of shortcuts (?).
+// the list of shortcuts (?). DashboardKeys listens for the keys, and loads these as they're first opened.
 
 const KIND: Record<PaletteItem["kind"], { icon: IconName; word: string }> = {
 	change: { icon: "pull", word: "Change" },
@@ -36,14 +30,15 @@ export function Kbd({ children }: { children: string }) {
 export function CommandPalette({
 	open,
 	onOpenChange,
-	items,
+	places,
 	go = (to) => {
 		window.location.hash = to;
 	},
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	items: PaletteItem[];
+	/** What it offers: the reader's repos, the repo shown and its open changes, and which pages are theirs. */
+	places: Parameters<typeof paletteItems>[0];
 	/** Goes to a place's address (tests watch it). */
 	go?: (href: string) => void;
 }) {
@@ -52,7 +47,7 @@ export function CommandPalette({
 	const went = useRef(false);
 	const list = useRef<HTMLUListElement>(null);
 	const id = useId();
-	const shown = filterPalette(items, query);
+	const shown = filterPalette(open ? paletteItems(places) : [], query);
 	const chosen = Math.min(active, Math.max(shown.length - 1, 0));
 	// It has no trigger: closed, focus goes back to what had it.
 	const returnFocus = useReturnFocus(open);
@@ -222,67 +217,5 @@ export function ShortcutsHelp({ open, onOpenChange }: { open: boolean; onOpenCha
 				</dl>
 			</DialogContent>
 		</Dialog>
-	);
-}
-
-/**
- * The dashboard's keyboard: its shortcuts, the palette they open and the list of them (which the user menu opens
- * too, through `help`).
- */
-export function DashboardKeys({
-	route,
-	repos,
-	snapshot,
-	people,
-	operator = false,
-	help,
-	onHelp,
-}: {
-	route: Route;
-	/** The reader's repos, most recently active first. */
-	repos: string[];
-	/** The repo shown's snapshot, once read. */
-	snapshot: RepoSnapshot | undefined;
-	/** A person signed in (not an Access operator). */
-	people: boolean;
-	/** One of GitHive's operators, through Cloudflare Access. */
-	operator?: boolean;
-	help: boolean;
-	onHelp: (open: boolean) => void;
-}) {
-	const [palette, setPalette] = useState(false);
-	const repo = route.page === "repo" || route.page === "change" ? route.repo : undefined;
-	useShortcuts((shortcut: Shortcut) => {
-		switch (shortcut.kind) {
-			case "palette":
-				setPalette((open) => !open);
-				return true;
-			case "help":
-				onHelp(true);
-				return true;
-			case "go":
-				window.location.hash = shortcut.to === "inbox" ? href.inbox() : href.repos();
-				return true;
-			case "search": {
-				const field = route.page === "repos" ? document.getElementById("repo-search") : null;
-				field?.focus();
-				return !!field;
-			}
-			case "tab": {
-				const tab = repo ? repoTabs(repo, snapshot)[shortcut.index] : undefined;
-				if (!tab || tab.unavailable) return false;
-				window.location.hash = tab.href;
-				return true;
-			}
-		}
-	});
-	const changes =
-		repo && snapshot ? snapshot.claims.map((claim) => ({ change: claim.change, title: claimTitle(claim) })) : [];
-	const items = palette ? paletteItems({ repos, ...(repo ? { repo } : {}), changes, people, operator }) : [];
-	return (
-		<>
-			<CommandPalette open={palette} onOpenChange={setPalette} items={items} />
-			<ShortcutsHelp open={help} onOpenChange={onHelp} />
-		</>
 	);
 }
