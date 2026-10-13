@@ -15,9 +15,7 @@ export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loa
 		<Page id="main">
 			<div className="mb-4">
 				<h1 className="text-display tracking-[-0.01em]">Inbox</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					Changes the agents can't move forward without you, in every repo.
-				</p>
+				<p className="mt-1 mb-0 text-muted-foreground">Changes waiting on you, in every repo.</p>
 			</div>
 			<InboxBody groups={groups} loaded={loaded} error={error} />
 		</Page>
