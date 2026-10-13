@@ -344,8 +344,9 @@ export function HiveMap({
 				<PopoverAnchor virtualRef={anchor} />
 				{openedCell ? (
 					<PopoverContent
-						side="right"
-						align="start"
+						// Beside the cell where there's room, and under it on a phone.
+						side={wide(anchor.current) ? "right" : "bottom"}
+						align={wide(anchor.current) ? "start" : "center"}
 						collisionPadding={12}
 						aria-label={cellPlace(openedCell)}
 						onInteractOutside={() => {
@@ -372,6 +373,9 @@ export function HiveMap({
 		</section>
 	);
 }
+
+/** Whether the window a cell is in has room for its details beside it. */
+const wide = (element: Element | null) => (element?.ownerDocument.defaultView?.innerWidth ?? 1280) >= 640;
 
 const ARROWS: Record<string, Direction> = {
 	ArrowUp: "up",
