@@ -79,10 +79,32 @@ export function claimApprovalLabel(claim: Claim): string {
 	return `${approval.approvals}/${approval.required} approvals`;
 }
 
-/** The claim's title: the first line of what the agent set out to do, or its id. */
+/** The longest title a row shows before cutting it at a word. */
+const TITLE_MAX = 64;
+
+/**
+ * A short title from an intent: its first line, up to its first sentence's end or a colon that ends a lead-in
+ * ("Wire up the game src/main.js: put the game together…"), cut at a word if still long.
+ */
+export function shortTitle(intent: string): string {
+	const line = (intent.split("\n")[0] ?? "").trim();
+	let end = line.length;
+	const sentence = /[.!?](\s|$)/.exec(line);
+	if (sentence) end = sentence.index;
+	// A colon this far in ends a lead-in; one nearer the start is a label ("Fix: …"), part of the title.
+	const colon = line.indexOf(": ");
+	if (colon >= 12 && colon < end) end = colon;
+	let title = line.slice(0, end).trim();
+	if (title.length > TITLE_MAX) {
+		const cut = title.lastIndexOf(" ", TITLE_MAX - 1);
+		title = `${title.slice(0, cut > TITLE_MAX / 2 ? cut : TITLE_MAX - 1)}…`;
+	}
+	return title.replace(/[,;:]$/, "");
+}
+
+/** The claim's title: a short one from what the agent set out to do, or its id. */
 export function claimTitle(claim: Claim): string {
-	const first = (claim.intent ?? "").split("\n")[0]?.trim();
-	return first || claim.change;
+	return shortTitle(claim.intent ?? "") || claim.change;
 }
 
 export function claimAgent(claim: Claim): string {

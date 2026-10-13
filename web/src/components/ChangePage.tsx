@@ -6,7 +6,7 @@ import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
 import type { ChangeStatus, Tone } from "../lib/changeStatus";
-import { claimApprovalLabel, claimStatus, votesForClaim, type Claim } from "../lib/claimStatus";
+import { claimApprovalLabel, claimStatus, shortTitle, votesForClaim, type Claim } from "../lib/claimStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -441,7 +441,7 @@ export function ChangePage({
 	const ending = history ? changeEnding(history) : null;
 	const status = statusOf(claim, history);
 	const agent = record?.agent || ending?.release.agent || identityName(record?.by) || "agent";
-	const title = (record?.intent ?? "").split("\n")[0]?.trim() || changeId;
+	const title = shortTitle(record?.intent ?? "") || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	// A change merging a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;

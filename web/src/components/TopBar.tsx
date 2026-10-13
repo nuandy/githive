@@ -156,8 +156,9 @@ function Breadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
 						<li
 							key={`${index}:${crumb.label}`}
 							className={cn(
-								"flex min-w-0 items-center whitespace-nowrap before:mx-2 before:text-border-strong before:content-['/']",
-								last && "overflow-hidden",
+								"flex items-center whitespace-nowrap before:mx-2 before:text-border-strong before:content-['/']",
+								// Only the last place gives up room, cut short; the ones before it would overlap it.
+								last ? "min-w-0 overflow-hidden" : "shrink-0",
 								index < crumbs.length - 2 && "to-560:hidden",
 							)}
 						>

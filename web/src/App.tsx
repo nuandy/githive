@@ -32,7 +32,7 @@ import { useChanged } from "./hooks/useChanged";
 import { useLingering } from "./hooks/useLingering";
 import { useLiveFeed } from "./hooks/useLiveFeed";
 import { usePoll } from "./hooks/usePoll";
-import { claimTitle } from "./lib/claimStatus";
+import { claimTitle, shortTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type Route } from "./lib/routes";
@@ -392,8 +392,7 @@ function repoViewOf(route: Route): RepoView | null {
 function changeTitle(changeId: string, snapshot: RepoSnapshot | undefined, history: ChangeHistory | undefined): string {
 	const claim = snapshot?.claims.find((candidate) => candidate.change === changeId);
 	if (claim) return claimTitle(claim);
-	const ended = history?.claim?.intent?.split("\n")[0]?.trim();
-	return ended || changeId;
+	return shortTitle(history?.claim?.intent ?? "") || changeId;
 }
 
 /** The breadcrumbs and the window title for a route. */

@@ -5,6 +5,7 @@ import {
 	claimApprovalLabel,
 	claimTitle,
 	claimStatus,
+	shortTitle,
 	votesForClaim,
 	shardingSummary,
 	votesShardingSummary,
@@ -55,6 +56,12 @@ describe("changes", () => {
 	it("names and titles a claim", () => {
 		expect(claimTitle(claim)).toBe("Rewrite the C section");
 		expect(claimTitle({ ...claim, intent: "" })).toBe("c-1");
+		const paragraph =
+			"BaseServlet calls exactly one controller method per request: do<HttpMethod> (doGet, doPost, ...) when the " +
+			"controller defines it, otherwise doMain. Previously every public method starting with \"do\" ran.";
+		expect(claimTitle({ ...claim, intent: paragraph })).toBe(
+			"BaseServlet calls exactly one controller method per request",
+		);
 		expect(claimAgent(claim)).toBe("agent-c");
 		expect(claimAgent({ ...claim, agent: "" })).toBe("agent-c");
 	});
@@ -122,5 +129,26 @@ describe("how a repo keeps its votes", () => {
 			sharded: true,
 		});
 		expect(recordsBadge({})).toBeNull();
+	});
+});
+
+const BRIEF =
+	"Wire up the game src/main.js: put the game together as README.md describes: today's puzzle, progress loaded and saved after every word, the board, typing and controls.";
+
+describe("a short title", () => {
+	it("stops at a colon that ends a lead-in, so a hosted builder's brief doesn't become the headline", () => {
+		expect(shortTitle(BRIEF)).toBe("Wire up the game src/main.js");
+	});
+
+	it("keeps a label's colon near the start, and stops at the first sentence", () => {
+		expect(shortTitle("Fix: an IPv6 Host header loses its port. It drops it.")).toBe(
+			"Fix: an IPv6 Host header loses its port",
+		);
+	});
+
+	it("cuts a long sentence at a word", () => {
+		const title = shortTitle(`Add ${"very ".repeat(30)}long tests`);
+		expect(title.length).toBeLessThanOrEqual(65);
+		expect(title.endsWith("…")).toBe(true);
 	});
 });

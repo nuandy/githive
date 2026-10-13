@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { ago } from "../test/fixtures";
-import { freeWork, goalStatus, hiveGoals, rejections, shortTitle, stageCounts } from "./goals";
+import { freeWork, goalStatus, hiveGoals, rejections, stageCounts } from "./goals";
 
 type Claim = RepoSnapshot["claims"][number];
+
+const BRIEF =
+	"Wire up the game src/main.js: put the game together as README.md describes: today's puzzle, progress loaded and saved after every word, the board, typing and controls.";
 
 const claim = (change: string, extra: Partial<Claim> = {}): Claim => ({
 	change,
@@ -15,27 +18,6 @@ const claim = (change: string, extra: Partial<Claim> = {}): Claim => ({
 	head: null,
 	approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 	...extra,
-});
-
-const BRIEF =
-	"Wire up the game src/main.js: put the game together as README.md describes: today's puzzle, progress loaded and saved after every word, the board, typing and controls.";
-
-describe("a goal's short title", () => {
-	it("stops at a colon that ends a lead-in, so a hosted builder's brief doesn't become the headline", () => {
-		expect(shortTitle(BRIEF)).toBe("Wire up the game src/main.js");
-	});
-
-	it("keeps a label's colon near the start, and stops at the first sentence", () => {
-		expect(shortTitle("Fix: an IPv6 Host header loses its port. It drops it.")).toBe(
-			"Fix: an IPv6 Host header loses its port",
-		);
-	});
-
-	it("cuts a long sentence at a word", () => {
-		const title = shortTitle(`Add ${"very ".repeat(30)}long tests`);
-		expect(title.length).toBeLessThanOrEqual(65);
-		expect(title.endsWith("…")).toBe(true);
-	});
 });
 
 describe("the hive's goals", () => {

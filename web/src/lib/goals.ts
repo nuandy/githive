@@ -1,5 +1,5 @@
 import type { BacklogItem, HiveEvent, RepoLanding, RepoSnapshot } from "../api";
-import { claimAgent } from "./claimStatus";
+import { claimAgent, shortTitle } from "./claimStatus";
 import { timeOf } from "./model";
 
 // The Hive tab's goals: each change an agent announced, and everything that has happened to it since, put together
@@ -84,29 +84,6 @@ export interface GoalSources {
 	 * claim is gone, so the tab remembers what it saw while the claim was in force.
 	 */
 	remembered?: Map<string, string[]>;
-}
-
-/** The longest title a row shows before cutting it at a word. */
-const TITLE_MAX = 64;
-
-/**
- * A short title from an intent: its first line, up to its first sentence's end or a colon that ends a lead-in
- * ("Wire up the game src/main.js: put the game together…"), cut at a word if still long.
- */
-export function shortTitle(intent: string): string {
-	const line = (intent.split("\n")[0] ?? "").trim();
-	let end = line.length;
-	const sentence = /[.!?](\s|$)/.exec(line);
-	if (sentence) end = sentence.index;
-	// A colon this far in ends a lead-in; one nearer the start is a label ("Fix: …"), part of the title.
-	const colon = line.indexOf(": ");
-	if (colon >= 12 && colon < end) end = colon;
-	let title = line.slice(0, end).trim();
-	if (title.length > TITLE_MAX) {
-		const cut = title.lastIndexOf(" ", TITLE_MAX - 1);
-		title = `${title.slice(0, cut > TITLE_MAX / 2 ? cut : TITLE_MAX - 1)}…`;
-	}
-	return title.replace(/[,;:]$/, "");
 }
 
 const timeAt = (iso: string) => timeOf(iso) ?? 0;
