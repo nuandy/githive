@@ -210,11 +210,11 @@ export function meetsCount(awareness: ChangeAwareness | undefined, claims: Claim
 export function landable(
 	claim: Claim,
 	votes: Vote[],
-	context: Pick<StateContext, "landing" | "policy"> & { merge?: MergeCheck | undefined },
+	context: Pick<StateContext, "landing" | "settings"> & { merge?: MergeCheck | undefined },
 ): boolean {
 	if (claim.waitsOn?.length) return false;
 	if (conflictOf(claim, context.merge).kind === "conflicts") return false;
-	return changeState(claim, { votes, landing: context.landing, policy: context.policy }) === "approved";
+	return changeState(claim, { votes, landing: context.landing, settings: context.settings }) === "approved";
 }
 
 /**

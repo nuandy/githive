@@ -61,8 +61,8 @@ export function HiveStrip({
 	upNext?: number;
 	landing?: RepoLanding;
 	audit?: RepoAudit;
-	/** The claims, votes and policy, for what waits on a person (see needsYou.ts). */
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
+	/** The claims, votes and review settings, for what waits on a person (see needsYou.ts). */
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
 	/** The goals panel's range: landed counts what landed within it. */
 	range: number;
 	/** Where the goals panel's clock starts (before now - range when quiet stretches fold). */
@@ -156,7 +156,7 @@ export function needsRows(
 	repo: string,
 	goals: Goal[],
 	audit: RepoAudit | undefined,
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">,
 	now: number,
 ): NeedsRow[] {
 	const { changes, violations } = needsYou(snapshot, audit);
@@ -210,7 +210,7 @@ function NeedsYou({
 	repo: string;
 	goals: Goal[];
 	audit: RepoAudit | undefined;
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
 	now: number;
 }) {
 	const rows = needsRows(repo, goals, audit, snapshot, now);

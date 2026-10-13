@@ -49,7 +49,7 @@ const votes: RepoSnapshot["votes"] = [
 const landing = {
 	checking: { base: "b", since: "", changes: [{ change: "checking", head: "checking-head", agent: "" }] },
 };
-const context = { votes, policy, landing, now: NOW };
+const context = { votes, settings: { policy }, landing, now: NOW };
 
 const ids = (filter: ChangeFilter, query = "") =>
 	changeList(claims, context, { filter, query }).shown.map((listed) => listed.claim.change);

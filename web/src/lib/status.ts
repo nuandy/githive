@@ -1,4 +1,5 @@
 import type { RepoLanding, RepoSnapshot } from "../api";
+import { settingsForBranch } from "../../../src/toolkit/branch-rules";
 import { abandoned } from "../../../src/toolkit/staleness";
 import type { Tone } from "./changeStatus";
 
@@ -11,6 +12,8 @@ import type { Tone } from "./changeStatus";
 type Claim = RepoSnapshot["claims"][number];
 type Vote = RepoSnapshot["votes"][number];
 type Policy = RepoSnapshot["policy"];
+/** What a repo holds its changes to: its review policy, its branch rules and its project's branch (see claimPolicy). */
+export type RepoPolicy = Pick<RepoSnapshot, "policy" | "branchRules" | "branch">;
 
 /** Every state a change can be in, loudest first: the order a cell held by several shows. */
 export const CHANGE_STATES = [
@@ -159,11 +162,15 @@ export const STATES: Record<ChangeState, StateLook> = {
 	},
 };
 
-/** What else a change's state reads: the votes, the batch being checked, who may vote as each role, and the time. */
+/**
+ * What else a change's state reads: the votes, the batch being checked, the repo's review settings (who may vote as
+ * each role, on the change's own branch), and the time.
+ */
 export interface StateContext {
 	votes?: Vote[];
 	landing?: Pick<RepoLanding, "checking"> | undefined;
-	policy?: Policy | undefined;
+	/** Without them, no role is taken to be people's alone. */
+	settings?: RepoPolicy | undefined;
 	/** Without it, a change is never called abandoned (the Hive tells its story to the end instead). */
 	now?: number | undefined;
 }
@@ -174,8 +181,8 @@ export interface StateContext {
  * vote only people may give before plain review.
  */
 export function changeState(claim: Claim, context: StateContext = {}): ClaimState {
-	const { votes = [], landing, policy, now } = context;
-	const waiting = waitingOn(claim, { votes, policy });
+	const { votes = [], landing, settings, now } = context;
+	const waiting = waitingOn(claim, { votes, settings });
 	if (waiting?.kind === "question") return "needs-person";
 	const checking =
 		!!claim.head &&
@@ -225,10 +232,10 @@ export type Waiting =
 
 /**
  * What, if anything, a change needs a person for: what its agent asks (GitHive's failed builder asks too), or, once
- * pushed and not sent back, a vote as a role only people may vote as. Failed checks are its agent's to fix. The
- * server's repo summaries count the same (dashboard.ts, waitingOnPerson).
+ * pushed and not sent back, a vote as a role only people may vote as under the policy it's held to. Failed checks are
+ * its agent's to fix. The server's repo summaries count the same (dashboard.ts, waitingOnPerson).
  */
-export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "policy"> = {}): Waiting | undefined {
+export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "settings"> = {}): Waiting | undefined {
 	const { attention, change } = claim;
 	if (attention)
 		return {
@@ -252,13 +259,31 @@ export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "p
 	if (!claim.head || approval.approved || approval.vetoedBy.length) return undefined;
 	if (rejectionsOnHead(claim, context.votes ?? []).length) return undefined;
 	if (claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject")) return undefined;
-	const role = (approval.awaiting ?? []).find((each) => peopleOnly(context.policy, each));
+	const policy = context.settings && claimPolicy(claim, context.settings);
+	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
 	return role ? { kind: "vote", change, role } : undefined;
 }
 
-/** Whether only people may vote as a role: every holder is a person, people, or a team (see grantWarnings). */
+/** What GitHub's change is held to while the repo trusts GitHub's changes: no review (the server's TRUSTED_POLICY). */
+const TRUSTED: Policy = { required: 0, vetoes: [] };
+
+/**
+ * The policy a change is held to, as the server holds it (claimPolicy): none for GitHub's change while the repo trusts
+ * it, else that of the branch it lands on, the repo's or a branch rule's.
+ */
+export function claimPolicy(claim: Pick<Claim, "into" | "trusted">, settings: RepoPolicy): Policy {
+	if (claim.trusted) return TRUSTED;
+	const project = settings.branch ?? "main";
+	const repo = { policy: settings.policy, verify: [], rules: settings.branchRules, project };
+	return settingsForBranch(repo, claim.into ?? project).policy;
+}
+
+/**
+ * Whether only people may vote as a role: it has holders, and each is people ("person:*") or one person. A team isn't:
+ * its members' agents may vote as it; nor is a pool of one person's agents ("person:<id>/*").
+ */
 export function peopleOnly(policy: Policy | undefined, role: string): boolean {
 	const holders = policy?.grants?.[role] ?? ["person:*", "githive"];
-	const person = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder) || holder.startsWith("@");
+	const person = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder);
 	return holders.length > 0 && holders.every(person);
 }

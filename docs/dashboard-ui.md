@@ -75,7 +75,10 @@ lands: "Land", "Landed on main"; "merge" is only git's own (a merge commit, a co
 for counts addressed to the reader: the Inbox's count, "2 changes need you". What needs you is agents' questions,
 changes waiting on a vote only people may give, and the audit's open violations, never failed checks (the agent's own
 work): `waitingOn()` in `status.ts` and `needsYou()` in `needsYou.ts` decide it, and the server's repo summaries count
-the same for the Inbox and Repositories.
+the same for the Inbox and Repositories. A vote is people's alone when every holder of its role is people
+(`person:*`) or one person, never a team, whose members' agents may vote as it; and it's read from the policy the
+change is held to (`claimPolicy`: its branch's, or none for GitHub's trusted change), so pass the repo's `settings`,
+never `snapshot.policy` alone.
 
 **Light and dark.** `:root` is light and `.dark` on `<html>` is dark; `dark:` variants follow it. Under "Same as this
 device" the page follows the system live. Another palette is another block of the same variables.

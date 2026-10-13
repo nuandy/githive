@@ -30,6 +30,7 @@ import { briefPaths, shortSha, shortTitle } from "../lib/model";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import type { RepoPolicy } from "../lib/status";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
 import { LoadError } from "./LoadError";
@@ -118,7 +119,7 @@ const INLINE_ICON = "inline -mb-px mr-0.75 align-baseline";
 function ChangeRow({
 	claim,
 	votes,
-	policy,
+	settings,
 	landing,
 	repo,
 	now,
@@ -126,13 +127,14 @@ function ChangeRow({
 }: {
 	claim: Claim;
 	votes: Vote[];
-	policy: RepoSnapshot["policy"];
+	/** The repo's review settings: each change is held to its own branch's policy. */
+	settings: RepoPolicy;
 	landing: Pick<RepoLanding, "checking"> | undefined;
 	repo: string;
 	now?: number;
 	arrived: boolean;
 }) {
-	const status = claimStatus(claim, votes, { policy, landing, now: now ?? Date.now() });
+	const status = claimStatus(claim, votes, { settings, landing, now: now ?? Date.now() });
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
@@ -206,7 +208,7 @@ function Bumping({ count }: { count: number }) {
 function ChangeRows({
 	claims,
 	votes,
-	policy,
+	settings,
 	landing,
 	repo,
 	now,
@@ -214,7 +216,8 @@ function ChangeRows({
 }: {
 	claims: Claim[];
 	votes: Vote[];
-	policy: RepoSnapshot["policy"];
+	/** The repo's review settings: each change is held to its own branch's policy. */
+	settings: RepoPolicy;
 	landing: Pick<RepoLanding, "checking"> | undefined;
 	repo: string;
 	now?: number;
@@ -229,7 +232,7 @@ function ChangeRows({
 					key={claim.change}
 					claim={claim}
 					votes={votes}
-					policy={policy}
+					settings={settings}
 					landing={landing}
 					repo={repo}
 					now={now}
@@ -325,7 +328,7 @@ export function ChangeList({
 	const branch = shown ?? project;
 	const open = shown ? openOn(snapshot, shown) : snapshot.claims;
 	const [query, setQuery] = useState(search);
-	const context = { votes: snapshot.votes, policy: snapshot.policy, landing, now: now ?? Date.now() };
+	const context = { votes: snapshot.votes, settings: snapshot, landing, now: now ?? Date.now() };
 	const { shown: listed, counts } = changeList(open, context, { filter, query });
 	const claims = listed.map((each) => each.claim);
 	const branchChanged = useChanged(shown);
@@ -430,7 +433,7 @@ export function ChangeList({
 					key={`${shown}:${filter}`}
 					claims={claims}
 					votes={snapshot.votes}
-					policy={snapshot.policy}
+					settings={snapshot}
 					landing={landing}
 					repo={repo}
 					now={now}

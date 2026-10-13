@@ -2,7 +2,15 @@ import type { RepoSnapshot } from "../api";
 import type { ChangeStatus } from "./changeStatus";
 import { displayName, identityName } from "./agent";
 import { listed } from "./decision";
-import { type ChangeState, changeState, rejectionsOnHead, type StateContext, STATES, waitingOn } from "./status";
+import {
+	type ChangeState,
+	changeState,
+	rejectionsOnHead,
+	type RepoPolicy,
+	type StateContext,
+	STATES,
+	waitingOn,
+} from "./status";
 
 // Repos keep no change records. A change is a claim in force, with its pushed head,
 // the approvals on that head, and any hosted agents on it.
@@ -17,13 +25,13 @@ export type Vote = RepoSnapshot["votes"][number];
 export function claimStatus(claim: Claim, votes: Vote[] = [], context: Omit<StateContext, "votes"> = {}): ChangeStatus {
 	const kind = changeState(claim, { ...context, votes });
 	const { label, tone } = STATES[kind];
-	return { kind, label, tone, description: describeState(kind, claim, votes, context.policy) };
+	return { kind, label, tone, description: describeState(kind, claim, votes, context.settings) };
 }
 
-function describeState(state: ChangeState, claim: Claim, votes: Vote[], policy?: RepoSnapshot["policy"]): string {
+function describeState(state: ChangeState, claim: Claim, votes: Vote[], settings?: RepoPolicy): string {
 	switch (state) {
 		case "needs-person": {
-			const waiting = waitingOn(claim, { votes, policy });
+			const waiting = waitingOn(claim, { votes, settings });
 			if (waiting?.kind === "vote") return `Waiting for a ${waiting.role} vote, which only a person can give.`;
 			if (!waiting || waiting.agent.startsWith("githive-")) return waiting?.reason ?? "It waits on a person.";
 			return `${waiting.agent} asks a person: ${waiting.reason}`;

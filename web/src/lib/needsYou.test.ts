@@ -50,4 +50,26 @@ describe("what needs you in a repo", () => {
 		);
 		expect(result).toEqual({ changes: [], violations: 0, count: 0 });
 	});
+
+	it("reads each change's own branch's policy: a branch rule may leave a role to people", () => {
+		const onRelease = claim("release", { into: "release/2.0", approval: { ...claim("x").approval, awaiting: ["qa"] } });
+		const onMain = claim("main", { approval: { ...claim("x").approval, awaiting: ["qa"] } });
+		const result = needsYou({
+			claims: [onRelease, onMain],
+			votes: [],
+			policy: { required: 1, vetoes: ["qa"], grants: { qa: ["qa-bot"] } },
+			branch: "main",
+			branchRules: [{ pattern: "release/*", policy: { grants: { qa: ["person:*"] } } }],
+		});
+		expect(result.changes).toEqual([{ kind: "vote", change: "release", role: "qa" }]);
+	});
+
+	it("leaves out a vote a team may give: its members' agents may give it", () => {
+		const result = needsYou({
+			claims: [claim("team")],
+			votes: [],
+			policy: { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } },
+		});
+		expect(result.count).toBe(0);
+	});
 });

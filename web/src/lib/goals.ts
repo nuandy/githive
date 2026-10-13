@@ -1,7 +1,7 @@
 import type { BacklogItem, HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { claimAgent } from "./claimStatus";
 import { timeOf } from "./model";
-import { type ChangeState, changeState, type StateContext, STATES } from "./status";
+import { type ChangeState, changeState, type RepoPolicy, type StateContext, STATES } from "./status";
 
 // The Hive tab's goals: each change an agent announced, and everything that has happened to it since, put together
 // from the claims, votes, the hive's event log and what's landing. A goal is the unit the tab tells a story about;
@@ -79,8 +79,8 @@ export interface GoalSources {
 	landing?: RepoLanding;
 	/** Changes on other branches, left out (the event log is the whole repo's). */
 	elsewhere?: Set<string>;
-	/** Who may vote as each role, for a change waiting on a vote only people give. */
-	policy?: RepoSnapshot["policy"];
+	/** The repo's review settings, for a change waiting on a vote only people give (on its own branch). */
+	settings?: RepoPolicy;
 	/**
 	 * The paths of claims seen earlier, by change. Nothing the server sends says what a landed change touched once its
 	 * claim is gone, so the tab remembers what it saw while the claim was in force.
@@ -139,7 +139,15 @@ const timeAt = (iso: string) => timeOf(iso) ?? 0;
 const byTime = <T extends { at: string }>(a: T, b: T) => timeAt(a.at) - timeAt(b.at);
 
 /** Every goal the sources show, in flight and finished, newest announced first. */
-export function hiveGoals({ claims, votes, events = [], landing, elsewhere, policy, remembered }: GoalSources): Goal[] {
+export function hiveGoals({
+	claims,
+	votes,
+	events = [],
+	landing,
+	elsewhere,
+	settings,
+	remembered,
+}: GoalSources): Goal[] {
 	const log = [...events].sort(byTime);
 	const oldest = log[0] ? timeAt(log[0].at) : undefined;
 	const claimOf = new Map(claims.map((claim) => [claim.change, claim]));
@@ -270,7 +278,7 @@ export function hiveGoals({ claims, votes, events = [], landing, elsewhere, poli
 				title: shortTitle(intent) || change,
 				intent,
 				paths: held?.paths ?? (last ? remembered?.get(change) : undefined) ?? [],
-				state: held ? stateOf(held, { votes, landing, policy }) : ending!.kind,
+				state: held ? stateOf(held, { votes, landing, settings }) : ending!.kind,
 				announced,
 				...(ending ? { finished: ending.at } : {}),
 				...(held ? { head: held.head, approval: held.approval } : {}),

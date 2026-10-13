@@ -57,7 +57,7 @@ describe("changes", () => {
 		});
 		// A role only people may vote as needs a person.
 		const people = { required: 2, vetoes: ["security"], grants: { security: ["person:*"] } };
-		expect(claimStatus(waiting, [], { policy: people })).toMatchObject({
+		expect(claimStatus(waiting, [], { settings: { policy: people } })).toMatchObject({
 			kind: "needs-person",
 			description: "Waiting for a security vote, which only a person can give.",
 		});

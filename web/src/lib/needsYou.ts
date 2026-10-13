@@ -15,11 +15,12 @@ export interface NeedsYou {
 }
 
 export function needsYou(
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">,
 	audit?: Pick<RepoAudit, "open">,
 ): NeedsYou {
-	const { votes, policy } = snapshot;
-	const waiting = snapshot.claims.flatMap((claim) => waitingOn(claim, { votes, policy }) ?? []);
+	const { votes } = snapshot;
+	// Each change is held to its own branch's policy (status.ts, claimPolicy).
+	const waiting = snapshot.claims.flatMap((claim) => waitingOn(claim, { votes, settings: snapshot }) ?? []);
 	const changes = [
 		...waiting.filter((each) => each.kind === "question"),
 		...waiting.filter((each) => each.kind === "vote"),

@@ -119,10 +119,20 @@ export function Hive(props: HiveProps) {
 				...(events ? { events } : {}),
 				...(landing ? { landing } : {}),
 				...(props.elsewhere ? { elsewhere: props.elsewhere } : {}),
-				policy: snapshot.policy,
+				settings: { policy: snapshot.policy, branchRules: snapshot.branchRules, branch: snapshot.branch },
 				remembered,
 			}),
-		[snapshot.claims, snapshot.votes, snapshot.policy, events, landing, props.elsewhere, remembered],
+		[
+			snapshot.claims,
+			snapshot.votes,
+			snapshot.policy,
+			snapshot.branchRules,
+			snapshot.branch,
+			events,
+			landing,
+			props.elsewhere,
+			remembered,
+		],
 	);
 	const upNext = useMemo(() => (backlog ? freeWork(backlog, goals) : undefined), [backlog, goals]);
 	const cells = useMemo(

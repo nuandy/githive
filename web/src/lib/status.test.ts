@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
-import { CHANGE_STATES, changeState, peopleOnly, STATES, waitingOn } from "./status";
+import { CHANGE_STATES, changeState, claimPolicy, peopleOnly, STATES, waitingOn } from "./status";
 
 type Claim = RepoSnapshot["claims"][number];
 type Vote = RepoSnapshot["votes"][number];
@@ -92,12 +92,13 @@ describe("a change's state", () => {
 
 	it("needs a person when a pushed change waits on a vote only people may give", () => {
 		const waiting = claim({ approval: awaiting("security") });
-		expect(changeState(waiting, { policy: peopleHold("security") })).toBe("needs-person");
+		expect(changeState(waiting, { settings: { policy: peopleHold("security") } })).toBe("needs-person");
 		// Agents and GitHive's reviewers hold the role by default: it's in review.
-		expect(changeState(waiting, { policy: { required: 1, vetoes: ["security"] } })).toBe("in-review");
+		expect(changeState(waiting, { settings: { policy: { required: 1, vetoes: ["security"] } } })).toBe("in-review");
 		expect(changeState(waiting)).toBe("in-review");
 		// Sent back to its agent, it's the agent's turn.
-		expect(changeState(waiting, { policy: peopleHold("security"), votes: [vote()] })).toBe("changes-requested");
+		const sentBack = { settings: { policy: peopleHold("security") }, votes: [vote()] };
+		expect(changeState(waiting, sentBack)).toBe("changes-requested");
 	});
 
 	it("reads rejections on its head before its approval: failed checks apart from a reviewer's", () => {
@@ -169,14 +170,32 @@ describe("what waits on a person", () => {
 	});
 
 	it("is a vote only people may give, on a pushed change not sent back", () => {
-		const policy = peopleHold("security");
-		expect(waitingOn(claim({ approval: awaiting("security") }), { policy })).toEqual({
+		const settings = { policy: peopleHold("security") };
+		expect(waitingOn(claim({ approval: awaiting("security") }), { settings })).toEqual({
 			kind: "vote",
 			change: "c-1",
 			role: "security",
 		});
-		expect(waitingOn(claim({ head: null, approval: awaiting("security") }), { policy })).toBeUndefined();
-		expect(waitingOn(claim({ approval: awaiting("security") }), { policy, votes: [vote()] })).toBeUndefined();
+		expect(waitingOn(claim({ head: null, approval: awaiting("security") }), { settings })).toBeUndefined();
+		expect(waitingOn(claim({ approval: awaiting("security") }), { settings, votes: [vote()] })).toBeUndefined();
+	});
+
+	it("reads who may vote from the policy of the branch the change lands on, as the server does", () => {
+		// The repo lets agents vote as release; a branch rule leaves it to people on release branches.
+		const settings = {
+			policy: { required: 1, vetoes: ["release"], grants: { release: ["release-bot", "person:*"] } },
+			branch: "main",
+			branchRules: [{ pattern: "release/*", policy: { grants: { release: ["person:*"] } } }],
+		};
+		const waiting = claim({ approval: awaiting("release") });
+		expect(waitingOn(waiting, { settings })).toBeUndefined();
+		expect(waitingOn({ ...waiting, into: "release/2.0" }, { settings })).toEqual({
+			kind: "vote",
+			change: "c-1",
+			role: "release",
+		});
+		expect(changeState({ ...waiting, into: "release/2.0" }, { settings })).toBe("needs-person");
+		expect(changeState({ ...waiting, into: "feature/x" }, { settings })).toBe("in-review");
 	});
 
 	it("isn't failed checks: they're the agent's to fix", () => {
@@ -186,18 +205,43 @@ describe("what waits on a person", () => {
 });
 
 describe("who may vote as a role", () => {
-	it("is people only when every holder is a person, people, or a team", () => {
+	it("is people only when every holder is people or one person", () => {
 		const policy = (holders: string[]): RepoSnapshot["policy"] => ({
 			required: 1,
 			vetoes: ["security"],
 			grants: { security: holders },
 		});
 		expect(peopleOnly(policy(["person:*"]), "security")).toBe(true);
-		expect(peopleOnly(policy(["person:ada", "@acme/security"]), "security")).toBe(true);
+		expect(peopleOnly(policy(["person:ada", "person:*"]), "security")).toBe(true);
+		// A team's members' agents may vote as it, and a pool is one person's agents.
+		expect(peopleOnly(policy(["person:ada", "@acme/security"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["@acme/security"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:ada/*"]), "security")).toBe(false);
 		expect(peopleOnly(policy(["person:*", "sec-agent"]), "security")).toBe(false);
 		expect(peopleOnly(policy([]), "security")).toBe(false);
 		// The default grant includes GitHive's reviewers.
 		expect(peopleOnly({ required: 1, vetoes: ["security"] }, "security")).toBe(false);
 		expect(peopleOnly(undefined, "security")).toBe(false);
+	});
+});
+
+describe("the policy a change is held to", () => {
+	const settings = {
+		policy: { required: 1, vetoes: ["security"] },
+		branch: "main",
+		branchRules: [{ pattern: "release/*", policy: { required: 2, vetoes: ["release"] } }],
+	};
+
+	it("is its branch's: the repo's on the project's branch, a branch rule's where one names its branch", () => {
+		expect(claimPolicy(claim(), settings)).toEqual(settings.policy);
+		expect(claimPolicy(claim({ into: "main" }), settings)).toEqual(settings.policy);
+		expect(claimPolicy(claim({ into: "release/2.0" }), settings)).toEqual({ required: 2, vetoes: ["release"] });
+		expect(claimPolicy(claim({ into: "feature/x" }), settings)).toEqual(settings.policy);
+	});
+
+	it("is no review for GitHub's change while the repo trusts GitHub's changes", () => {
+		const trusted = claim({ trusted: "GitHub's changes are trusted", approval: awaiting("security") });
+		expect(claimPolicy(trusted, settings)).toEqual({ required: 0, vetoes: [] });
+		expect(waitingOn(trusted, { settings: { policy: peopleHold("security") } })).toBeUndefined();
 	});
 });
