@@ -23,6 +23,7 @@ const merge = extendTailwindMerge({
 				"display-sm",
 				"display",
 			],
+			container: ["measure"],
 			shadow: ["raised"],
 			ease: ["spring", "pop"],
 			animate: ["appear", "fade", "leave", "bump", "pop", "live"],

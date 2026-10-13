@@ -98,7 +98,9 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 					<When at={review.at} />
 				</span>
 			</div>
-			{review.summary ? <div className="px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div> : null}
+			{review.summary ? (
+				<div className="max-w-measure px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div>
+			) : null}
 			{review.thin ? <p className="m-0 px-3.5 py-3 wrap-anywhere text-muted-foreground">{THIN_NOTE}</p> : null}
 			{review.evidence ? (
 				<details className="disclosure px-3.5 pb-3">
@@ -146,7 +148,7 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 						// A commit's message in a box of its own, in the code's face; anything else, set off by a rule.
 						item.kind === "pushed"
 							? "rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-meta"
-							: "border-l-3 border-border px-3 py-2 text-ui-lg",
+							: "max-w-measure border-l-3 border-border px-3 py-2 text-ui-lg",
 					)}
 				>
 					{withLinks(item.body)}

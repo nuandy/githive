@@ -13,5 +13,6 @@ describe("cn", () => {
 		expect(cn("duration-fast", "duration-slow")).toBe("duration-slow");
 		expect(cn("shadow-raised", "shadow-none")).toBe("shadow-none");
 		expect(cn("rounded-md", false, undefined, "rounded-full")).toBe("rounded-full");
+		expect(cn("max-w-measure", "max-w-none")).toBe("max-w-none");
 	});
 });

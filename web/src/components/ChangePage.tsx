@@ -250,7 +250,7 @@ function AttentionCallout({
 				<strong>
 					{attention.agent} asks {answerable ? "you" : "a person"}
 				</strong>
-				<p>{attention.reason}</p>
+				<p className="max-w-measure">{attention.reason}</p>
 				<p className="text-muted-foreground">
 					{answerable
 						? "Decide with your vote below: it counts like a reviewer's and answers the question."
@@ -459,7 +459,7 @@ function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord
 					{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
 				</span>
 			</div>
-			<div className="p-3.5 whitespace-pre-wrap wrap-anywhere">
+			<div className="max-w-measure p-3.5 whitespace-pre-wrap wrap-anywhere">
 				{record?.intent || <span className="text-muted-foreground">No description provided.</span>}
 			</div>
 		</article>
@@ -559,8 +559,9 @@ export function ChangePage({
 	return (
 		<div className={cn(pageFades && "animate-fade")}>
 			<div className="pb-3.5">
-				<h1 className="text-display leading-[1.25] font-medium tracking-[-0.01em] wrap-anywhere to-720:text-[21px]">
-					{title} <span className="font-mono text-[0.72em] font-light text-muted-foreground">{changeId}</span>
+				<h1 className="text-display leading-[1.25] font-medium tracking-[-0.01em] wrap-anywhere to-720:text-title">
+					{title}{" "}
+					<span className="font-mono text-lead font-light text-muted-foreground to-720:text-body-sm">{changeId}</span>
 				</h1>
 				<div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-muted-foreground wrap-anywhere [&_strong]:text-foreground">
 					{status ? <StatusPill status={status} size="lg" solid /> : null}

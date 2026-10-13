@@ -244,10 +244,9 @@ export function ChangeList({
 	return (
 		<Box aria-labelledby="changes-title">
 			<BoxHeader>
-				{/* The browser's size for an h2: 1.5em of the 15px it's in. */}
 				<h2
 					id="changes-title"
-					className="inline-flex items-center gap-1.5 py-0.5 text-[22.5px] font-semibold text-foreground"
+					className="inline-flex items-center gap-1.5 py-0.5 text-title font-semibold text-foreground"
 					aria-current="page"
 				>
 					<Icon name="pull" />
@@ -348,7 +347,9 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
 							{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
 						</p>
-						{vote.evidence ? <p className="mt-0.5 mb-0 text-ui text-muted-foreground">{vote.evidence}</p> : null}
+						{vote.evidence ? (
+							<p className="mt-0.5 mb-0 max-w-measure text-ui text-muted-foreground">{vote.evidence}</p>
+						) : null}
 					</div>
 				</li>
 			))}

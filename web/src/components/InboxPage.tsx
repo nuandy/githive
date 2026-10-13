@@ -98,7 +98,7 @@ function InboxRepo({ group, arrived }: { group: InboxGroup; arrived: boolean }) 
 									Urgent
 								</Badge>
 							) : null}
-							<p className="mt-0.75 mb-0 text-ui wrap-anywhere text-muted-foreground">{item.reason}</p>
+							<p className="mt-0.75 mb-0 max-w-measure text-ui wrap-anywhere text-muted-foreground">{item.reason}</p>
 						</div>
 					</li>
 				))}

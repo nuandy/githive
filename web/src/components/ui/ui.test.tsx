@@ -167,6 +167,15 @@ describe("the dashboard's source", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	it("sizes text from the theme's scale, but where the Hive draws its marks", () => {
+		// The Hive's map and the goals' chips and clock set type inside shapes of their own size; later work redraws them.
+		const marks = ["HiveMap.tsx", "GoalsPanel.tsx", "Territory.tsx"];
+		const offenders = Object.keys(sources).filter(
+			(file) => !marks.some((mark) => file.endsWith(`/${mark}`)) && /\btext-\[[\d.]+(px|em|rem)\]/.test(sources[file]!),
+		);
+		expect(offenders).toEqual([]);
+	});
+
 	it("draws focus one way: the outline, never a border and halo instead", () => {
 		const offenders = Object.keys(sources).filter((file) =>
 			/shadow-focus|focus-visible:outline-none|focus-visible:border-ring/.test(sources[file]!),

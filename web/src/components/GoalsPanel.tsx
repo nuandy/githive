@@ -57,7 +57,7 @@ const FOLDS = "[transition:grid-template-rows_0.45s_ease,opacity_0.3s_ease]";
 const NOTE = "mx-2 my-1.5 animate-hive-fade-in text-ui text-muted-foreground";
 /** A section's heading, in small capitals and ruled to the panel's edge, with room above it. */
 const SECTION =
-	"flex items-center gap-2.5 text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase [transition:margin_0.45s_ease] after:order-1 after:h-px after:flex-1 after:bg-border";
+	"flex items-center gap-2.5 text-micro font-bold tracking-[0.06em] text-muted-foreground uppercase [transition:margin_0.45s_ease] after:order-1 after:h-px after:flex-1 after:bg-border";
 const sectionRoom = (timeline: boolean) => (timeline ? "mx-0 mt-1.5 mb-0.5" : "mx-0 mt-2.5 mb-1");
 /** A row's line: the agent's chip, then the chevron, the words and the bar. */
 const LINE = "flex items-center gap-2 px-2";
@@ -841,7 +841,7 @@ function GoalSteps({
 				) : null}
 				{goal.steps.map((step, index) => (
 					<li key={index} className={cn(STEP, arrives)} style={stagger(index + 1)}>
-						<time dateTime={step.at} className="font-mono text-[11px] leading-5 font-normal text-muted-foreground">
+						<time dateTime={step.at} className="font-mono text-micro leading-5 font-normal text-muted-foreground">
 							{clockTime(step.at, now)}
 						</time>
 						<span className={STEP_TONE[step.kind]}>

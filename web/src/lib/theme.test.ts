@@ -176,3 +176,20 @@ describe("links in running text", () => {
 		expect(rule?.[1]).toMatch(/text-decoration-line: underline;/);
 	});
 });
+
+// Eight sizes, far enough apart to tell: 11 for counts only, 12 the smallest for words (Overpass's x-height is small),
+// then 13, 14, 15, 17, 20 and 26. The roles are names for them.
+describe("the type scale", () => {
+	const sizes = [...css.matchAll(/--text-([a-z-]+):\s*([\d.]+)px;/g)].map(
+		([, name, px]) => [name!, Number(px)] as const,
+	);
+
+	it("has eight whole-pixel steps", () => {
+		expect(sizes.length).toBeGreaterThan(8);
+		expect([...new Set(sizes.map(([, px]) => px))].sort((a, b) => a - b)).toEqual([11, 12, 13, 14, 15, 17, 20, 26]);
+	});
+
+	it("keeps 11px to the counts", () => {
+		expect(sizes.filter(([, px]) => px < 12).map(([name]) => name)).toEqual(["micro"]);
+	});
+});

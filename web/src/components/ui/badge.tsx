@@ -27,7 +27,7 @@ export const badgeVariants = cva(
 			solid: { true: "", false: "" },
 			outline: { true: "border-border-strong bg-transparent font-medium text-muted-foreground", false: "" },
 			// Each size says its line height again: cn() drops a line height that a font size follows.
-			size: { default: "", sm: "py-0 text-micro leading-4.5", lg: "px-3 py-1.25 text-ui-lg leading-5" },
+			size: { default: "", sm: "py-0 text-caption leading-4.5", lg: "px-3 py-1.25 text-ui-lg leading-5" },
 		},
 		compoundVariants: [
 			{ solid: true, tone: "good", class: "bg-good text-good-foreground" },

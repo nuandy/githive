@@ -291,21 +291,24 @@
 	--font-sans: "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-	/* Type: the sizes the dashboard uses, by role. */
+	/* Type: eight sizes, named by role. 11px is for counts only; 12px is the smallest for words, since Overpass's
+	   x-height is small. Roles that share a size are kept apart by weight, color and face. */
 	--text-*: initial;
-	--text-micro: 11.5px;
+	--text-micro: 11px;
 	--text-caption: 12px;
-	--text-meta: 12.5px;
+	--text-meta: 13px;
 	--text-ui: 13px;
-	--text-ui-lg: 13.5px;
+	--text-ui-lg: 14px;
 	--text-body-sm: 14px;
 	--text-body: 15px;
-	--text-lead: 16px;
-	--text-title-sm: 18px;
+	--text-lead: 17px;
+	--text-title-sm: 17px;
 	--text-title: 20px;
-	--text-title-lg: 22px;
-	--text-display-sm: 24px;
+	--text-title-lg: 20px;
+	--text-display-sm: 26px;
 	--text-display: 26px;
+	/* The measure of long-form text (an intent, a review, a question): about 70 characters a line, max-w-measure. */
+	--container-measure: 70ch;
 
 	--ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
 	--ease-in: cubic-bezier(0.4, 0, 1, 1);

@@ -112,7 +112,7 @@ function RepoLine({ row, ruled }: { row: RepoRow; ruled: boolean }) {
 				)}
 			/>
 			<div className="min-w-0 flex-1">
-				<a className="text-[17px] font-bold wrap-anywhere text-foreground" href={href.repo(row.name)}>
+				<a className="text-lead font-bold wrap-anywhere text-foreground" href={href.repo(row.name)}>
 					<span className="font-normal text-muted-foreground">{owner}/</span>
 					{name}
 				</a>

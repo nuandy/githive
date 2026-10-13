@@ -44,7 +44,7 @@ function Signatures({ overlap }: { overlap: Overlap }) {
 	const { before, after, change } = overlap.altered;
 	if (change !== "interface" || !before || !after) return null;
 	return (
-		<div className="mt-0.75 text-caption text-muted-foreground [&_code]:text-micro">
+		<div className="mt-0.75 text-caption text-muted-foreground [&_code]:text-caption">
 			<code>{before}</code>
 			<span aria-label="becomes"> → </span>
 			<code>{after}</code>

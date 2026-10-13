@@ -47,7 +47,7 @@ export function Steps({ steps }: { steps: ConnectStep[] }) {
 }
 
 // A way to connect's title, with a pill beside it.
-const WAY_TITLE = "mt-0 mb-2.5 flex flex-wrap items-center gap-2 text-[14.5px]";
+const WAY_TITLE = "mt-0 mb-2.5 flex flex-wrap items-center gap-2 text-body";
 
 interface ConnectSectionProps {
 	client: McpClient;
