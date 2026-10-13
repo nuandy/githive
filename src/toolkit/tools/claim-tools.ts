@@ -3,6 +3,7 @@ import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
 import { claimHints } from "../clef-hints";
+import { giveBackPartClaim, withoutLeftovers } from "./claim-leftovers";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
@@ -62,7 +63,14 @@ export const claimTools: ToolHandlers = {
 		// Asked before claiming: claiming again renews what was counted then.
 		const renewing = (await call.claimOf(change))?.agent === agent;
 		const claimStore = sharded ? storeFor(ctx, repo, sharded) : store;
-		const outcome = await claimStore.claim(input, stamper);
+		const giveBack = (reason: string) => giveBackPartClaim(call, claimStore, { change, agent, reason });
+		const written = await claimStore.claim(input, stamper).catch(async (err) => {
+			// A store can answer an error after the claim is written; a new claim is given back, so it doesn't sit
+			// in the agent's name unbuilt. A renewal stays: the change was the agent's already.
+			if (!renewing) await giveBack("its claim failed partway");
+			throw err;
+		});
+		const outcome = await withoutLeftovers(written, renewing, giveBack);
 		if (outcome.ok) await keepToOwnerLimit(call, claimStore, { change, agent, renewing });
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);

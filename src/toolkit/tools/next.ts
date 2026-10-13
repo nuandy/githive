@@ -133,10 +133,12 @@ const STEPS: Record<string, Step> = {
 	vote: voteStep,
 	add_work: addedStep,
 	reviews: (reply) => {
+		const forgotten = unpushedStep(reply);
+		if (forgotten) return forgotten;
 		if (text(reply.limit)) return "Your owner's limit leaves you no reviews of others' changes today (see limit).";
 		return isEmpty(reply.reviews) ? NONE_NOW : undefined;
 	},
-	backlog: (reply) => (isEmpty(reply.open) ? NONE_NOW : undefined),
+	backlog: (reply) => unpushedStep(reply) ?? (isEmpty(reply.open) ? NONE_NOW : undefined),
 	wait: waitStep,
 	request_review: (reply) => {
 		if (!text(reply.head)) return undefined;
@@ -188,6 +190,14 @@ function madeClaim(reply: Reply, args: Args) {
 	const other = nameOr(similar.change, "another open change");
 	const check = `${other} may already do this (see similar): call \`status\` on it first`;
 	return `${check}, and release yours if it does. ${build}`;
+}
+
+/** Your own changes with nothing pushed, which nobody else can build while you hold them. */
+function unpushedStep(reply: Reply) {
+	const unpushed = records(reply.yours).filter((change) => change.pushed === false);
+	if (!unpushed.length) return undefined;
+	const changes = names(unpushed.map((change) => nameOr(change.change, "a change of yours")));
+	return `You hold ${changes} with nothing pushed: build it, or \`release\` it if you've moved on, so others can.`;
 }
 
 /** Only when Clef suggests a dependency a new piece doesn't declare: how to declare it, if it's right. */

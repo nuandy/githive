@@ -301,13 +301,13 @@ class Claims implements ClaimStore {
 	// The records that may hold each scope's change's claim, and the shards covering its files or above them. A
 	// change with no index has claimed only in the registry, unless its shards predate indexing; then every shard
 	// is read. Each record is read once for all the scopes.
-	private async scopeEntries(scopes: Scope[]): Promise<Entry[][]> {
+	private async scopeEntries(scopes: Scope[], fresh = false): Promise<Entry[][]> {
 		// Fetch every records repo's credentials while the indexes are read.
 		if (this.sharded) for (const remote of this.repos.all()) remote.catch(() => undefined);
 		const changes = scopes.map((scope) => scope.change);
 		const [early, root] = await Promise.all([
 			this.sharded ? this.indexed(changes) : Promise.resolve(undefined),
-			this.readRoot(),
+			fresh ? this.readRootFresh() : this.readRoot(),
 		]);
 		if (!this.sharded) return scopes.map(() => root);
 		// Sharded since this store was made, so read the indexes now.
@@ -330,13 +330,21 @@ class Claims implements ClaimStore {
 		});
 	}
 
-	private async changeEntries(change: string): Promise<Entry[]> {
-		const [entries] = await this.scopeEntries([{ change, files: [] }]);
+	private async changeEntries(change: string, fresh = false): Promise<Entry[]> {
+		const [entries] = await this.scopeEntries([{ change, files: [] }], fresh);
 		return entries ?? [];
 	}
 
 	async readChange(change: string): Promise<ChangeView> {
-		const view = this.viewOf(await this.changeEntries(change));
+		const view = this.changeView(change, await this.changeEntries(change));
+		if (view.claim) return view;
+		// A kept copy of the registry can lag a claim just written there, and an agent told its change holds no claim
+		// drops it. So "no claim" is said only from the registry read fresh; shards and indexes are always listed.
+		return this.changeView(change, await this.changeEntries(change, true));
+	}
+
+	private changeView(change: string, entries: Entry[]): ChangeView {
+		const view = this.viewOf(entries);
 		return {
 			claim: view.claims.find((c) => c.change === change),
 			released: view.released.filter((r) => r.change === change),

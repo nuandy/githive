@@ -40,13 +40,16 @@ export const workTools: ToolHandlers = {
 			).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 		const options = await reviewOptions(ctx, repo, state, held);
 		return {
+			...yoursIn(state),
 			reviews: options.slice(0, LISTED_AT_MOST),
 			...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
 		};
 	},
 	async backlog({ ctx, actAs, openWork }) {
-		const { open, waiting } = await withinOwnerLimits(ctx, backlogFor(await openWork(actAs("agent"))));
+		const state = await openWork(actAs("agent"));
+		const { open, waiting } = await withinOwnerLimits(ctx, backlogFor(state));
 		return {
+			...yoursIn(state),
 			open: open.slice(0, LISTED_AT_MOST),
 			...(open.length > LISTED_AT_MOST ? { more: open.length - LISTED_AT_MOST } : {}),
 			waiting: waiting.slice(0, LISTED_AT_MOST),
@@ -204,6 +207,16 @@ async function withinOwnerLimits(ctx: ToolContext, backlog: BacklogView): Promis
 	const others = (piece: BacklogView["open"][number]) => piece.owner !== ctx.identity;
 	const held = backlog.open.filter(others).map((piece) => ({ id: piece.id, reason: `your owner's limit: ${limit}` }));
 	return { open: backlog.open.filter((piece) => !others(piece)), waiting: [...backlog.waiting, ...held] };
+}
+
+/**
+ * The caller's own open changes, and whether each has anything pushed, for the lists it reads before taking more
+ * work: a claim it forgot, or one a failed call left in its name, shows up here. Read already, so it costs nothing.
+ */
+function yoursIn(state: WorkInput) {
+	const mine = state.open.filter((entry) => entry.claim.agent === state.agent);
+	if (!mine.length) return {};
+	return { yours: mine.map((entry) => ({ change: entry.claim.change, pushed: entry.head !== null })) };
 }
 
 /** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */

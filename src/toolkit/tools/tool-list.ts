@@ -311,6 +311,7 @@ const TOOL_LIST = [
 			"why the others wait. Pieces others wait on come first, the longest chain behind them first, " +
 			"each with how many wait on it (`unblocks`): starting them first finishes the backlog soonest. " +
 			"Other people's pieces wait, saying so, once your owner's limit on building them is reached. " +
+			"`yours` lists your own open changes, and whether each has anything pushed. " +
 			"Build one by claiming it with its id as the change, and its `landsAfter`, " +
 			"if it has any, as `after`.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },

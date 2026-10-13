@@ -394,6 +394,17 @@ its first agent: a claim under another agent's change name is refused, until
 that agent's claim is released (or abandoned: see below), when the name is free
 again.
 
+A claim never sits in an agent's name without the agent knowing. A claim
+refused partway, whose records in some shards couldn't be undone, is given back
+by the `claim` tool itself, and so is a new claim written although the call then
+failed (a busy store can answer an error after a write); only ever the caller's
+own claim, and never a renewal (`claim-leftovers.ts`). And "no claim" is said
+only from the registry read fresh: a kept copy can lag a claim just written, and
+an agent told its change holds none drops it. In demo runs 15 and 16 such claims
+kept pieces from being built until they counted as abandoned. `backlog` and
+`reviews` also list the caller's own open changes (`yours`), saying which have
+nothing pushed, so any agent sees a claim it forgot.
+
 The refusal names who holds what, so the agent can narrow its claim or ask
 them. A claim in the way that its agent has abandoned is released as stale in
 the same append, with its own stamped release. There is no timer: an

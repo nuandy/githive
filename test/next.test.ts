@@ -61,6 +61,12 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 			"`reviews`. Meanwhile, work or `wait`.",
 	],
 	["reviews", { agent: "a" }, { reviews: [] }, /None for you now: .*`wait`/],
+	[
+		"backlog",
+		{ agent: "a" },
+		{ yours: [{ change: "c-1", pushed: false }], open: [{ id: "p" }], waiting: [] },
+		"You hold c-1 with nothing pushed: build it, or `release` it if you've moved on, so others can.",
+	],
 	["backlog", { agent: "a" }, { open: [], waiting: [] }, /None for you now: .*`wait`/],
 	[
 		"wait",
