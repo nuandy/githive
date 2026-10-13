@@ -12,6 +12,7 @@ import {
 	giveUpAsPerson,
 	makeBranch,
 	mergeAsPerson,
+	releaseAsPerson,
 	repoSnapshot,
 	voteAsPerson,
 } from "../toolkit/mcp";
@@ -65,16 +66,23 @@ function repoSummaryRoutes(app: Hono<AppEnv>) {
 			repoSnapshot({ ...toolContext(c.env, c.get("principal")), timing }, repo.id),
 		);
 	});
-	// What the caller may do in a repo, with its id and default branch.
+	// What the caller may do in a repo, with its id and default branch. For a person, also who they are in the records
+	// and their teams in the repo's org: what decides the roles they may vote as (see holdsRole).
 	app.get("/repos/:owner/:name/access", async (c) => {
 		const repo = await routeRepo(c, "read");
-		const [meta, branch] = await Promise.all([
+		const principal = c.get("principal");
+		const person = principal && isPerson(principal) ? principal : undefined;
+		const [meta, branch, teams] = await Promise.all([
 			c.env.DB ? new OrgStore(c.env.DB).repoById(repo.id) : null,
 			remoteFor(c.env.ARTIFACTS, repo.id, "read")
 				.then(defaultBranch)
 				.catch(() => null),
+			person?.kind === "user" && c.env.DB
+				? new OrgStore(c.env.DB).teamsForRepo(person.user.id, repo.id).catch(() => [])
+				: [],
 		]);
-		return c.json({ ...repo, visibility: meta?.visibility ?? null, branch });
+		const who = person ? { by: byOf(person), teams } : {};
+		return c.json({ ...repo, visibility: meta?.visibility ?? null, branch, ...who });
 	});
 }
 
@@ -109,6 +117,23 @@ function personActionRoutes(app: Hono<AppEnv>) {
 			fail(403, "giving up GitHub's changes from the dashboard is a person's: admins' agents release");
 		const repo = await routeRepo(c, "write");
 		return c.json(await giveUpAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
+	});
+	// A person releases a change's claim, whoever's it is, with a reason: its paths are free for other agents, and its
+	// agent is told (see releaseAsPerson). Stamped with their name.
+	app.post("/repos/:owner/:name/changes/:change/release", async (c) => {
+		const actor = c.get("principal") ?? fail(401, "no identity");
+		if (!isPerson(actor)) fail(403, "releasing a claim from the dashboard is a person's: agents release their own");
+		const repo = await routeRepo(c, "write");
+		const { reason } = await jsonArgs(c);
+		return c.json(
+			await releaseAsPerson(
+				toolContext(c.env, actor),
+				repo.id,
+				c.req.param("change"),
+				byOf(actor),
+				typeof reason === "string" ? reason : "",
+			),
+		);
 	});
 	// Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before.
 	// Taking back a person's give-up is a person's to do.

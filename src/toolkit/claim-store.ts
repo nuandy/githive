@@ -96,7 +96,10 @@ export interface ClaimStore {
 		stamper?: Stamper,
 	): Promise<ReleaseOutcome>;
 	/** Releases another agent's claim on `agent`'s word, idle or not (see claims.ts giveUp). */
-	giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
+	giveUp(
+		input: { change: string; agent: string; reason: string; stale?: boolean },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome>;
 	/** The GitHive-Claims trailer for a merge of `files`, from the view its claims were checked in. */
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord): string;
 }
@@ -575,7 +578,10 @@ class Claims implements ClaimStore {
 			.catch((err) => console.error(`forgetting ${change}'s attempts failed`, String(err)));
 	}
 
-	async giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome> {
+	async giveUp(
+		input: { change: string; agent: string; reason: string; stale?: boolean },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
 		return this.eachShard(held.shards, (shard) => giveUp(this.logOf(shard), input, stamper));

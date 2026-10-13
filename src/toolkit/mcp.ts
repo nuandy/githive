@@ -29,6 +29,7 @@ export {
 	giveUpAsPerson,
 	makeBranch,
 	openCount,
+	releaseAsPerson,
 	repoAudit,
 	repoSnapshot,
 	voteAsPerson,

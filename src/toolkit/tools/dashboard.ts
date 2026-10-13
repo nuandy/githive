@@ -7,7 +7,7 @@ import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
-import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
+import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
@@ -308,6 +308,50 @@ export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: str
 	const outcome = await giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
 	await ctx.ping?.(repo).catch(() => undefined);
 	return outcome;
+}
+
+/** What a person's release tells, and what its agent hears. */
+export const RELEASED_NOTE = "Its paths are free for other agents; its agent is told; its commits stay on its branch.";
+
+/**
+ * A person releases a change's claim from the dashboard, whoever's it is, saying why: a stuck change freed. Its paths
+ * are free for other agents, its agent is told with its next reply, and its commits stay on its branch. The release is
+ * stamped with the person, not as stale, which the audit accepts (see othersClaimsReleased). GitHub's change is given up
+ * as before (see giveUpGitHubChange), so GitHive brings it back when GitHub's branch moves. The route checks they can
+ * write.
+ */
+export async function releaseAsPerson(ctx: ToolContext, repo: string, change: string, person: string, reason: string) {
+	if (!/^person:[^/]+$/.test(person))
+		fail(403, "only a person releases another's claim from the dashboard; agents release their own with release");
+	const why = reason.trim();
+	if (!why) fail(400, "say why you release it: its agent is told");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const store = storeFor(ctx, repo, registry);
+	const { claim } = await store.readChange(change);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to release`);
+	const stamper = await ctx.stamper?.();
+	if (isGitHubChange(claim))
+		return giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
+	const outcome = await store.giveUp({ change, agent: person, reason: why, stale: false }, stamper);
+	if (!outcome.ok) return outcome;
+	const at = new Date().toISOString();
+	await ctx.notify?.(repo, claimInto(claim, projectBranch(registry)), [
+		{
+			agent: claim.agent,
+			notice: {
+				kind: "released",
+				at,
+				change,
+				says: `A person released your claim on ${change}: ${why}`,
+				next:
+					`Its paths are free for other agents now. Your commits stay on changes/${change} in your fork; claim ` +
+					"again to carry on, if they're still free.",
+				from: { agent: person },
+			},
+		},
+	]);
+	await ctx.ping?.(repo, { kind: "released", agent: claim.agent, change, detail: why, at }).catch(() => undefined);
+	return { ok: true as const, released: change, note: RELEASED_NOTE };
 }
 
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */
