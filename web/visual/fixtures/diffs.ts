@@ -32,7 +32,7 @@ const EDITS: Record<string, Record<string, Edit>> = {
 				].join("\n"),
 			],
 			at: 0.75,
-			add: ["\t\t\t\t<SummaryRow label={taxLabel} amount={tax.amount} muted={tax.included} />"],
+			add: ["\t\t\t<SummaryRow label={taxLabel} amount={tax.amount} muted={tax.included} />"],
 		},
 		"src/lib/currency.ts": {
 			at: 0.8,
@@ -133,7 +133,9 @@ const EDITS: Record<string, Record<string, Edit>> = {
 function edited(before: string, edit: Exclude<Edit, "added" | "removed">): string {
 	const lines = before.split("\n");
 	if (edit.replace) {
-		const index = lines.findIndex((line) => line.includes(edit.replace![0]));
+		// The line itself, else the first that holds it.
+		const exact = lines.indexOf(edit.replace[0]);
+		const index = exact >= 0 ? exact : lines.findIndex((line) => line.includes(edit.replace![0]));
 		if (index >= 0) lines[index] = edit.replace[1];
 	}
 	if (edit.add?.length) {
