@@ -7,6 +7,11 @@ import { Button } from "./button";
 import { Collapse } from "./collapse";
 import { Input, NativeSelect, Textarea } from "./field";
 import { Segmented } from "./segmented";
+import { StatusIcon } from "../StatusPill";
+import { AlertDialog, AlertDialogAction, AlertDialogTrigger } from "./alert-dialog";
+import { Dialog, DialogTrigger, OVERLAY, PANEL } from "./dialog";
+import { Popover, PopoverTrigger } from "./popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 
 describe("the building blocks", () => {
 	it("draws a plain button that doesn't submit forms", () => {
@@ -154,6 +159,81 @@ describe("the building blocks", () => {
 	});
 });
 
+describe("overlays", () => {
+	it("gives a tooltip its trigger, in the dashboard's provider or a provider of its own", () => {
+		const tip = (
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<span tabIndex={0}>Live</span>
+				</TooltipTrigger>
+				<TooltipContent>Connected</TooltipContent>
+			</Tooltip>
+		);
+		for (const html of [renderToStaticMarkup(tip), renderToStaticMarkup(<TooltipProvider>{tip}</TooltipProvider>)]) {
+			expect(html).toMatch(/^<span tabindex="0" data-state="closed" data-slot="tooltip-trigger">Live<\/span>$/);
+		}
+	});
+
+	it("says a status's words in a tooltip, not a title", () => {
+		const html = renderToStaticMarkup(<StatusIcon status={{ kind: "merged", tone: "good", label: "Merged" }} />);
+		expect(html).toContain('data-slot="tooltip-trigger"');
+		expect(html).toContain('aria-label="Merged"');
+		expect(html).not.toContain("title=");
+	});
+
+	it("opens a popover from a button that says so", () => {
+		const html = renderToStaticMarkup(
+			<Popover>
+				<PopoverTrigger>Who holds this</PopoverTrigger>
+			</Popover>,
+		);
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).toContain('aria-expanded="false"');
+		expect(html).toContain('data-slot="popover-trigger"');
+	});
+
+	it("opens a dialog, or a question, from a button that says so", () => {
+		for (const html of [
+			renderToStaticMarkup(
+				<Dialog>
+					<DialogTrigger>New token</DialogTrigger>
+				</Dialog>,
+			),
+			renderToStaticMarkup(
+				<AlertDialog>
+					<AlertDialogTrigger>Delete</AlertDialogTrigger>
+				</AlertDialog>,
+			),
+		]) {
+			expect(html).toContain('aria-haspopup="dialog"');
+			expect(html).toContain('data-state="closed"');
+		}
+	});
+
+	it("goes ahead with a question in red ink, unless told otherwise", () => {
+		const danger = renderToStaticMarkup(
+			<AlertDialog>
+				<AlertDialogAction>Delete</AlertDialogAction>
+			</AlertDialog>,
+		);
+		expect(danger).toContain("text-bad");
+		const primary = renderToStaticMarkup(
+			<AlertDialog>
+				<AlertDialogAction variant="primary">Make public</AlertDialogAction>
+			</AlertDialog>,
+		);
+		expect(primary).toContain("bg-primary");
+	});
+
+	it("dims the page behind a dialog and fades the dialog in and out, growing a little", () => {
+		for (const fades of ["data-[state=open]:fade-in-0", "data-[state=closed]:fade-out-0"]) {
+			expect(OVERLAY).toContain(fades);
+			expect(PANEL).toContain(fades);
+		}
+		expect(PANEL).toContain("data-[state=open]:zoom-in-95");
+	});
+});
+
 describe("the theme menu", () => {
 	it("says what it shows before the reader's choice is known", () => {
 		const html = renderToStaticMarkup(<ThemeMenu />);
@@ -185,6 +265,19 @@ describe("the dashboard's source", () => {
 			(file) => !marks.some((mark) => file.endsWith(`/${mark}`)) && /\btext-\[[\d.]+(px|em|rem)\]/.test(sources[file]!),
 		);
 		expect(offenders).toEqual([]);
+	});
+
+	it("grows menus, tooltips and popovers from their trigger, fading both ways", () => {
+		for (const [file, part] of [
+			["./dropdown-menu.tsx", "dropdown-menu"],
+			["./tooltip.tsx", "tooltip"],
+			["./popover.tsx", "popover"],
+		] as const) {
+			const source = sources[file]!;
+			expect(source, file).toContain(`origin-(--radix-${part}-content-transform-origin)`);
+			expect(source, file).toMatch(/fade-in-0/);
+			expect(source, file).toMatch(/data-\[state=closed\]:fade-out-0/);
+		}
 	});
 
 	it("draws focus one way: the outline, never a border and halo instead", () => {
