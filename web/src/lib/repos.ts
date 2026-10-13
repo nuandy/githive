@@ -35,6 +35,10 @@ export interface WaitingItem {
 	urgency?: number;
 	kind?: "question" | "vote";
 	role?: string;
+	/** Who asked, or whose change waits on the vote (newer summaries). */
+	agent?: string;
+	/** Since when: the question's time, or for a vote, when its agent last claimed or extended the change. */
+	at?: string;
 }
 
 /** What the server keeps per repo for this list (GET /summaries); counts are absent until first taken. */

@@ -268,6 +268,9 @@ describe("status", () => {
 					change: "a-1",
 					title: "Speed up the a module",
 					reason: "reviewers disagree on the cache size",
+					// Who asked, and when: the Inbox says "agent-a asks · 38m".
+					agent: "agent-a",
+					at: before.claims[0]!.attention!.at,
 				},
 			],
 		});
@@ -322,7 +325,7 @@ describe("status", () => {
 			...ctx(),
 			summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }),
 		};
-		await repoSnapshot(watched, "project");
+		const snapshot = await repoSnapshot(watched, "project");
 		expect(summaries.at(-1)?.patch).toMatchObject({
 			open: 3,
 			needsYou: 1,
@@ -333,6 +336,9 @@ describe("status", () => {
 					title: "Handle refund webhooks",
 					role: "security",
 					reason: "Waiting for a security vote, which only a person can give.",
+					// Whose change, and since when it waits: its agent's last claim or extension.
+					agent: "agent-a",
+					at: snapshot.claims.find((claim) => claim.change === "a-1")!.active,
 				},
 			],
 		});

@@ -469,6 +469,8 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 			change,
 			title,
 			reason: attention.reason.slice(0, 500),
+			agent: attention.agent,
+			at: attention.at,
 			...(attention.urgency === undefined ? {} : { urgency: attention.urgency }),
 		};
 	if (!head || approval.approved || approval.vetoedBy.length) return null;
@@ -478,7 +480,16 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 	if (sentBack || claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject")) return null;
 	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
 	if (!role) return null;
-	return { kind: "vote", change, title, role, reason: `Waiting for a ${role} vote, which only a person can give.` };
+	// Since its agent last claimed or extended it: as near as the snapshot knows to when its head was pushed.
+	return {
+		kind: "vote",
+		change,
+		title,
+		role,
+		reason: `Waiting for a ${role} vote, which only a person can give.`,
+		agent: claim.agent,
+		at: claim.active,
+	};
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */
