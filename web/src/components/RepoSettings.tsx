@@ -241,7 +241,7 @@ function useTokenOptions(repo: string, manage: RepoManageApi, snapshot: RepoSnap
 			]
 		: [];
 	return {
-		roles: roleOptions([...new Set(used)], teams),
+		roles: roleOptions([...new Set(used)], teams, owner),
 		holders: holderOptions({
 			teams,
 			org: owner,

@@ -81,12 +81,12 @@ export function holderOptions({
 	];
 }
 
-/** Roles to choose from: those the repo already uses, then the org's teams' names, each once. */
-export function roleOptions(used: string[], teams: { slug: string; name: string | null }[]): TokenOption[] {
+/** Roles to choose from: those the repo already uses, then the names of the org's teams, each once. */
+export function roleOptions(used: string[], teams: { slug: string; name: string | null }[], org = ""): TokenOption[] {
 	const options: TokenOption[] = used.map((role) => ({ value: role, label: role, detail: "Used in this repo" }));
 	for (const team of teams)
 		if (!options.some((option) => option.value === team.slug))
-			options.push({ value: team.slug, label: team.slug, detail: `Like the team @…/${team.slug}` });
+			options.push({ value: team.slug, label: team.slug, detail: `Named after the team @${org}/${team.slug}` });
 	return options.filter((option) => ROLE.test(option.value));
 }
 

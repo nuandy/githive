@@ -148,6 +148,13 @@ const click =
 const openSummary = (text: string) => async (p: Page) => {
 	await p.locator("summary", { hasText: text }).first().click();
 };
+const removeCollaborator = async (p: Page) => {
+	await p
+		.locator('[aria-labelledby="repo-collaborators"]')
+		.getByRole("button", { name: "Remove", exact: true })
+		.first()
+		.click();
+};
 const openUserMenu = async (p: Page) => {
 	await p.getByRole("button", { name: /^Signed in as/ }).click();
 };
@@ -277,6 +284,23 @@ const APP: Scene[] = [
 	page("org-acme", "/orgs/acme"),
 	page("org-acme-confirm", "/orgs/acme", { act: click("Remove") }),
 	page("org-acme-team-confirm", "/orgs/acme", { act: click("Delete team") }),
+	// Making devon an owner asks first.
+	page("org-acme-promote", "/orgs/acme", {
+		act: async (p) => {
+			await p.locator("#role-devon").selectOption("owner");
+		},
+	}),
+	// A role changed says Saved.
+	page("org-acme-role-saved", "/orgs/acme", {
+		act: async (p) => {
+			await p.locator("#role-mara").selectOption("member");
+		},
+	}),
+	// Taken off a team, with Undo.
+	page("org-acme-team-undo", "/orgs/acme", { act: click("Take devon off @acme/payments") }),
+	page("org-acme-invite-undo", "/orgs/acme", {
+		act: steps(click("Cancel invitation"), click("Yes, cancel invitation")),
+	}),
 	page("org-fieldnotes", "/orgs/fieldnotes"),
 	page("org-robin", "/orgs/robin"),
 	page("agents", "/settings/agents"),
@@ -330,15 +354,42 @@ const APP: Scene[] = [
 	page("storefront-code-image", `${STOREFRONT}/code/public/images/placeholder.png`),
 	page("storefront-code-lockfile", `${STOREFRONT}/code/package-lock.json`),
 	page("storefront-agents", `${STOREFRONT}/agents`),
+	// Settings, a page per section.
 	page("storefront-settings", `${STOREFRONT}/settings`),
-	page("storefront-settings-checks", `${STOREFRONT}/settings`, { act: openSummary("What the checks run in") }),
-	page("storefront-settings-confirm", `${STOREFRONT}/settings`, {
-		act: async (p) =>
-			p
-				.locator('[aria-labelledby="repo-collaborators"]')
-				.getByRole("button", { name: "Remove", exact: true })
-				.first()
-				.click(),
+	page("storefront-settings-records", `${STOREFRONT}/settings`, { act: openSummary("How the records are kept") }),
+	...(["review", "path-rules", "branch-rules", "checks", "github", "danger-zone"] as const).map((section) =>
+		page(`storefront-settings-${section}`, `${STOREFRONT}/settings/${section}`),
+	),
+	page("storefront-settings-checks-environment", `${STOREFRONT}/settings/checks`, {
+		act: openSummary("What the checks run in"),
+	}),
+	page("storefront-settings-confirm", `${STOREFRONT}/settings`, { act: removeCollaborator }),
+	// The collaborator removed: a line offers Undo.
+	page("storefront-settings-undo", `${STOREFRONT}/settings`, {
+		act: steps(removeCollaborator, click("Yes, remove")),
+	}),
+	// Edits not saved: a dot by Review in the nav, and its save bar ready.
+	page("storefront-settings-review-dirty", `${STOREFRONT}/settings/review`, {
+		act: steps(fill("Required approvals", "3"), async (p) => {
+			await p.locator("#settings-vetoes").fill("privacy,");
+			await p.keyboard.press("Escape");
+		}),
+	}),
+	// Roles offered as you type.
+	page("storefront-settings-review-typeahead", `${STOREFRONT}/settings/review`, {
+		act: async (p) => {
+			await p.locator("#settings-vetoes").click();
+			await p.keyboard.type("f");
+		},
+	}),
+	// A save with a rule naming no paths: the problem under its field, and in the save bar.
+	page("storefront-settings-path-rules-problem", `${STOREFRONT}/settings/path-rules`, {
+		act: steps(click("Add a rule"), click("Save")),
+	}),
+	page("storefront-settings-github-change", `${STOREFRONT}/settings/github`, { act: click("Change…") }),
+	page("storefront-settings-github-disconnect", `${STOREFRONT}/settings/github`, { act: click("Disconnect") }),
+	page("storefront-settings-delete", `${STOREFRONT}/settings/danger-zone`, {
+		act: steps(click("Delete repository…"), fill(/^Type/, "acme/storefront")),
 	}),
 	page("storefront-audit", `${STOREFRONT}/audit`),
 	// The audit not read yet: here, never.
@@ -371,6 +422,7 @@ const APP: Scene[] = [
 	page("new-thing-hive", "/repos/acme/new-thing"),
 	page("new-thing-code", "/repos/acme/new-thing/code"),
 	page("new-thing-settings", "/repos/acme/new-thing/settings"),
+	page("new-thing-settings-danger-zone", "/repos/acme/new-thing/settings/danger-zone"),
 	page("tiny-lib-hive", "/repos/oss-friend/tiny-lib"),
 	page("tiny-lib-settings", "/repos/oss-friend/tiny-lib/settings"),
 	page("tiny-lib-code", "/repos/oss-friend/tiny-lib/code"),

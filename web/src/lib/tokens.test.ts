@@ -83,8 +83,9 @@ describe("who may vote as a role", () => {
 
 describe("roles that can block", () => {
 	it("are offered from the roles the repo uses and the org's teams", () => {
-		const options = roleOptions(["security", "payments"], [{ slug: "frontend", name: "Frontend" }]);
+		const options = roleOptions(["security", "payments"], [{ slug: "frontend", name: "Frontend" }], "acme");
 		expect(options.map((option) => option.value)).toEqual(["security", "payments", "frontend"]);
+		expect(options[2]!.detail).toBe("Named after the team @acme/frontend");
 		expect(roleOptions(["security"], [{ slug: "security", name: null }]).map((option) => option.value)).toEqual([
 			"security",
 		]);
