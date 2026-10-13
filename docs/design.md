@@ -1956,7 +1956,7 @@ lines, the names it alters or uses that other changes touch, and its files:
 `GET /repos/<owner>/<name>/changes/<change>/diff`, each file's unified diff from
 the change's merge base with its branch to its head, or, once landed, from the
 landed commit's first parent to it, with files outside its claim flagged; capped
-at 300 files, about 1 MB of diff text and 256 KB a side, binary and too-big files
+at 300 files, about 900 KB as JSON and 256 KB a side, binary and too-big files
 marked rather than diffed), what landed on a branch and why
 (History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or

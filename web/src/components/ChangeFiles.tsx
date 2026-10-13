@@ -80,7 +80,7 @@ function NotShown({ file, repo, head }: { file: FileDiff; repo: string; head: st
 		? "Binary file: not shown."
 		: file.tooBig
 			? "Too big to show here: one of its sides is over 256 KB."
-			: "Its lines are left out: this change's diff is past 1 MB.";
+			: "Its lines are left out: this change's diff is past 900 KB.";
 	return (
 		<p className="m-0 flex flex-wrap gap-x-2 border-t border-border px-3 py-2.5 text-ui text-muted-foreground">
 			{why}

@@ -365,7 +365,7 @@ export interface FileDiff {
 	outside?: true;
 	binary?: true;
 	tooBig?: true;
-	/** Its lines were left out: the diff's text (about 1 MB) ran out before it. */
+	/** Its lines were left out: the diff (about 900 KB) ran out of room before it. */
 	cut?: true;
 	hunks?: DiffHunk[];
 }

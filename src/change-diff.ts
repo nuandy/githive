@@ -4,14 +4,17 @@ import type { MemoryFS } from "./memory-fs";
 import { type DiffHunk, unifiedDiff } from "./unified-diff";
 
 // A change's files as the change page's Files tab shows them: each file it changed between two commits, with its
-// lines added and removed. The work is capped: the first DIFF_FILES files, DIFF_BYTES of diff text in all, and no side
-// of a file over DIFF_FILE_BYTES is diffed. A binary file, or one too big, is marked rather than diffed; a file past
-// the text cap keeps its counts and loses its lines.
+// lines added and removed. The work is capped: the first DIFF_FILES files, DIFF_BYTES of them as JSON in all, and no
+// side of a file over DIFF_FILE_BYTES is diffed. A binary file, or one too big, is marked rather than diffed; a file
+// past the size cap keeps its counts and loses its lines.
 
 /** The most files a diff lists; `total` counts the rest. */
 export const DIFF_FILES = 300;
-/** The most diff text a diff holds, about 1 MB. */
-export const DIFF_BYTES = 1_000_000;
+/**
+ * The most a diff's files weigh as JSON, about 900 KB: escaped as they're sent, so the view holding them stays under
+ * the most a kept view may weigh (see kept-view.ts) and the next reader doesn't diff them again.
+ */
+export const DIFF_BYTES = 900_000;
 /** The most a side of a file may weigh to be diffed. */
 export const DIFF_FILE_BYTES = 256 * 1024;
 
@@ -71,30 +74,29 @@ export async function diffFiles(
 		if (!before && !after) continue;
 		const file: FileDiff = { path, status: !before ? "added" : !after ? "removed" : "modified" };
 		if (claimed && !inLane(path, claimed)) file.outside = true;
-		files.push(file);
 		const sides = [before, after].filter((bytes): bytes is Uint8Array => !!bytes);
-		if (sides.some((bytes) => bytes.length > fileBytes)) {
-			file.tooBig = true;
-			continue;
-		}
-		if (sides.some(isBinary)) {
-			file.binary = true;
-			continue;
-		}
-		const { hunks, added, removed } = unifiedDiff(
-			decoder.decode(before ?? new Uint8Array()),
-			decoder.decode(after ?? new Uint8Array()),
-		);
-		Object.assign(file, { added, removed });
-		const size = hunks.reduce((sum, hunk) => sum + hunk.lines.reduce((lines, line) => lines + line.length + 1, 0), 0);
-		if (size > left) file.cut = true;
+		if (sides.some((bytes) => bytes.length > fileBytes)) file.tooBig = true;
+		else if (sides.some(isBinary)) file.binary = true;
 		else {
-			left -= size;
-			file.hunks = hunks;
+			const { hunks, added, removed } = unifiedDiff(
+				decoder.decode(before ?? new Uint8Array()),
+				decoder.decode(after ?? new Uint8Array()),
+			);
+			Object.assign(file, { added, removed });
+			if (weight({ ...file, hunks }) <= left) file.hunks = hunks;
+			else file.cut = true;
 		}
+		// Past the size cap even without its lines: it isn't listed, and `total` counts it.
+		const size = weight(file);
+		if (size > left) break;
+		left -= size;
+		files.push(file);
 	}
 	return { files, total: sorted.length };
 }
+
+/** A file's weight in a diff's JSON, with the comma after it. */
+const weight = (file: FileDiff) => JSON.stringify(file).length + 1;
 
 /** A repo held in memory, as isomorphic-git reads it. */
 export interface HeldRepo {

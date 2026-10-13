@@ -66,13 +66,29 @@ describe("a change's files, capped", () => {
 		]);
 	});
 
-	it("lists at most so many files, and leaves out lines past its text", async () => {
+	it("lists at most so many files, and leaves out lines past its size", async () => {
 		const few = await diffFiles(Object.keys(sides), read, { limits: { files: 2 } });
 		expect([few.files.map((file) => file.path), few.total]).toEqual([["a.txt", "b.txt"], 6]);
-		// a.txt's lines take 13 bytes (" one", "-two" and "+2", each with its newline), so b.txt's don't fit in 16.
-		const short = await diffFiles(["a.txt", "b.txt"], read, { limits: { bytes: 16 } });
-		expect(short.files[0]!.hunks).toHaveLength(1);
-		expect(short.files[1]).toEqual({ path: "b.txt", status: "added", added: 1, removed: 0, cut: true });
+		// Room for a.txt with its lines and b.txt without: b.txt's are left out.
+		const whole = await diffFiles(["a.txt"], read);
+		const cutB = { path: "b.txt", status: "added", added: 1, removed: 0, cut: true };
+		const bytes = JSON.stringify([...whole.files, cutB]).length;
+		const short = await diffFiles(["a.txt", "b.txt"], read, { limits: { bytes } });
+		expect(short.files).toEqual([...whole.files, cutB]);
+		// Without room for even b.txt's path, it isn't listed, and is counted.
+		const shorter = await diffFiles(["a.txt", "b.txt"], read, { limits: { bytes: bytes - cutB.path.length } });
+		expect([shorter.files, shorter.total]).toEqual([whole.files, 2]);
+	});
+
+	it("weighs its files as they're sent, so lines JSON escapes can't take it past its size", async () => {
+		// Tabs, quotes and backslashes take twice their length in JSON.
+		const escaped = `${'\t"\\'.repeat(30)}\n`.repeat(20);
+		const paths = ["q0.txt", "q1.txt", "q2.txt", "q3.txt"];
+		const { files } = await diffFiles(paths, async (side) => (side === "head" ? bytes(escaped) : null), {
+			limits: { bytes: 6000 },
+		});
+		expect(JSON.stringify(files).length).toBeLessThanOrEqual(6000);
+		expect(files.map((file) => !!file.cut)).toEqual([false, true, true, true]);
 	});
 });
 
