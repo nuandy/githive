@@ -13,6 +13,7 @@ import {
 	signinErrorOf,
 	tokenLabel,
 	withoutSigninError,
+	workPrompt,
 } from "./session";
 
 describe("signing in", () => {
@@ -92,5 +93,11 @@ describe("agent tokens", () => {
 		]);
 		for (const client of ["claude-code", "codex", "other"] as const)
 			expect(JSON.stringify(tokenSteps(client, "https://githive.app", "ghv_x"))).not.toContain("<token>");
+	});
+});
+
+describe("giving a new agent work", () => {
+	it("asks it, through GitHive, for a small piece of work in one of your repos", () => {
+		expect(workPrompt("robin/notes")).toBe("Use GitHive to improve the README in robin/notes.");
 	});
 });

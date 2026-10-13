@@ -12,16 +12,48 @@ function buttonText(copied: Copied, label: string): string {
 }
 
 /**
+ * The text with each flag (--transport, -m) kept whole: browsers break a line after a hyphen, which would leave "--"
+ * at one line's end and "transport" at the next's. A line breaks at a space instead.
+ */
+function WholeFlags({ text }: { text: string }) {
+	return (
+		<>
+			{text.split(/(\s+)/).map((part, index) =>
+				index % 2 === 0 && /^-[^\s]{1,40}$/.test(part) ? (
+					<span key={index} className="whitespace-nowrap">
+						{part}
+					</span>
+				) : (
+					part
+				),
+			)}
+		</>
+	);
+}
+
+/**
  * A command or secret to copy: shown in full, with a Copy button that falls back to selecting the text. The button is
  * named by what it copies, never by the text, which may be a secret; a status line says it's copied, for a while.
  */
-export function CopyBlock({ text, label = "Copy", className }: { text: string; label?: string; className?: string }) {
+export function CopyBlock({
+	text,
+	label = "Copy",
+	className,
+	onCopy,
+}: {
+	text: string;
+	label?: string;
+	className?: string;
+	/** Called once it's copied, or selected for the reader to copy. */
+	onCopy?: () => void;
+}) {
 	const codeRef = useRef<HTMLElement>(null);
 	const [copied, setCopied] = useState<Copied>(null);
 	const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 	useEffect(() => () => clearTimeout(timer.current), []);
 	const show = (state: Copied) => {
 		setCopied(state);
+		onCopy?.();
 		clearTimeout(timer.current);
 		timer.current = setTimeout(() => setCopied(null), 2000);
 	};
@@ -48,7 +80,9 @@ export function CopyBlock({ text, label = "Copy", className }: { text: string; l
 	return (
 		<div className={cn("flex min-w-0 items-start gap-2 to-560:flex-col to-560:items-stretch", className)}>
 			<pre className="min-w-0 flex-1 border border-border px-3 py-2.25">
-				<code ref={codeRef}>{text}</code>
+				<code ref={codeRef}>
+					<WholeFlags text={text} />
+				</code>
 			</pre>
 			<Button className="min-w-18 shrink-0" onClick={copy}>
 				<span key={copied ?? "label"} className={cn(changed && "animate-fade")}>

@@ -112,6 +112,9 @@ export function connectSteps(client: McpClient, origin: string): ConnectStep[] {
 	];
 }
 
+/** What to ask a new agent first: a small piece of real work, through GitHive, in one of your repos. */
+export const workPrompt = (repo: string) => `Use GitHive to improve the README in ${repo}.`;
+
 /** Connecting a client with an agent token: what to copy, with the token filled in. */
 export function tokenSteps(client: McpClient, origin: string, token: string): ConnectStep[] {
 	const url = `${origin}/mcp`;
