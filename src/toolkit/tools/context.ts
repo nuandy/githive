@@ -116,7 +116,7 @@ export interface ToolContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
 	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
-	ping?: (repo: string, event?: HiveEvent, tool?: string, whom?: { for: string[] }) => Promise<void>;
+	ping?: (repo: string, event?: HiveEvent, tool?: string, whom?: { for?: string[]; opens?: true }) => Promise<void>;
 	/** Cloudflare's Clef decision models, asked about what agents write for each other (see clef-hints.ts). */
 	clef?: Clef;
 	/** The repo's doorbell, which rings on every write (see RepoCache.ring): `wait` holds on it. */

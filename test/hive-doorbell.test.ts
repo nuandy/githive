@@ -5,25 +5,28 @@ import { FakeStorage } from "./fakes/env";
 // rings only a repo whose hive asked, and stops once none of its agents is running.
 
 const { RepoCache } = await import("../src/repo-cache");
+type HiveRing = import("../src/repo-cache").HiveRing;
 
 function repoCache(running: () => boolean | Promise<boolean>) {
 	const rings: [string, string][] = [];
+	const rung: HiveRing[] = [];
 	const HOSTED_AGENT = {
 		getByName: (name: string) => ({
-			ringAgents: async (reason: string) => {
-				rings.push([name, reason]);
+			ringAgents: async (ring: HiveRing) => {
+				rings.push([name, ring.reason]);
+				rung.push(ring);
 				return running();
 			},
 		}),
 	};
 	const storage = new FakeStorage();
 	const cache = new RepoCache({ storage, getWebSockets: () => [] } as never, { HOSTED_AGENT } as never);
-	return { cache, rings, storage };
+	return { cache, rings, rung, storage };
 }
 
 describe("ringing a repo's hive", () => {
 	it("rings with the tool that wrote, a landing or a push, once the hive asked", async () => {
-		const { cache, rings } = repoCache(() => true);
+		const { cache, rings, rung } = repoCache(() => true);
 		await cache.ping("records", true, [], "claim");
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(rings).toEqual([]);
@@ -40,10 +43,12 @@ describe("ringing a repo's hive", () => {
 				["hive:ada--honeycomb", "landed"],
 			]),
 		);
+		// A landing concerns each change's agent, and may free work for anyone.
+		expect(rung.at(-1)).toEqual({ reason: "landed", for: ["bee"], opens: true });
 	});
 
 	it("rings for a notice left for an agent, and wakes a held wait, with the notice still kept", async () => {
-		const { cache, rings } = repoCache(() => true);
+		const { cache, rings, rung } = repoCache(() => true);
 		await cache.hiveListens("ada--honeycomb");
 		const mark = await cache.rings();
 		const held = cache.ringAfter(mark, 5_000);
@@ -51,6 +56,7 @@ describe("ringing a repo's hive", () => {
 		await cache.notify("main", [{ agent: "bee", notice: { kind: "heads_up", at, says: "a heads-up", change: "c" } }]);
 		expect(await held).toEqual({ rings: mark + 1, reasons: ["notice"] });
 		await vi.waitFor(() => expect(rings).toEqual([["hive:ada--honeycomb", "notice"]]));
+		expect(rung).toEqual([{ reason: "notice", for: ["bee"] }]);
 		// Waiting reads when the newest notice came, which telling it doesn't change: the agent's next reply tells it.
 		expect(await cache.newestNotice("bee")).toBe(at);
 		expect((await cache.newsFor("main", "bee")).map((item) => item.kind)).toEqual(["heads_up"]);

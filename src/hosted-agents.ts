@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
+import type { HiveRing } from "./repo-cache";
 import type { Conversation } from "./sandbox";
 import { callTool } from "./toolkit/mcp";
 import {
@@ -31,10 +32,6 @@ export const AGENT_TURN_GAP_MS = 5_000;
 
 const TURN_BEGAN = "turn-began";
 const RUNG_AT = "rung-at";
-
-// What rings as a tool wrote it, a batch landed or a push arrived (see RepoCache.ringHive) that can't end an agent's
-// wait on its own change or its review: an agent busy with both skips them.
-const NEW_WORK_ONLY = new Set(["claim", "add_work", "build", "pushed", "settings", "ask_human"]);
 
 /** Turns in a row an agent's loop may fail before it stops. */
 const FAILING_MOST = 15;
@@ -111,12 +108,12 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** Rings each of the repo's agents (see ring). Returns whether any of them is still running. */
-	async ringAgents(reason: string) {
+	async ringAgents(rung: HiveRing | string) {
 		const hive = await this.ctx.storage.get<Hive>("hive");
 		if (!hive) return false;
 		const ring = (name: string) =>
 			this.agentNamed(hive.repo, name)
-				.ring(reason)
+				.ring(rung)
 				.catch(() => true);
 		const running = await Promise.all(hive.names.map(ring));
 		return running.some(Boolean);
@@ -171,13 +168,14 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/**
-	 * Something changed in the repo (`reason`: the tool that wrote, "landed" or "pushed"): the agent takes a turn soon,
-	 * at most one per AGENT_TURN_GAP_MS. A stopped agent stays stopped. Returns whether the agent is still running.
+	 * Something changed in the repo (see RepoCache.ring): if it concerns the agent, it takes a turn soon, at most one
+	 * per AGENT_TURN_GAP_MS. A stopped agent stays stopped. Returns whether the agent is still running. A ring as a
+	 * reason alone is from a RepoCache older than rings that say whom they concern, and wakes it.
 	 */
-	async ring(reason: string) {
+	async ring(rung: HiveRing | string) {
 		const state = await this.ctx.storage.get<HostedAgentState>("agent");
 		if (!state || state.done) return false;
-		if (state.change && state.reviewing && NEW_WORK_ONLY.has(reason)) return true;
+		if (!wakes(typeof rung === "string" ? { reason: rung } : rung, state)) return true;
 		const now = Date.now();
 		await this.ctx.storage.put(RUNG_AT, now);
 		const began = (await this.ctx.storage.get<number>(TURN_BEGAN)) ?? 0;
@@ -417,4 +415,15 @@ async function giveBack(call: Call, change: string, reason: string) {
 function remember(state: HostedAgentState, rejected: Rejected) {
 	const others = (state.rejected ?? []).filter((kept) => kept.change !== rejected.change);
 	state.rejected = [...others, rejected].slice(-REJECTED_KEPT);
+}
+
+/**
+ * Whether a ring wakes an agent: one about it does; one that may offer work does unless the agent is busy with its
+ * own change and a review, so has no room for more; one that says neither is about everything, and does.
+ */
+function wakes(ring: HiveRing, state: HostedAgentState) {
+	if (ring.for === undefined && !ring.opens) return true;
+	if (ring.for?.includes(state.name)) return true;
+	if (!ring.opens) return false;
+	return !(state.change && state.reviewing);
 }

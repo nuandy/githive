@@ -166,10 +166,17 @@ interface Published {
 	whom?: Concerns;
 }
 
-/** Whom a ring concerns: the agents named, so a held `wait` of anyone else sleeps on. */
+/**
+ * Whom a ring concerns: the agents named, and with `opens`, any agent it may offer work to. A ring that says neither is
+ * about everything, as rings were before they said.
+ */
 export interface Concerns {
-	for: string[];
+	for?: string[];
+	opens?: true;
 }
+
+/** A ring as the hive hears it: why it rang, and whom it concerns. */
+export type HiveRing = Concerns & { reason: string };
 
 /** A ring as a held `wait` hears it: the count it brought the doorbell to, and why it rang. */
 export interface Rung {
@@ -177,10 +184,7 @@ export interface Rung {
 	reasons: string[];
 }
 
-interface LoggedRing {
-	reason: string;
-	for?: string[];
-}
+type LoggedRing = HiveRing;
 
 interface Listener {
 	agent?: string;
@@ -189,8 +193,13 @@ interface Listener {
 
 const ringKey = (rings: number) => `${RING}${String(rings).padStart(12, "0")}`;
 
-// A ring without `for` concerns everyone, and so does every ring to a listener that named no agent.
-const concerns = (ring: LoggedRing, agent: string | undefined) => !ring.for || !agent || ring.for.includes(agent);
+// A held `wait` wakes for a ring about its agent or one that may offer it work. A listener that named no agent hears
+// every ring, and every listener hears a ring that says nothing of whom it concerns.
+function concerns(ring: LoggedRing, agent: string | undefined) {
+	if (!agent) return true;
+	if (ring.for === undefined && !ring.opens) return true;
+	return !!ring.opens || ring.for!.includes(agent);
+}
 
 export class RepoCache extends DurableObject<Env> {
 	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
@@ -368,7 +377,8 @@ export class RepoCache extends DurableObject<Env> {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
 		const events = pushEvents(pushes);
 		if (!events.length) return;
-		await this.publish({ events, kind: "pushed", ring: "pushed" });
+		// A push offers its change for review.
+		await this.publish({ events, kind: "pushed", ring: "pushed", whom: { opens: true } });
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
@@ -570,7 +580,9 @@ export class RepoCache extends DurableObject<Env> {
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
 		const landed = asNews(outcomes);
 		const told = landed.length ? { told: { landed: { branch, news: landed } } } : {};
-		await this.publish({ events: settledEvents(outcomes), kind: "landing", ring: "landed", ...told });
+		// A landing concerns each change's agent, and may free work waiting on it for anyone.
+		const whom: Concerns = { for: [...new Set(outcomes.map((outcome) => outcome.agent))], opens: true };
+		await this.publish({ events: settledEvents(outcomes), kind: "landing", ring: "landed", whom, ...told });
 		return stretch && stretchSummary(stretch);
 	}
 
@@ -718,7 +730,7 @@ export class RepoCache extends DurableObject<Env> {
 	// Counted first, so a call that read the count just before this can't miss it.
 	private async ring(reason: string, whom?: Concerns, told?: Told) {
 		const rings = (await this.rings()) + 1;
-		const logged: LoggedRing = { reason, ...(whom ? { for: whom.for } : {}) };
+		const logged: LoggedRing = { reason, ...whom };
 		if (told) await keepNoticeTimes(this.ctx.storage, told);
 		await this.ctx.storage.put({
 			[RINGS]: rings,
@@ -729,18 +741,18 @@ export class RepoCache extends DurableObject<Env> {
 		if (told) await trimTold(this.ctx.storage);
 		for (const listener of [...this.listening])
 			if (concerns(logged, listener.agent)) listener.wake({ rings, reasons: [reason] });
-		this.ringHive(reason);
+		this.ringHive(logged);
 	}
 
-	private ringHive(reason: string) {
+	private ringHive(rung: HiveRing) {
 		const ring = async () => {
 			const hive = await this.ctx.storage.get<{ repo: string; since: number }>(HIVE);
 			if (!hive || !this.env.HOSTED_AGENT) return;
-			const running = await rpc(this.env.HOSTED_AGENT.getByName(`hive:${hive.repo}`).ringAgents(reason));
+			const running = await rpc(this.env.HOSTED_AGENT.getByName(`hive:${hive.repo}`).ringAgents(rung));
 			const current = await this.ctx.storage.get<{ since: number }>(HIVE);
 			if (!running && current?.since === hive.since) await this.ctx.storage.delete(HIVE);
 		};
-		void ring().catch((err) => console.error(`ringing the hive (${reason}) failed`, String(err)));
+		void ring().catch((err) => console.error(`ringing the hive (${rung.reason}) failed`, String(err)));
 	}
 
 	private broadcast(kind: string) {

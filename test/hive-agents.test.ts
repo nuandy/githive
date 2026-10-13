@@ -314,7 +314,7 @@ describe("ringing a repo's hosted agents", () => {
 		expect(await alarmOf(first!)).toBe(now + AGENT_TURN_GAP_MS);
 	});
 
-	it("skip rings about new work while busy with their own change and a review", async () => {
+	it("skip rings that may offer work while busy with their own change and a review, but not one about them", async () => {
 		frozen();
 		const { repoHive, agents } = hive(pieces("a"));
 		await start(repoHive);
@@ -323,12 +323,26 @@ describe("ringing a repo's hosted agents", () => {
 		const state = (await first!.account()) as HostedAgentState;
 		await storageOf(first!).put("agent", { ...state, ...busy });
 		await storageOf(first!).setAlarm(now + AGENT_FALLBACK_MS);
-		await first!.ring("claim");
-		await first!.ring("pushed");
+		await first!.ring({ reason: "claim", for: [] });
+		await first!.ring({ reason: "pushed", opens: true });
+		await first!.ring({ reason: "vote", for: ["someone-else"] });
 		expect(await alarmOf(first!)).toBe(now + AGENT_FALLBACK_MS);
-		// Its reviewer giving the review back ends its wait, as a vote does.
-		await first!.ring("leave_review");
+		// Its reviewer giving the review back ends its wait, as a vote does: both name it.
+		await first!.ring({ reason: "leave_review", for: [state.name], opens: true });
 		expect(await alarmOf(first!)).toBe(now);
+	});
+
+	it("wake when idle for a ring that may offer work, and never for one about other agents alone", async () => {
+		frozen();
+		const { repoHive, agents } = hive(pieces("a"));
+		await start(repoHive);
+		const [first] = agents();
+		await first!.alarm();
+		await first!.ring({ reason: "vote", for: ["someone-else"] });
+		await first!.ring({ reason: "claim", for: [] });
+		expect(await alarmOf(first!)).toBe(now + AGENT_FALLBACK_MS);
+		await first!.ring({ reason: "add_work", opens: true });
+		expect(await alarmOf(first!)).toBe(now + AGENT_TURN_GAP_MS);
 	});
 
 	it("never wake once stopped, and the hive says when none of its agents is running", async () => {

@@ -1355,17 +1355,24 @@ it:
   a notice is left for an agent, and the hive rings each agent still running.
   Every writer goes through one method, `publish`, which keeps the notices and
   hive events, tells the dashboard's pages and rings, so no writer can leave a
-  listener out. A ring says whom it concerns: a notice its recipients, a vote
-  its change's agent, a claim, a build or a question to people no agent waiting
-  (they only take work away, which an agent finds when it next looks), and
-  anything that may offer work (a release, backlog added, a push, a landing,
-  settings) every agent. RepoCache logs its last 500 rings with that. Beyond
+  listener out. A ring says whom it concerns (`for`) and whether it may offer
+  work to anyone (`opens`): a notice concerns its recipients, a vote its
+  change's agent and its voter, a review given back the agent that held it
+  (and opens it to others), a landing each change's agent (and opens what
+  waited on it); a claim, a build, a merge or a question to people concerns no
+  agent waiting (they only take work away, which an agent finds when it next
+  looks, and a merge's landing rings for itself); a release, backlog added, a
+  push, settings or a revert opens. A ring that says neither, such as a write
+  from the dashboard, concerns everyone. RepoCache logs its last 500 rings with
+  that. Beyond
   that, a ring says only that something changed, with the tool that changed it; the agent then reads and chooses as
   always, so nothing it's told decides for it. An agent takes at most one turn
   every 5 seconds however often it's rung, and one rung during a turn takes the
-  next soon after, since its reads may have come too early. An agent busy with
-  its own change and a review skips rings that can only offer new work (a claim,
-  a push, backlog added). Rings are hints: when nothing rings, an agent still
+  next soon after, since its reads may have come too early. A hosted agent
+  wakes for a ring that names it, and for one that opens work unless it's busy
+  with its own change and a review, so has no room for more; a ring that only
+  names other agents leaves it asleep. A vote and a review given back name
+  their caller because a hosted agent's reviewer makes them in its name. Rings are hints: when nothing rings, an agent still
   takes a turn every 2 minutes, which notices what rings nothing, such as a
   review hold running out. The repo rings only once its hive has started, and
   stops when none of its agents is running. **`wait`** is the same doorbell for
