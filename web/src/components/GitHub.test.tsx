@@ -6,7 +6,7 @@ import { repoSnapshot } from "../test/fixtures";
 import { ChangePage } from "./ChangePage";
 import { GitHubLink } from "./GitHubLink";
 import { createDraftStore, draftKey } from "../lib/settingsDrafts";
-import { githubDraft, githubForm, githubInput, GitHubSection, savedLink } from "./GitHubSettings";
+import { disconnects, githubDraft, githubForm, githubInput, GitHubSection, savedLink } from "./GitHubSettings";
 import { ChangeLabels, githubTerms } from "./RepoTabs";
 
 // A repo connected to GitHub shows it by its name: the GitHub repo, and in pr
@@ -196,6 +196,18 @@ describe("the GitHub settings", () => {
 		expect(text(html)).toContain("Nothing reaches GitHub's main until someone merges it there.");
 		expect(text(html)).toContain("Pushed to main After every landing GitHive pushes main to GitHub");
 		expect(text(section(undefined))).toContain("Connect");
+	});
+
+	it("asks before a repo left blank disconnects it: Save asks Disconnect's question", () => {
+		expect(disconnects({ repo: " ", sync: "pr", trust: true }, github())).toBe(true);
+		expect(disconnects({ repo: "acme/shop", sync: "mirror", trust: true }, github())).toBe(false);
+		expect(disconnects({ repo: "", sync: "pr", trust: true }, undefined)).toBe(false);
+		const drafts = createDraftStore();
+		const form = { ...githubDraft(github()), repo: "", editing: true, touched: true };
+		drafts.set(draftKey("acme/web", "github"), { draft: form, base: githubForm(github()), dirty: true });
+		const html = section(github(), drafts);
+		expect(html).toMatch(/<button[^>]*type="submit"[^>]*>Disconnect…<\/button>/);
+		expect(text(html)).toContain("Left blank, it disconnects acme/shop: Save asks first.");
 	});
 
 	it("shows the link as saved until the repo is read again", () => {

@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import type { GitHubSync, RepoGitHub, SettingsInput } from "../api";
 import { useHeldDraft } from "../hooks/useHeldDraft";
 import { messageOf } from "../lib/errors";
@@ -68,6 +68,9 @@ export function githubInput(draft: GitHubDraft, github: RepoGitHub | undefined, 
 	return input;
 }
 
+/** Whether saving the draft would disconnect the repo (its name left blank): that asks first, as Disconnect does. */
+export const disconnects = (draft: GitHubDraft, github: RepoGitHub | undefined) => !!github && !draft.repo.trim();
+
 /** The form as held: the draft, whether the editor is open (a connected link shows read-only until Change…), and
  * whether anything was touched. */
 interface GitHubForm extends GitHubDraft {
@@ -132,9 +135,13 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 	);
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<ReactNode>(null);
+	// Save with the repo left blank asks Disconnect's question; answered, focus goes back to the field.
+	const [asking, setAsking] = useState(false);
+	const field = useRef<HTMLInputElement>(null);
 	const form = held.draft;
 	const github = linkOf(form);
 	const input = inputOf(form);
+	const blank = disconnects(form, github);
 
 	const edit = (patch: Partial<GitHubDraft>) => {
 		setStatus(null);
@@ -156,10 +163,11 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 			setBusy(false);
 		}
 	};
+	const disconnect = (link: RepoGitHub) => send({ github: "" }, `Saved. Disconnected from ${link.repo}.`);
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
-		const repoNow = form.repo.trim();
-		void send(input, repoNow ? `Saved. Connected to ${repoNow}.` : "Saved. Not connected to GitHub.");
+		if (blank) setAsking(true);
+		else void send(input, `Saved. Connected to ${form.repo.trim()}.`);
 	};
 
 	const description = (
@@ -185,7 +193,7 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 						setStatus(null);
 						held.edit((current) => ({ ...current, editing: true }));
 					}}
-					onDisconnect={() => send({ github: "" }, `Saved. Disconnected from ${github.repo}.`)}
+					onDisconnect={() => disconnect(github)}
 				/>
 			</SettingsPart>
 		);
@@ -204,17 +212,23 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 					<SettingField>
 						<Label htmlFor="github-repo">GitHub repo</Label>
 						<Input
+							ref={field}
 							id="github-repo"
 							className={cn(COMMAND, "max-w-100")}
 							value={form.repo}
 							onChange={(event) => edit({ repo: event.target.value })}
 							autoComplete="off"
 							spellCheck={false}
-							aria-describedby="github-repo-hint"
+							aria-describedby={blank ? "github-repo-hint github-repo-blank" : "github-repo-hint"}
 						/>
 						<SettingHint id="github-repo-hint">
 							Its owner and name, as its address on GitHub ends: owner/name.
 						</SettingHint>
+						{github && blank ? (
+							<SettingHint id="github-repo-blank">
+								Left blank, it disconnects {github.repo}: Save asks first.
+							</SettingHint>
+						) : null}
 					</SettingField>
 					<fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0" disabled={!connected}>
 						<legend className="mb-1 p-0 font-semibold">How GitHive's work reaches it</legend>
@@ -268,8 +282,16 @@ export function GitHubSection({ repo, branch, snapshot, save, onSaved, drafts }:
 					held.discard();
 				}}
 				discardLabel={github ? "Cancel" : "Discard"}
-				saveLabel={github ? "Save" : "Connect"}
+				saveLabel={blank ? "Disconnect…" : github ? "Save" : "Connect"}
 			/>
+			{github ? (
+				<Disconnect
+					github={github}
+					busy={busy}
+					onDisconnect={() => disconnect(github)}
+					asked={{ open: asking, close: () => setAsking(false), refocus: () => field.current?.focus() }}
+				/>
+			) : null}
 		</form>
 	);
 }
@@ -334,26 +356,44 @@ function Connected({
 	);
 }
 
-/** Disconnecting, asked first in a dialog: what stops, and what stays. */
+/**
+ * Disconnecting, asked first in a dialog: what stops, and what stays. Its own button opens it; or, `asked`, the editor's
+ * Save does, with the repo left blank, and focus goes back to the field once it's answered.
+ */
 function Disconnect({
 	github,
 	busy,
 	onDisconnect,
+	asked,
 }: {
 	github: RepoGitHub;
 	busy: boolean;
 	onDisconnect(): Promise<boolean>;
+	asked?: { open: boolean; close(): void; refocus(): void };
 }) {
-	const [open, setOpen] = useState(false);
+	const [opened, setOpened] = useState(false);
+	const open = asked ? asked.open : opened;
+	const setOpen = (next: boolean) => {
+		if (!asked) setOpened(next);
+		else if (!next) asked.close();
+	};
 	const stays = github.pull ? "the open pull request stays" : "what's there stays";
 	return (
 		<AlertDialog open={open} onOpenChange={(next) => !busy && setOpen(next)}>
-			<AlertDialogTrigger asChild>
-				<Button variant="danger" disabled={busy}>
-					Disconnect
-				</Button>
-			</AlertDialogTrigger>
-			<AlertDialogContent>
+			{asked ? null : (
+				<AlertDialogTrigger asChild>
+					<Button variant="danger" disabled={busy}>
+						Disconnect
+					</Button>
+				</AlertDialogTrigger>
+			)}
+			<AlertDialogContent
+				onCloseAutoFocus={(event) => {
+					if (!asked) return;
+					event.preventDefault();
+					asked.refocus();
+				}}
+			>
 				<AlertDialogHeader>
 					<AlertDialogTitle>Disconnect {github.repo}?</AlertDialogTitle>
 					<AlertDialogDescription>
