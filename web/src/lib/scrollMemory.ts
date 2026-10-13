@@ -75,3 +75,14 @@ export class ScrollMemory {
 /** Whether the page is tall enough yet to scroll down to `y`. */
 export const reachable = (y: number, page: { scrollHeight: number; innerHeight: number }) =>
 	y <= 0 || page.scrollHeight - page.innerHeight >= y;
+
+/**
+ * Whether this is the first time `entry` (a history entry's key) is seen, noting it: for what's done once per entry,
+ * on the visit that made it, not again as Back and Forward return to it. An entry with no key counts each time.
+ */
+export function firstTimeIn(seen: Set<string>, entry: string | undefined): boolean {
+	if (entry === undefined) return true;
+	if (seen.has(entry)) return false;
+	seen.add(entry);
+	return true;
+}

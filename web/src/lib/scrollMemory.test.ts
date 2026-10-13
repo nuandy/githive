@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ScrollMemory, reachable, withEntryKey } from "./scrollMemory";
+import { ScrollMemory, firstTimeIn, reachable, withEntryKey } from "./scrollMemory";
 
 // Where each history entry was scrolled to, so Back and Forward go back to it, and a new place starts at the top.
 
@@ -70,5 +70,17 @@ describe("a history entry's key", () => {
 		expect(withEntryKey(null, "k1")).toEqual({ githiveEntry: "k1" });
 		expect(withEntryKey({ other: 1 }, "k1")).toEqual({ other: 1, githiveEntry: "k1" });
 		expect(withEntryKey("not an object", "k1")).toEqual({ githiveEntry: "k1" });
+	});
+});
+
+describe("what's done once per history entry", () => {
+	it("is done on an entry's first visit, not as Back or Forward return to it", () => {
+		const seen = new Set<string>();
+		expect(firstTimeIn(seen, "k1")).toBe(true);
+		expect(firstTimeIn(seen, "k1")).toBe(false);
+		expect(firstTimeIn(seen, "k2")).toBe(true);
+		// An entry with no key can't be told apart: each time.
+		expect(firstTimeIn(seen, undefined)).toBe(true);
+		expect(firstTimeIn(seen, undefined)).toBe(true);
 	});
 });

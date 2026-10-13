@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ChangeDiff, ChangeHistory, ReleaseAnswer, RepoLanding, RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
@@ -19,6 +19,7 @@ import {
 } from "../lib/decision";
 import { shortSha } from "../lib/model";
 import { reducedMotion } from "../lib/motion";
+import { entryKeyOf, firstTimeIn } from "../lib/scrollMemory";
 import { timeAgo } from "../lib/relativeTime";
 import { type ChangeTab, href } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -301,6 +302,19 @@ function bringIntoView(id: string) {
 	found?.focus({ preventScroll: true });
 }
 
+/** The history entries whose `decide` was acted on: Back and Forward to one leave its scroll as it was. */
+const decided = new Set<string>();
+
+/**
+ * Asked to decide: the decision box gets the keyboard's place. Beside the tabs on a wide window it's in view already,
+ * sticky, so nothing scrolls; under the header on a narrow one, it's brought into view.
+ */
+function decideNow() {
+	if (window.matchMedia("(min-width: 901px)").matches)
+		document.getElementById("decide")?.focus({ preventScroll: true });
+	else bringIntoView("decide");
+}
+
 /**
  * A change, shown like a pull request: in force, landed or released. One decision box says where it stands and what
  * deciding on it needs, sticky beside every tab on a wide window and under the header on a narrow one; the tabs are
@@ -372,13 +386,10 @@ export function ChangePage({
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [wanted, tab]);
-	// Asked to decide: once the change is read, the box comes into view with the keyboard's place on it, once.
-	const decided = useRef(false);
+	// Asked to decide: once the change is read, the box takes the keyboard's place, once per history entry.
 	useEffect(() => {
-		if (!decide) decided.current = false;
-		if (!decide || decided.current || missing) return;
-		decided.current = true;
-		bringIntoView("decide");
+		if (!decide || missing) return;
+		if (firstTimeIn(decided, entryKeyOf(window.history.state))) decideNow();
 	}, [decide, missing]);
 
 	if (missing)
