@@ -69,10 +69,15 @@ lucide icons for `Icon`, and restyle it from the theme.
 ## Motion: nothing changes abruptly
 
 - State changes (hover, press, focus, selected) transition at `duration-fast`.
-- What appears (loaded content, a message, a confirm) fades in: `animate-appear`. A page fades in as you go to it
-  (`PageBoundary`); what's there from its first render comes with that fade, so what fades in on its own later (a
-  tab's content, a bumped count) waits until it has changed (`useChanged`), and a row that joins a list after it
-  first showed fades in by itself (`useArrivals`).
+- Going somewhere doesn't move anything: a page, a tab, and whatever replaces "Loading…" only fade in, quickly
+  (`animate-fade`), and the top bar, header and tabs stay still. A list's rows fade in one after another as it first
+  shows (`stagger`, with `useStagger`), never again for a poll.
+- What arrives in a page that stays put (a new row, a message, a confirm) fades in rising a few pixels:
+  `animate-appear`. What's there from a page's first render comes with that page's fade, so what fades in on its own
+  later (a tab's content, a bumped count) waits until it has changed (`useChanged`); a row that comes later than its
+  list, on its own (`useArrivals`).
+- The page keeps room for its scroll bar (`scrollbar-gutter: stable`), so it doesn't shift sideways between a short
+  page and a long one.
 - What opens and closes folds its height: `Collapse` or `Fold`, `disclosure`, or grid rows `0fr ↔ 1fr`.
 - Menus and other overlays grow from their trigger and fade, both ways.
 - Swapped content cross-fades; what leaves goes before it's removed (`useLingering`).

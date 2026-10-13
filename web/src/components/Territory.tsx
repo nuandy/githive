@@ -147,7 +147,7 @@ export function Territory({
 	// What comes once the tree is read (or goes to read another branch's) fades in; what's there at once comes with the
 	// page.
 	const read = useChanged(Boolean(tree));
-	const fades = read && "animate-appear";
+	const fades = read && "animate-fade";
 	return (
 		<section aria-labelledby="territory-title">
 			<div className="mb-5 flex flex-wrap items-baseline gap-x-4.5 gap-y-1 border-t-2 border-foreground pt-2.5">

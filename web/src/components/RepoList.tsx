@@ -246,7 +246,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
 				<div className="grid min-w-0 gap-2">
 					<h1 className="text-display tracking-[-0.01em]">Repositories</h1>
-					{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-appear")} /> : null}
+					{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
 				</div>
 				{canCreate ? (
 					<div className="flex flex-wrap gap-2">
@@ -265,7 +265,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 			{demo ? <DemoCard api={demo} /> : null}
 
 			{all.length > 0 ? (
-				<div className={cn("relative mb-4", searchFades && "animate-appear")}>
+				<div className={cn("relative mb-4", searchFades && "animate-fade")}>
 					<Icon name="search" className="pointer-events-none absolute top-2.5 left-2.75 text-muted-foreground" />
 					<label className="sr-only" htmlFor="repo-search">
 						Find a repository
@@ -281,7 +281,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 				</div>
 			) : null}
 
-			<div key={phase} className={cn("grid", listFades && "animate-appear")} aria-label="Repositories">
+			<div key={phase} className={cn("grid", listFades && "animate-fade")} aria-label="Repositories">
 				{phase === "loading" ? (
 					<p className={NOTE} role="status">
 						Loading repositories…

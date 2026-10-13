@@ -143,7 +143,7 @@ const ROW = "my-3.75 px-0.5 py-3";
 /** The files on the branch with their holders, or why they aren't shown. Once they load, they fade in. */
 function FileTree({ branch, holders, tree, treeError }: ClaimsMapProps) {
 	const phase = tree ? "tree" : treeError ? "error" : "loading";
-	const fades = useChanged(phase) && "animate-appear";
+	const fades = useChanged(phase) && "animate-fade";
 	if (treeError) {
 		return (
 			<p className={cn(ROW, "text-bad", fades)} role="alert">
@@ -173,7 +173,7 @@ function FileTree({ branch, holders, tree, treeError }: ClaimsMapProps) {
 export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) {
 	const elsewhere = tree ? claimedElsewhere(tree.files, holders) : [];
 	// What comes with the files, once they load, fades in with them.
-	const loaded = useChanged(!!tree) && "animate-appear";
+	const loaded = useChanged(!!tree) && "animate-fade";
 	return (
 		<div className="grid min-w-0 gap-4">
 			<Box aria-labelledby="claims-legend-title">

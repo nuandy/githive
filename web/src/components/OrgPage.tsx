@@ -282,7 +282,7 @@ function OrgUnavailable({ slug, error }: { slug: string; error: string | undefin
 		);
 	return (
 		<Box asChild>
-			<Empty className="animate-appear">
+			<Empty className="animate-fade">
 				<h2>Can't show {slug}</h2>
 				<p>
 					{error} <a href={href.orgs()}>Your organizations</a>.

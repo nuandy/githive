@@ -176,7 +176,7 @@ function ChangeRows({ claims, repo, now, fades }: { claims: Claim[]; repo: strin
 	const arrived = useArrivals(claims.map((claim) => claim.change));
 	const staggers = useStagger(claims.length > 0);
 	return (
-		<ul className={cn("m-0 list-none p-0", staggers ? "stagger" : fades && "animate-appear")}>
+		<ul className={cn("m-0 list-none p-0", staggers ? "stagger" : fades && "animate-fade")}>
 			{claims.map((claim) => (
 				<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} arrived={arrived(claim.change)} />
 			))}
@@ -228,7 +228,7 @@ export function ChangeList({
 				) : null}
 			</BoxHeader>
 			{claims.length === 0 ? (
-				<Empty className={cn(fades && "animate-appear")}>
+				<Empty className={cn(fades && "animate-fade")}>
 					<Icon name="pull" size={28} />
 					<h2>No open changes</h2>
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
@@ -331,7 +331,7 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	const resolved = audit.violations.filter((violation) => violation.resolvedBy);
 	const openHeadline = open.length ? counted(open.length, "open violation") : "No open violations";
 	return (
-		<div className={cn("grid max-w-225 gap-4", replayed && "animate-appear")}>
+		<div className={cn("grid max-w-225 gap-4", replayed && "animate-fade")}>
 			<Callout tone={open.length ? "bad" : "good"}>
 				<Icon
 					name={open.length ? "alert" : "check-circle"}

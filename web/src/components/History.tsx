@@ -32,7 +32,7 @@ export interface HistoryProps {
 export function History({ repo, history, error }: HistoryProps) {
 	// What loads fades in where "Loading" was: the changes, that there are none, or that they couldn't be read.
 	const phase = history ? (history.changes.length ? "list" : "empty") : error ? "error" : "loading";
-	const fades = useChanged(phase) && "animate-appear";
+	const fades = useChanged(phase) && "animate-fade";
 	if (!history) {
 		const status = error ? "The history couldn't be loaded." : "Loading history…";
 		return (

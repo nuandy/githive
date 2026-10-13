@@ -26,7 +26,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 	const running = runs.data?.running;
 	const newest = runs.data?.newest;
 	// Once the runs are read, what they change (a run going, a game to play) fades in.
-	const appear = useChanged(runs.loaded) && "animate-appear";
+	const appear = useChanged(runs.loaded) && "animate-fade";
 	const start = async () => {
 		setBusy(true);
 		setError(null);

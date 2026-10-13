@@ -302,6 +302,8 @@
 	/* Filled backwards only: once in, it leaves nothing behind. A transform left filling keeps the element on a layer
 	   of its own, which Chrome draws a little blurred at a fractional offset (the page under the top bar's 51.14px). */
 	--animate-appear: appear var(--motion-base) var(--ease-out) backwards;
+	/* Going somewhere (a page, a tab, what replaces Loading): a quick fade, no movement, so the page never lurches. */
+	--animate-fade: fade var(--motion-fast) ease-out backwards;
 	--animate-leave: leave var(--motion-base) var(--ease-in) both;
 	--animate-bump: bump 0.6s ease-out;
 	--animate-pop: pop 0.5s var(--ease-pop) backwards;
@@ -312,6 +314,11 @@
 		from {
 			opacity: 0;
 			transform: translateY(4px);
+		}
+	}
+	@keyframes fade {
+		from {
+			opacity: 0;
 		}
 	}
 	@keyframes leave {
@@ -355,13 +362,13 @@
 	animation-duration: var(--motion-slow);
 }
 
-/* A list whose rows come in one after another as it first shows, each a step behind the one above. Only the first
+/* A list whose rows fade in one after another as it first shows, each a step behind the one above, without moving. Only the first
    ten step; the rest come with the tenth, so a long list is all in within half a second. useStagger says when: from the
    moment the list has rows, for as long as that takes, and never for rows that come later. */
 @utility stagger {
 	& > * {
 		--stagger: 9;
-		animation: appear var(--motion-base) var(--ease-out) backwards;
+		animation: fade var(--motion-base) ease-out backwards;
 		animation-delay: calc(var(--stagger) * var(--stagger-step));
 	}
 	& > :nth-child(1) {
@@ -417,6 +424,8 @@
 @layer base {
 	html {
 		-webkit-text-size-adjust: 100%;
+		/* Room for the scroll bar always, so a page that's taller than the window doesn't sit narrower than one that isn't. */
+		scrollbar-gutter: stable;
 	}
 	body {
 		margin: 0;

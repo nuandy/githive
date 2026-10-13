@@ -23,7 +23,7 @@ export function AdminRows<Item>({
 	empty: string;
 	children: (item: Item, arrived: boolean) => ReactNode;
 }) {
-	const read = useChanged(items === undefined) && "animate-appear";
+	const read = useChanged(items === undefined) && "animate-fade";
 	const arrived = useArrivals((items ?? []).map(keyOf));
 	const staggers = useStagger(!!items?.length);
 	if (items === undefined) return <p className={LINE}>Loading…</p>;

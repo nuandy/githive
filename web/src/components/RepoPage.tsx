@@ -404,7 +404,7 @@ export function RepoPage({
 						onStarted={onStarted}
 					/>
 				) : null}
-				<div key={current} className={switched ? "animate-appear" : undefined}>
+				<div key={current} className={switched ? "animate-fade" : undefined}>
 					<RepoTabContent
 						repo={repo}
 						view={view}

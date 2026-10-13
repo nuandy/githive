@@ -126,7 +126,7 @@ function NewTeamHint({ orgSlug, slug, problem }: { orgSlug: string; slug: string
 	if (problem) said = <span className="text-bad">{problem}</span>;
 	else if (slug) said = `Granted as @${orgSlug}/${slug}.`;
 	return (
-		<FieldHint key={say} className={cn(changed && "animate-appear")}>
+		<FieldHint key={say} className={cn(changed && "animate-fade")}>
 			{said}
 		</FieldHint>
 	);

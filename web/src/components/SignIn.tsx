@@ -47,7 +47,7 @@ function ProviderButtons({
 	invite: string;
 }) {
 	// What takes the place of "Loading…" fades in.
-	const appear = useChanged(providers === undefined) && "animate-appear";
+	const appear = useChanged(providers === undefined) && "animate-fade";
 	if (providers === undefined)
 		return (
 			<p className="my-3.75 text-muted-foreground" role="status">
@@ -101,7 +101,7 @@ function SignInFooter() {
 	// A dot between each and the next.
 	const item = "not-first:before:mx-2 not-first:before:content-['·']";
 	return (
-		<footer className="animate-appear">
+		<footer className="animate-fade">
 			<ul className="m-0 flex list-none flex-wrap justify-center gap-x-0 gap-y-1 p-0 text-meta text-muted-foreground">
 				{links.map(([label, url]) => (
 					<li key={label} className={item}>
@@ -151,7 +151,7 @@ export function SignIn({
 		>
 			<div
 				className={cn(
-					"grid w-full max-w-100 animate-appear justify-items-center gap-3.5 px-7 pt-9 pb-7 text-center",
+					"grid w-full max-w-100 animate-fade justify-items-center gap-3.5 px-7 pt-9 pb-7 text-center",
 					"rounded-3xl border border-border bg-card shadow-raised",
 				)}
 			>

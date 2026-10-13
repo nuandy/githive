@@ -206,7 +206,7 @@ function AgentList({
 	agentRow: (agent: MyAgent, arrived: boolean) => React.ReactNode;
 }) {
 	// What's read fades in as it takes the place of "Loading…"; an agent made later fades in on its own.
-	const read = useChanged(agents === undefined) && "animate-appear";
+	const read = useChanged(agents === undefined) && "animate-fade";
 	const arrived = useArrivals((agents ?? []).map((agent) => agent.id));
 	const staggers = useStagger(!!agents?.length);
 	if (agents === undefined)
@@ -251,7 +251,7 @@ function ConnectedApps({
 	now,
 }: ConnectedAppsProps) {
 	// What's read fades in as it takes the place of "Loading…"; an app connected later fades in on its own.
-	const read = useChanged(connections === undefined) && "animate-appear";
+	const read = useChanged(connections === undefined) && "animate-fade";
 	const arrived = useArrivals((connections ?? []).map((connection) => connection.id));
 	const staggers = useStagger(!!connections?.length);
 	if (connections === undefined)

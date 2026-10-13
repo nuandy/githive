@@ -27,7 +27,7 @@ export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loa
 function InboxBody({ groups, loaded, error }: { groups: InboxGroup[]; loaded: boolean; error?: string }) {
 	const count = groups.reduce((sum, group) => sum + group.items.length, 0);
 	// What's read fades in as it takes the place of "Loading…"; a repo that comes to wait on you later, on its own.
-	const read = useChanged(loaded) && "animate-appear";
+	const read = useChanged(loaded) && "animate-fade";
 	const arrived = useArrivals(groups.map((group) => group.repo));
 	if (!loaded)
 		return (

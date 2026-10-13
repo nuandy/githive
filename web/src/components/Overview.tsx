@@ -86,7 +86,7 @@ function BranchBar({
 				</NativeSelect>
 			</Label>
 			{canWrite && api.makeBranch && !making ? (
-				<Button className={cn(swapped && "animate-appear")} onClick={() => setMaking(true)}>
+				<Button className={cn(swapped && "animate-fade")} onClick={() => setMaking(true)}>
 					New branch
 				</Button>
 			) : null}
@@ -137,7 +137,7 @@ function NewBranchForm(props: {
 	};
 	return (
 		<>
-			<form className="flex animate-appear flex-wrap items-center gap-2" onSubmit={submit}>
+			<form className="flex animate-fade flex-wrap items-center gap-2" onSubmit={submit}>
 				<label className="sr-only" htmlFor="new-branch-name">
 					Name of the new branch
 				</label>

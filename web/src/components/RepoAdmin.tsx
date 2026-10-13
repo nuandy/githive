@@ -154,7 +154,7 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 	const arrived = useArrivals((collaborators ?? []).map((collaborator) => collaborator.handle));
 	const staggers = useStagger(!!collaborators?.length);
 	const read = useChanged(collaborators === undefined && !listError);
-	const line = cn(LINE, read && "animate-appear");
+	const line = cn(LINE, read && "animate-fade");
 
 	return (
 		<>

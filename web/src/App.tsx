@@ -363,7 +363,7 @@ function RepoRoute(props: {
 		shown = <RepoUnavailable repo={repo} error={snapshot.error} />;
 	}
 	return (
-		<div key={phase} className={cn("flex flex-col", swapped && "animate-appear")}>
+		<div key={phase} className={cn("flex flex-col", swapped && "animate-fade")}>
 			{shown}
 		</div>
 	);

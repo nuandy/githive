@@ -25,7 +25,7 @@ const merge = extendTailwindMerge({
 			],
 			shadow: ["raised", "focus"],
 			ease: ["spring", "pop"],
-			animate: ["appear", "leave", "bump", "pop", "live"],
+			animate: ["appear", "fade", "leave", "bump", "pop", "live"],
 		},
 		classGroups: { duration: [{ duration: ["fast", "base", "slow"] }] },
 	},

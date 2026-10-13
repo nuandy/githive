@@ -48,7 +48,7 @@ const ROW_MAIN = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 wrap-a
 function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 	const memberOf = orgs ? realOrgs(orgs) : [];
 	// The orgs fade in as they take the place of "Loading…".
-	const appear = useChanged(orgs === undefined) && "animate-appear";
+	const appear = useChanged(orgs === undefined) && "animate-fade";
 	return (
 		<Box aria-labelledby="orgs-title">
 			<BoxHeader>
@@ -177,7 +177,7 @@ function NewOrgHint({ slug, problem }: { slug: string; problem: string | null })
 	const say = problem ?? (slug ? "where" : "rules");
 	const changed = useChanged(say);
 	return (
-		<FieldHint key={say} id="new-org-slug-hint" className={cn(changed && "animate-appear")}>
+		<FieldHint key={say} id="new-org-slug-hint" className={cn(changed && "animate-fade")}>
 			{said}
 		</FieldHint>
 	);

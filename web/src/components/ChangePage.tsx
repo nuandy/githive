@@ -382,7 +382,7 @@ function ChangeMissing({
 		);
 	return (
 		<Box asChild>
-			<Empty className={cn(fades && "animate-appear")}>
+			<Empty className={cn(fades && "animate-fade")}>
 				<Icon name="alert" size={28} />
 				<h2>Change not found</h2>
 				<p>
@@ -457,7 +457,7 @@ export function ChangePage({
 
 	if (missing)
 		return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} fades={historyFades} />;
-	const loaded = historyFades && "animate-appear";
+	const loaded = historyFades && "animate-fade";
 
 	// What its agent hears about it while its claim is in force: a conflict with its branch, and other changes' code.
 	const heard =
@@ -504,7 +504,7 @@ export function ChangePage({
 		);
 
 	return (
-		<div className={cn(pageFades && "animate-appear")}>
+		<div className={cn(pageFades && "animate-fade")}>
 			<div className="pb-3.5">
 				<h1 className="text-display leading-[1.25] font-medium tracking-[-0.01em] wrap-anywhere to-720:text-[21px]">
 					{title} <span className="font-mono text-[0.72em] font-light text-muted-foreground">{changeId}</span>
@@ -536,7 +536,7 @@ export function ChangePage({
 					},
 				]}
 			/>
-			<div key={tab} className={cn("pt-5", tabFades && "animate-appear")}>
+			<div key={tab} className={cn("pt-5", tabFades && "animate-fade")}>
 				{tab === "commits" ? commits : conversation}
 			</div>
 		</div>

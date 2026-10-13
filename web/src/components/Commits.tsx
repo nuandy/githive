@@ -123,7 +123,7 @@ function CommitRows({ commits, repo }: { commits: ChangeHistory["commits"]; repo
 /** A change's own commits, newest first, with their messages. Once they load, they fade in where "Loading" was. */
 export function ChangeCommits({ history, repo }: { history: ChangeHistory | undefined; repo: string }) {
 	const phase = !history ? "loading" : history.commits.length ? "list" : "empty";
-	const fades = useChanged(phase) && "animate-appear";
+	const fades = useChanged(phase) && "animate-fade";
 	if (!history)
 		return (
 			<p className="my-3.75 text-muted-foreground" role="status">

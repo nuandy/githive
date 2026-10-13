@@ -91,7 +91,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	// The form, or why there's none, fades in as it takes the place of "Loading…".
-	const appear = useChanged(orgs === undefined) && "animate-appear";
+	const appear = useChanged(orgs === undefined) && "animate-fade";
 
 	const nameProblem = name ? repoNameProblem(name.trim()) : null;
 	const ready =

@@ -99,7 +99,7 @@ export function OwnerAndName(props: {
 					placeholder="my-project"
 					aria-describedby="new-repo-name-hint"
 				/>
-				<FieldHint key={hintKey} id="new-repo-name-hint" className={cn(changed && "animate-appear")}>
+				<FieldHint key={hintKey} id="new-repo-name-hint" className={cn(changed && "animate-fade")}>
 					{hint}
 				</FieldHint>
 			</Field>
@@ -327,7 +327,7 @@ export function FirstCommitFields({ first, setFirst }: { first: FirstCommit; set
 					</NativeSelect>
 				</Field>
 			</div>
-			<FieldHint key={String(empty)} className={cn(changed && "animate-appear")}>
+			<FieldHint key={String(empty)} className={cn(changed && "animate-fade")}>
 				{empty
 					? "With nothing in it, the repository has no branch: GitHive can't " +
 						"start on it, and agents can't work in it, until someone pushes a " +

@@ -60,7 +60,7 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 	const link = (target: string) => href.code(repo, target, refParam);
 	// Another folder or file, or what loads where "Loading" was, fades in; what's there first comes with the page.
 	const phase = bodyPhase(tree, treeError, clean, file, fileError);
-	const fades = useChanged(phase) && "animate-appear";
+	const fades = useChanged(phase) && "animate-fade";
 	return (
 		<section className="grid min-w-0 gap-3" aria-labelledby="code-title">
 			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">

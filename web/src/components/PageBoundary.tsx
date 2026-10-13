@@ -23,7 +23,7 @@ export class PageBoundary extends Component<{ children: ReactNode }, PageBoundar
 	render() {
 		const { failed } = this.state;
 		return (
-			<div key={failed ? "failed" : "page"} className="flex animate-appear flex-col">
+			<div key={failed ? "failed" : "page"} className="flex animate-fade flex-col">
 				{failed ? (
 					<EmptyPage role="alert">
 						<h2>This page couldn't be shown</h2>
