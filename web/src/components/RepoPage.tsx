@@ -23,7 +23,6 @@ import { GitHubSettings } from "./GitHubSettings";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { openOn, parseFilter } from "../lib/changeList";
-import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab } from "../lib/routes";
@@ -284,7 +283,7 @@ function RepoTabContent({
 		case "history":
 			return <HistoryTab repo={repo} branch={branch} api={api} />;
 		case "claims":
-			return <ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />;
+			return <ClaimsTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "agents":
 			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
 		case "settings": {

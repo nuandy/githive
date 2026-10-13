@@ -112,16 +112,6 @@
 	--diff-del: #fbe9e6;
 	--diff-del-strong: #f3cdc6;
 
-	/* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
-	--claim-0: #3b82f6;
-	--claim-1: #f59e0b;
-	--claim-2: #14b8a6;
-	--claim-3: #ec4899;
-	--claim-4: #8b5cf6;
-	--claim-5: #22c55e;
-	--claim-6: #ef4444;
-	--claim-7: #06b6d4;
-
 	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;
@@ -262,14 +252,6 @@
 	--color-diff-add-strong: var(--diff-add-strong);
 	--color-diff-del: var(--diff-del);
 	--color-diff-del-strong: var(--diff-del-strong);
-	--color-claim-0: var(--claim-0);
-	--color-claim-1: var(--claim-1);
-	--color-claim-2: var(--claim-2);
-	--color-claim-3: var(--claim-3);
-	--color-claim-4: var(--claim-4);
-	--color-claim-5: var(--claim-5);
-	--color-claim-6: var(--claim-6);
-	--color-claim-7: var(--claim-7);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
 	--color-mark-dot: var(--mark-dot);

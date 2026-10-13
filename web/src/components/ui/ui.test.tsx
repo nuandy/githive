@@ -324,8 +324,8 @@ describe("the dashboard's source", () => {
 
 	it("sizes text from the theme's scale, but where the Hive draws its marks", () => {
 		// The Hive's map and the goals' chips and clock set type inside shapes of their own size; later work redraws them.
-		// A state's glyph sits inside its mark the same way: a lamp's, a swatch's, a Territory square's.
-		const marks = ["HiveMap.tsx", "GoalsPanel.tsx", "Territory.tsx", "StateMark.tsx", "HiveStrip.tsx", "badge.tsx"];
+		// A state's glyph sits inside its mark the same way: a lamp's, a swatch's, a Claims map row's.
+		const marks = ["HiveMap.tsx", "GoalsPanel.tsx", "StateMark.tsx", "HiveStrip.tsx", "badge.tsx"];
 		const offenders = Object.keys(sources).filter(
 			(file) => !marks.some((mark) => file.endsWith(`/${mark}`)) && /\btext-\[[\d.]+(px|em|rem)\]/.test(sources[file]!),
 		);

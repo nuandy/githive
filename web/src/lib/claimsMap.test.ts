@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
 import { ago, repoSnapshot } from "../test/fixtures";
-import { claimedElsewhere, covers, holderOf, holdersFromSnapshot, holdsInside } from "./claimsMap";
+import {
+	claimedElsewhere,
+	claimedFiles,
+	claimsOnOtherBranches,
+	covers,
+	heldIn,
+	holderOf,
+	holdersFromSnapshot,
+	holdsInside,
+	stateCounts,
+} from "./claimsMap";
 
-const claim = (change: string, agent: string, paths: string[]): RepoSnapshot["claims"][number] => ({
+type Claim = RepoSnapshot["claims"][number];
+const claim = (change: string, agent: string, paths: string[], over: Partial<Claim> = {}): Claim => ({
 	change,
 	agent,
 	paths,
@@ -12,22 +23,22 @@ const claim = (change: string, agent: string, paths: string[]): RepoSnapshot["cl
 	active: ago(5),
 	head: null,
 	approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
+	...over,
 });
+const snapshot = (claims: Claim[]) => ({ claims, votes: [], policy: { required: 1, vetoes: [] } });
 const files = ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx", "src/stats/charts/bar.tsx"];
 
 describe("the claims map", () => {
 	const holders = holdersFromSnapshot(
-		{
-			claims: [
-				claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]),
-				claim("readme", "agent-b", ["README.md"]),
-				claim("deep", "agent-c", ["src/stats/charts/"]),
-			],
-		},
+		snapshot([
+			claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]),
+			claim("readme", "agent-b", ["README.md"]),
+			claim("deep", "agent-c", ["src/stats/charts/"]),
+		]),
 		"acme/my-app",
 	);
 
-	it("reads a repo's claims from its snapshot, each with a color and a link to its change", () => {
+	it("reads a repo's claims from its snapshot, each in its change's state, with a link to its change", () => {
 		expect(holdersFromSnapshot(repoSnapshot, "acme/docs-site")).toEqual([
 			{
 				change: "c-1",
@@ -35,14 +46,49 @@ describe("the claims map", () => {
 				agent: "agent-c",
 				paths: ["src/c/"],
 				href: "#/repos/acme/docs-site/changes/c-1",
-				color: 0,
+				state: "changes-requested",
 				conflicts: [],
 			},
 		]);
-		expect(holders.map((h) => [h.change, h.color, h.href])).toEqual([
-			["stats", 0, "#/repos/acme/my-app/changes/stats"],
-			["readme", 1, "#/repos/acme/my-app/changes/readme"],
-			["deep", 2, "#/repos/acme/my-app/changes/deep"],
+		expect(holders.map((h) => [h.change, h.state, h.href])).toEqual([
+			["stats", "building", "#/repos/acme/my-app/changes/stats"],
+			["readme", "building", "#/repos/acme/my-app/changes/readme"],
+			["deep", "building", "#/repos/acme/my-app/changes/deep"],
+		]);
+		// The batch being checked lights its changes as landing.
+		const approved = { approved: true, approvals: 1, required: 1, vetoedBy: [] };
+		const checked = holdersFromSnapshot(
+			snapshot([claim("ready", "agent-a", ["a.ts"], { head: "h1", approval: approved })]),
+			"acme/my-app",
+			{ landing: { checking: { base: "b", since: "", changes: [{ change: "ready", head: "h1", agent: "" }] } } },
+		);
+		expect(checked[0]?.state).toBe("landing");
+	});
+
+	it("maps only the claims landing on the branch shown, and counts the others by branch", () => {
+		const claims = snapshot([
+			claim("main-1", "agent-a", ["src/a.ts"]),
+			claim("backport", "agent-b", ["src/a.ts"], { into: "release/2.4" }),
+			claim("backport-2", "agent-b", ["src/b.ts"], { into: "release/2.4" }),
+		]);
+		const onMain = holdersFromSnapshot({ ...claims, branch: "main" }, "acme/x", { branch: "main" });
+		expect(onMain.map((h) => h.change)).toEqual(["main-1"]);
+		expect(holderOf("src/a.ts", onMain)?.change).toBe("main-1");
+		expect(claimsOnOtherBranches({ ...claims, branch: "main" }, "main")).toEqual([{ branch: "release/2.4", count: 2 }]);
+	});
+
+	it("lists only what's claimed, counts what each folder holds, and keys the states in their order", () => {
+		expect(claimedFiles(files, holders)).toEqual(["README.md", "src/stats/page.tsx", "src/stats/charts/bar.tsx"]);
+		expect(heldIn("src", files, holders)).toBe(2);
+		expect(heldIn("docs", files, holders)).toBe(0);
+		const mixed = [
+			{ ...holders[0]!, state: "in-review" as const },
+			{ ...holders[1]!, state: "needs-person" as const },
+			{ ...holders[2]!, state: "in-review" as const },
+		];
+		expect(stateCounts(mixed)).toEqual([
+			["needs-person", 1],
+			["in-review", 2],
 		]);
 	});
 
