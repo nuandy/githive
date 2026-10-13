@@ -150,6 +150,14 @@ const PATHS = {
 		</>
 	),
 	moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+	// Three dots in a row: a menu of what else there is to do.
+	more: (
+		<>
+			<circle cx="5" cy="12" r="1" />
+			<circle cx="12" cy="12" r="1" />
+			<circle cx="19" cy="12" r="1" />
+		</>
+	),
 	monitor: (
 		<>
 			<rect width="20" height="14" x="2" y="3" rx="2" />

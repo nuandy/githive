@@ -246,7 +246,10 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "org") {
 		page = <OrgPage slug={route.org} me={me.kind === "user" ? me : { handle: "" }} manage={manage} />;
 	} else if (route.page === "agents-settings") {
-		page = me.kind === "user" ? <AgentsPage me={me} account={account} /> : <NoAgentsHere />;
+		// Your own repos, most recently active first, to name in what to ask a new agent.
+		const yours = summaries.data ? buildRepoRows(summaries.data).filter((row) => !row.public) : undefined;
+		const repos = yours?.map((row) => row.name);
+		page = me.kind === "user" ? <AgentsPage me={me} account={account} repos={repos} /> : <NoAgentsHere />;
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
@@ -425,7 +428,7 @@ function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: s
 		case "inbox":
 			return { crumbs: [{ label: "Inbox" }], title: "Inbox" };
 		case "agents-settings":
-			return { crumbs: [{ label: "Agents" }], title: "Agents" };
+			return { crumbs: [{ label: "Your agents" }], title: "Your agents" };
 		case "admin":
 			return { crumbs: [{ label: "Admin" }], title: "Admin" };
 		case "new-repo":

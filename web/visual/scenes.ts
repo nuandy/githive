@@ -6,6 +6,7 @@
 
 import type { Page } from "playwright-core";
 import type { Who } from "./fixtures.ts";
+import { AGENTS, CONNECTIONS, NEW_CONNECTION, NEW_TOKEN } from "./fixtures/account.ts";
 import { FIXED_NOW } from "./fixtures/clock.ts";
 import { DOCS_REPO } from "./fixtures/small-repos.ts";
 import { STOREFRONT as STOREFRONT_REPO } from "./fixtures/storefront.ts";
@@ -161,16 +162,16 @@ const steps =
 	};
 
 /** From here on, `method` requests to `path` get `body` (what the fixtures don't hold); then, for a GET, the page
- * loads again to ask. */
+ * loads again to ask, unless told not to (`reload: false`, for what the page asks again on its own). */
 const answering =
-	(path: string, body: unknown, { status = 200, method = "GET" } = {}) =>
+	(path: string, body: unknown, { status = 200, method = "GET", reload = true } = {}) =>
 	async (p: Page) => {
 		await p.route(`**${path}`, (route) =>
 			route.request().method() === method
 				? route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 				: route.fallback(),
 		);
-		if (method === "GET") await p.reload();
+		if (method === "GET" && reload) await p.reload();
 	};
 
 /** A demo run on acme/storefront, finished with every piece landed, so there's a game to play. */
@@ -280,7 +281,39 @@ const APP: Scene[] = [
 	page("org-fieldnotes", "/orgs/fieldnotes"),
 	page("org-robin", "/orgs/robin"),
 	page("agents", "/settings/agents"),
-	page("agents-confirm", "/settings/agents", { act: click("Revoke") }),
+	// Revoking an agent from its ⋯ menu, asked in a dialog.
+	page("agents-confirm", "/settings/agents", {
+		act: steps(click("More for robin/builder"), async (p) => p.getByRole("menuitem", { name: /Revoke agent/ }).click()),
+	}),
+	// An agent's tokens unfolded, and the revoked agents.
+	page("agents-tokens", "/settings/agents", { act: steps(openSummary("Tokens (2)"), openSummary("Revoked (1)")) }),
+	page("agents-new-token", "/settings/agents", { act: steps(openSummary("Tokens (2)"), click("New token…")) }),
+	page("agents-token-made", "/settings/agents", {
+		act: steps(
+			answering(`/me/agents/${AGENTS[0]!.id}/tokens`, NEW_TOKEN, { method: "POST" }),
+			openSummary("Tokens (2)"),
+			click("New token…"),
+			click("Make token"),
+		),
+	}),
+	// Closing the new token before copying it asks first.
+	page("agents-token-uncopied", "/settings/agents", {
+		act: steps(
+			answering(`/me/agents/${AGENTS[0]!.id}/tokens`, NEW_TOKEN, { method: "POST" }),
+			openSummary("Tokens (2)"),
+			click("New token…"),
+			click("Make token"),
+			click("Done"),
+		),
+	}),
+	// The Claude Code command copied, and a new connection found at the next look.
+	page("agents-connected", "/settings/agents", {
+		act: steps(
+			click("Copy"),
+			answering("/me/connections", [...CONNECTIONS, NEW_CONNECTION], { reload: false }),
+			async (p) => p.waitForTimeout(4_000),
+		),
+	}),
 	page("admin", "/admin", { who: "operator" }),
 	page("admin-confirm", "/admin", { who: "operator", act: click("Remove") }),
 	page("not-found", "/nope/nothing"),

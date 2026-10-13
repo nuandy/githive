@@ -88,6 +88,10 @@ export function AgentLimitsPanel({
 /**
  * One limit: never, a number a day, or no limit. Never and no limit save as they're chosen; a number a day once it's
  * given, on Enter or on leaving its field. A number that isn't one (empty, 0) saves nothing and puts back what's saved.
+ *
+ * Choosing a number a day shows its field and leaves focus on the choice: on Windows and Linux the arrow keys change a
+ * select's value as they go, so moving focus would take it away mid-arrow. The field is the next Tab away. Leaving the
+ * choice for anywhere but its field settles it as leaving the field does.
  */
 export function LimitField({
 	id,
@@ -113,18 +117,12 @@ export function LimitField({
 	// The limit last sent, so that leaving the field after Enter doesn't send it twice.
 	const sent = useRef(limit);
 	const field = useRef<HTMLInputElement>(null);
-	const focusField = useRef(false);
 	useEffect(() => {
 		sent.current = limit;
 		setChoice(choiceOf(limit));
 		const daily = dailyOf(limit);
 		if (daily) setTyped(String(daily));
 	}, [limit]);
-	useEffect(() => {
-		if (!focusField.current) return;
-		focusField.current = false;
-		field.current?.focus();
-	}, [choice]);
 	// The field comes in as it's chosen; one there from the start comes with the page.
 	const chosen = useChanged(choice);
 	const shown = useLingering(saved, 250);
@@ -140,8 +138,7 @@ export function LimitField({
 	};
 	const choose = (next: Choice) => {
 		setChoice(next);
-		if (next === "daily") focusField.current = true;
-		else commit(nextLimit(next, Number(typed)));
+		if (next !== "daily") commit(nextLimit(next, Number(typed)));
 	};
 	/** Saves the number typed, if it's one; otherwise puts back what's saved, and on leaving, a choice that isn't. */
 	const commitTyped = (leaving: boolean) => {
@@ -161,6 +158,9 @@ export function LimitField({
 				className="px-1.5 py-0.75 text-ui"
 				value={choice}
 				onChange={(event) => choose(event.target.value as Choice)}
+				onBlur={(event) => {
+					if (choice === "daily" && event.relatedTarget !== field.current) commitTyped(true);
+				}}
 			>
 				<option value="never">Never</option>
 				<option value="daily">Up to a number a day</option>
