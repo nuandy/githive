@@ -75,13 +75,23 @@ export function newRepoInput(form: {
 	};
 }
 
-/** A new repository, in your own namespace or an org you may create in: imported, copied, or empty. */
+/** What the form still needs before it can be sent, said beside its button; null once it has it all. */
+export function whatsMissing(form: { name: string; source: Source; url: string; copyFrom: string }): string | null {
+	const name = form.name.trim();
+	if (!name) return "Name it to make it.";
+	if (repoNameProblem(name)) return "Fix the name to make it.";
+	if (form.source === "import" && !form.url.trim()) return "Add the Git URL to import.";
+	if (form.source === "copy" && !form.copyFrom) return "Choose the repository to copy.";
+	return null;
+}
+
+/** A new repository, in your own namespace or an org you may create in: empty, imported, or copied. */
 export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: NewRepoViewProps) {
 	const owners = orgs ? creatableOwners(orgs) : [];
 	const [owner, setOwner] = useState<string | null>(null);
 	const chosen = owner ?? owners.find((o) => o.slug === wanted)?.slug ?? owners[0]?.slug ?? "";
 	const [name, setName] = useState("");
-	const [source, setSource] = useState<Source>("import");
+	const [source, setSource] = useState<Source>("empty");
 	const [url, setUrl] = useState("");
 	const [branch, setBranch] = useState("");
 	const [token, setToken] = useState("");
@@ -94,12 +104,10 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const appear = useChanged(orgs === undefined) && "animate-fade";
 
 	const nameProblem = name ? repoNameProblem(name.trim()) : null;
-	const ready =
-		!!chosen &&
-		!!name.trim() &&
-		!nameProblem &&
-		(source !== "import" || !!url.trim()) &&
-		(source !== "copy" || !!copyFrom);
+	const missing = whatsMissing({ name, source, url, copyFrom });
+	const ready = !!chosen && !missing;
+	// As it says something else, it fades in.
+	const missingChanged = useChanged(missing);
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
@@ -199,13 +207,27 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 								{error}
 							</p>
 						) : null}
-						<div className="flex flex-wrap gap-2">
-							<Button type="submit" variant="primary" disabled={!ready || busy}>
+						<div className="flex flex-wrap items-center gap-2">
+							<Button
+								type="submit"
+								variant="primary"
+								disabled={!ready || busy}
+								aria-describedby={missing ? "new-repo-missing" : undefined}
+							>
 								{submitLabel}
 							</Button>
 							<Button asChild>
 								<a href={href.repos()}>Cancel</a>
 							</Button>
+							{missing ? (
+								<p
+									key={missing}
+									id="new-repo-missing"
+									className={cn("m-0 text-meta text-muted-foreground", missingChanged && "animate-fade")}
+								>
+									{missing}
+								</p>
+							) : null}
 						</div>
 					</BoxBody>
 				</form>

@@ -252,11 +252,13 @@ const APP: Scene[] = [
 	page("new-repo-org", "/new?owner=acme"),
 	page("new-repo-copy", "/new", { act: click(/A copy of a repository here/, "radio") }),
 	page("new-repo-fresh", "/new", { act: click(/Start fresh/, "radio") }),
+	page("new-repo-import", "/new", { act: steps(fill(/^Name/, "widgets"), click(/A Git repository/, "radio")) }),
 	page("new-repo-bad-name", "/new", { act: fill(/^Name/, "my project") }),
 	page("new-repo-error", "/new", {
 		act: steps(
 			answering("/repos", { error: "robin/widgets exists already" }, { status: 409, method: "POST" }),
 			fill(/^Name/, "widgets"),
+			click(/A Git repository/, "radio"),
 			fill("Git URL", "https://github.com/octocat/Spoon-Knife"),
 			click("Make repository"),
 		),

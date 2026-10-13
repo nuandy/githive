@@ -110,13 +110,13 @@ export function OwnerAndName(props: {
 export type Choice<T> = { value: T; title: string; detail: string };
 
 export const SOURCES: Choice<Source>[] = [
+	{ value: "empty", title: "Start fresh", detail: "A new repository with a first commit, ready for agents." },
 	{
 		value: "import",
 		title: "A Git repository",
 		detail: "Imported from its URL, for example a public GitHub repository.",
 	},
 	{ value: "copy", title: "A copy of a repository here", detail: "Its default branch, in seconds." },
-	{ value: "empty", title: "Start fresh", detail: "A new repository with a first commit, ready for agents." },
 ];
 
 export const VISIBILITIES: Choice<"private" | "public">[] = [
