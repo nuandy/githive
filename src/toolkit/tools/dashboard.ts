@@ -355,22 +355,32 @@ export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: str
 /** What a person's release tells, and what its agent hears. */
 export const RELEASED_NOTE = "Its paths are free for other agents; its agent is told; its commits stay on its branch.";
 
+/** The most of a person's reason for a release that's kept, as of a question for people (see waitingOnPerson). */
+const RELEASE_REASON_CHARS = 500;
+
 /**
  * A person releases a change's claim from the dashboard, whoever's it is, saying why: a stuck change freed. Its paths
  * are free for other agents, its agent is told with its next reply, and its commits stay on its branch. The release is
- * stamped with the person, not as stale, which the audit accepts (see othersClaimsReleased). GitHub's change is given up
- * as before (see giveUpGitHubChange), so GitHive brings it back when GitHub's branch moves. The route checks they can
- * write.
+ * stamped with the person, not as stale, which the audit accepts (see othersClaimsReleased). Not while its batch is
+ * being checked, which may land it. GitHub's change is given up as before (see giveUpGitHubChange), so GitHive brings it
+ * back when GitHub's branch moves; the reason, asked here as for any change, gives way to that one's own. The route
+ * checks they can write.
  */
 export async function releaseAsPerson(ctx: ToolContext, repo: string, change: string, person: string, reason: string) {
 	if (!/^person:[^/]+$/.test(person))
 		fail(403, "only a person releases another's claim from the dashboard; agents release their own with release");
-	const why = reason.trim();
+	const why = reason.trim().slice(0, RELEASE_REASON_CHARS);
 	if (!why) fail(400, "say why you release it: its agent is told");
 	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	const store = storeFor(ctx, repo, registry);
 	const { claim } = await store.readChange(change);
 	if (!claim) fail(409, `${change} holds no claim: there's nothing to release`);
+	// Released mid-check, it would land anyway and its merge's own release would fail. A landing unread doesn't stop it.
+	const landing = await Promise.resolve()
+		.then(() => ctx.landing?.(repo, claimInto(claim, projectBranch(registry))).view())
+		.catch(() => null);
+	if (landing?.checking?.changes.some((checked) => checked.change === change))
+		fail(409, `${change} is being checked to land now; release it if the batch sends it back.`);
 	const stamper = await ctx.stamper?.();
 	if (isGitHubChange(claim))
 		return giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
