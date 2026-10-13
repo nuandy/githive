@@ -34,6 +34,7 @@ import { useLiveFeed } from "./hooks/useLiveFeed";
 import { usePoll } from "./hooks/usePoll";
 import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
+import { isLoose, splitRepo } from "./lib/repoName";
 import { buildRepoRows } from "./lib/repos";
 import { href, type RepoTab, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
@@ -146,8 +147,8 @@ function Visitor({
 	}, [title]);
 	const view = repoViewOf(route);
 	if (data.snapshot.error === SIGNED_OUT_MESSAGE) return signIn;
-	// The Repositories list is for people signed in, so the trail starts at the repo.
-	const trail = crumbs.filter((crumb) => crumb.href !== href.repos());
+	// An owner's page is for people signed in, so the trail names the owner without leading there.
+	const trail = crumbs.map((crumb) => (crumb.repo ? crumb : { label: crumb.label }));
 	return (
 		<Shell>
 			<SkipLink />
@@ -170,6 +171,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	// For GitHive's operators (Access): orgs' requests waiting for approval, counted on the Admin link.
 	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
+	// The reader's own repos, most recently active first, for the repo crumb's switcher.
+	const repoRows = summaries.data ? buildRepoRows(summaries.data) : [];
+	const yourRepos = repoRows.filter((row) => !row.public).map((row) => row.name);
 
 	const changeId = route.page === "change" ? route.change : null;
 	const { liveStatus, snapshot, audit, access, change } = useRepoData(repoName, changeId);
@@ -209,7 +213,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "repos") {
 		page = (
 			<RepoList
-				rows={summaries.data ? buildRepoRows(summaries.data) : []}
+				rows={repoRows}
 				loaded={summaries.loaded}
 				query={route.q ?? ""}
 				onQueryChange={(q) => replaceHash(href.repos(q))}
@@ -236,6 +240,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<SkipLink />
 			<TopBar
 				crumbs={crumbs}
+				repos={yourRepos}
+				onRepos={onRepos}
 				inboxCount={inbox.count}
 				inboxCurrent={route.page === "inbox"}
 				me={me}
@@ -371,10 +377,12 @@ function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: s
 	switch (route.page) {
 		case "repo":
 		case "change": {
+			// The repo as its owner, which is a place of its own, then its name, which switches to another repo.
 			const repoName = route.repo;
+			const { owner, name } = splitRepo(repoName);
 			const crumbs: Crumb[] = [
-				{ label: "Repositories", href: href.repos() },
-				{ label: repoName, href: href.repo(repoName) },
+				...(isLoose(repoName) ? [] : [{ label: owner, href: href.org(owner) }]),
+				{ label: name, href: href.repo(repoName), repo: repoName },
 			];
 			if (route.page !== "change") return { crumbs, title: [...tabTitle(route), repoName].join(" · ") };
 			crumbs.push({ label: changeLabel });

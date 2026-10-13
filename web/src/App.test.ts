@@ -28,4 +28,22 @@ describe("the window title", () => {
 			"(1) Audit · acme/docs · GitHive",
 		);
 	});
+
+	it("names a repo in the breadcrumbs as its owner, a place of its own, then its name, which switches repos", () => {
+		expect(headingOf({ page: "repo", repo: "acme/storefront", tab: "hive" }, 0, "").crumbs).toEqual([
+			{ label: "acme", href: "#/orgs/acme" },
+			{ label: "storefront", href: "#/repos/acme/storefront", repo: "acme/storefront" },
+		]);
+		expect(
+			headingOf({ page: "change", repo: "acme/storefront", change: "c", tab: "conversation" }, 0, "Cache it").crumbs,
+		).toEqual([
+			{ label: "acme", href: "#/orgs/acme" },
+			{ label: "storefront", href: "#/repos/acme/storefront", repo: "acme/storefront" },
+			{ label: "Cache it" },
+		]);
+		// A repo in no org yet has no owner to go to.
+		expect(headingOf({ page: "repo", repo: "_/loose", tab: "hive" }, 0, "").crumbs).toEqual([
+			{ label: "loose", href: "#/repos/_/loose", repo: "_/loose" },
+		]);
+	});
 });
