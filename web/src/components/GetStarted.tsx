@@ -38,7 +38,18 @@ function rememberDismissed() {
 }
 
 /** The checklist with its data: shown once the repos, agents and apps are read, unless it was put away. */
-export function GetStarted({ rows, loaded, api }: { rows: RepoRow[]; loaded: boolean; api: StartApi }) {
+export function GetStarted({
+	rows,
+	loaded,
+	api,
+	elsewhere,
+}: {
+	rows: RepoRow[];
+	loaded: boolean;
+	api: StartApi;
+	/** Where the page leads already (its New repository): a step doesn't offer the way there again. */
+	elsewhere?: string[];
+}) {
 	const [dismissed, setDismissed] = useState(readDismissed);
 	// Read often while it's shown, so a step ticks soon after it's done.
 	const agents = usePoll(dismissed ? null : "start:agents", api.agents, 15_000);
@@ -48,6 +59,7 @@ export function GetStarted({ rows, loaded, api }: { rows: RepoRow[]; loaded: boo
 	return (
 		<GetStartedView
 			start={start}
+			{...(elsewhere ? { elsewhere } : {})}
 			onDismiss={() => {
 				rememberDismissed();
 				setDismissed(true);
@@ -57,7 +69,16 @@ export function GetStarted({ rows, loaded, api }: { rows: RepoRow[]; loaded: boo
 }
 
 /** The checklist as it stands: four steps in a box; or, with all four done, a line saying so. */
-export function GetStartedView({ start, onDismiss }: { start: GettingStarted; onDismiss: () => void }) {
+export function GetStartedView({
+	start,
+	onDismiss,
+	elsewhere = [],
+}: {
+	start: GettingStarted;
+	onDismiss: () => void;
+	/** Where the page leads already: a step there doesn't repeat the way. */
+	elsewhere?: string[];
+}) {
 	if (start.next === null)
 		return (
 			<p className="mb-5 flex animate-fade flex-wrap items-center gap-x-3 gap-y-1.5 border-l-3 border-l-good bg-good-soft px-3.5 py-2">
@@ -83,7 +104,12 @@ export function GetStartedView({ start, onDismiss }: { start: GettingStarted; on
 			</BoxHeader>
 			<ol className="m-0 grid list-none grid-cols-1 gap-x-6 gap-y-5 px-0.5 py-4 min-[361px]:grid-cols-2 min-[901px]:grid-cols-4">
 				{start.steps.map((step, index) => (
-					<Step key={step.id} step={step} number={index + 1} next={start.next === step.id} />
+					<Step
+						key={step.id}
+						step={elsewhere.includes(step.href ?? "") ? { ...step, href: null } : step}
+						number={index + 1}
+						next={start.next === step.id}
+					/>
 				))}
 			</ol>
 		</Box>
