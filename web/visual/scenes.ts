@@ -114,6 +114,32 @@ const HIVE: Scene[] = [
 	playground("first", "first-agent", 1, 3),
 	playground("big", "big-repo", 1, 4),
 	playground("big-timeline", "big-repo", 1, 4, { then: (page) => viewButton(page, "Timeline").click() }),
+	// A cell's details, opened by a click beside it.
+	playground("mixed-cell", "mixed", 1, 2, {
+		then: (page) =>
+			page
+				.getByRole("button", { name: /: building, / })
+				.first()
+				.click(),
+	}),
+	// The map from the keyboard: one stop, the arrow keys from cell to cell, its ring on the cell reached.
+	playground("mixed-map-keys", "mixed", 1, 2, {
+		then: async (page) => {
+			await page
+				.getByRole("button", { name: /: building, / })
+				.first()
+				.focus();
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("ArrowDown");
+		},
+	}),
+	// Reading a goal while the hive moves on: the rows hold still and "4 new · 5 finished" waits in the heading.
+	playground("mixed-held", "mixed", 1, 2, {
+		then: async (page) => {
+			await firstRow(page).click();
+			await page.getByRole("button", { name: "Skip 10 min", exact: true }).click();
+		},
+	}),
 
 	motion("drawer-open", "mixed", 2, (page) => firstRow(page).click(), [0, 60, 120, 180, 240, 320]),
 	motion(
@@ -294,6 +320,13 @@ const APP: Scene[] = [
 		act: async (p) => p.locator('section[aria-labelledby="goals-title"] button[aria-expanded="false"]').first().click(),
 	}),
 	page("storefront-hive-timeline", STOREFRONT, { storage: { "githive.hive.view": "timeline" } }),
+	// What needs a person, as rows; the first question's tooltip says it in full.
+	page("storefront-hive-needs", STOREFRONT, {
+		act: async (p) =>
+			p.getByRole("region", { name: "Needs a person" }).getByRole("listitem").first().locator("[tabindex]").hover(),
+	}),
+	// A link that opens the Hive as someone left it: six hours, Timeline, one agent's goals, a row open.
+	page("storefront-hive-linked", `${STOREFRONT}?window=6h&view=timeline&agent=mara%2Fclaude&row=stock-sync`),
 	// The demo run's banner, as on the demo repo's Hive tab.
 	page("storefront-hive-demo", STOREFRONT, { act: answering("/demo/runs/acme/storefront", LANDED_RUN) }),
 	page("storefront-changes", `${STOREFRONT}/changes`),
