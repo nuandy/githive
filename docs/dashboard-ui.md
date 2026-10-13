@@ -74,7 +74,12 @@ Reach for `components/ui` before writing a control by hand:
   is a section's title at `title-sm`, semibold, an `h2` (or the heading it's given, `asChild`). `Callout` with a
   `tone`. `Empty`: nothing to show yet, an icon, an `h2` and a line or two, centered (`<Box asChild><Empty>` boxes it).
 - `SaveBar`: a form's foot, sticky at the bottom of its section: a status line (saved, or what went wrong), then
-  Discard and Save (`primary`, submits), both waiting while there's nothing to save.
+  Discard and Save (`primary`, submits), both waiting while there's nothing to save (`canDiscard` lets Discard close
+  an editor with nothing changed). A form's problems go under their fields too: `problemsFor` (in
+  `SettingsParts.tsx`) gives a field `aria-invalid` (a red edge), `aria-describedby` and the line to show.
+- `TokenInput`: a list chosen as chips, offering what matches as you type (a combobox); it only chooses strings, so
+  a form saves what it would have had typed. `lib/tokens.ts` reads and writes a list's text and offers roles and
+  who may vote as them.
 - `Input`, `Textarea`, `NativeSelect`, `Label`; `Field` holds a label, its control and a `FieldHint` under them.
 - `Collapse`: anything that opens and closes; `Fold` drops what it holds once folded, and unfolds it again as it comes
   back (a row a search leaves out, the fields for a choice). `DropdownMenu`: menus from a button; its items light up in
@@ -84,6 +89,12 @@ Reach for `components/ui` before writing a control by hand:
   `Popover` (a panel opened by a click or a tap: what a tooltip says where there's no hover, or a few controls),
   `Dialog` (a window of its own over the dimmed page) and `AlertDialog` (a question to answer before going on: delete,
   revoke, remove; `AlertDialogAction` is `danger` unless told otherwise).
+- Asking first: `ConfirmButton` (a destructive action asked in place, its No saying what it keeps: `keep="Keep
+  invitation"`) and `Question` (the same question for something else, a promotion, say); every question names what
+  it changes. What can be taken back says so instead, with `useUndo()` and `UndoLine`: Undo for ten seconds, where
+  the row was. What changes at once (a role, a permission) says Saved by it (`useSavedNote`, `SAVED_NOTE`).
+- Managing pages (`ui/manage.tsx`): a row's actions go under what it's about below 560px; a form that adds to a list
+  sits at the list's end (`ADD_FORM`), its fields labelled (`INLINE_FIELDS`), never by a placeholder alone.
 - `Announcer` with `useAnnouncer()`: a page's polite live region, for what changes under a screen reader. `say(words)`
   speaks at most once every four seconds and drops what comes sooner; draw `<Announcer said={said} />` once.
 - `Icon` comes in three sizes: 14 beside small text (13px and under), 16 (the default) beside body text and alone in a
