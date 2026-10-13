@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { headingOf } from "./App";
+import { headingOf, unreadableRepoNotice } from "./App";
 
 // The window title names the page, most particular first, so tabs and history tell them apart.
 
@@ -59,5 +59,11 @@ describe("your agents' page", () => {
 		const { crumbs, title } = headingOf({ page: "agents-settings" }, 0, "");
 		expect(title).toBe("Your agents · GitHive");
 		expect(crumbs).toEqual([{ label: "Your agents" }]);
+	});
+});
+
+describe("a repo signed out", () => {
+	it("says one the visitor can't read is private, or doesn't exist, on the sign-in card", () => {
+		expect(unreadableRepoNotice("acme/docs")).toBe("acme/docs is private, or doesn't exist. Sign in to see it.");
 	});
 });
