@@ -1,4 +1,4 @@
-import { type CSSProperties, type FocusEvent, useEffect, useReducer, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent, type RefObject, useEffect, useReducer, useRef, useState } from "react";
 import { useFresh } from "../hooks/useFresh";
 import { useGlide } from "../hooks/useGlide";
 import { useLingering } from "../hooks/useLingering";
@@ -160,7 +160,10 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	};
 	// Held still while someone reads: the pointer or focus is in the panel, or a row is open.
 	const [pointerIn, setPointerIn] = useState(false);
-	const [focusIn, setFocusIn] = useState(false);
+	const focusIn = useFocusWithin(panel);
+	// What the keyboard comes back to when the control it was on goes (see keepFocus).
+	const goalsTitle = useRef<HTMLHeadingElement>(null);
+	const inFlightTitle = useRef<HTMLSpanElement>(null);
 	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
 	// the point there. An open row folded away in it holds nothing still.
 	const finishedShown = timeline || showFinished;
@@ -238,10 +241,6 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			data-view={view}
 			onPointerEnter={() => setPointerIn(true)}
 			onPointerLeave={() => setPointerIn(false)}
-			onFocus={() => setFocusIn(true)}
-			onBlur={(event: FocusEvent) => {
-				if (!event.currentTarget.contains(event.relatedTarget)) setFocusIn(false);
-			}}
 			className={cn(
 				"min-w-0",
 				timeline ? "[--row-pad:2px] [--words:26%]" : "[--row-pad:7px] [--words:calc(100%-130px)] to-640:[--words:100%]",
@@ -249,14 +248,17 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			aria-labelledby="goals-title"
 		>
 			<div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-				<h2 id="goals-title" className="m-0 text-lead">
+				<h2 id="goals-title" ref={goalsTitle} tabIndex={-1} className="m-0 text-lead focus:outline-none">
 					Goals
 				</h2>
 				<span className="text-muted-foreground">{working ? `${working} in flight` : "nothing in flight"}</span>
 				{filter ? (
 					<Button
 						className="animate-hive-pop-in rounded-full border-link bg-link-soft px-2.5 py-px text-caption leading-5 font-semibold text-link"
-						onClick={() => props.onFilter(null)}
+						onClick={(event) => {
+							keepFocus(event, goalsTitle);
+							props.onFilter(null);
+						}}
 						aria-label={`${filter.kind === "agent" ? `Only ${filter.agent}` : `Only ${filter.label}`}: show every goal`}
 					>
 						{filter.kind === "agent" ? `only ${filter.agent}` : `only ${filter.label}`}{" "}
@@ -299,7 +301,9 @@ export function GoalsPanel(props: GoalsPanelProps) {
 				<div>
 					<AxisRow axis={axis} timeline={timeline} />
 					<div className={cn(SECTION, sectionRoom(timeline))}>
-						<span>In flight · {working}</span>
+						<span ref={inFlightTitle} tabIndex={-1} className="focus:outline-none">
+							In flight · {working}
+						</span>
 						{arrived.length || finished.length ? (
 							// Quiet, and no taller than the heading, so its coming moves nothing.
 							<Button
@@ -308,7 +312,10 @@ export function GoalsPanel(props: GoalsPanelProps) {
 									"order-2 -my-1 animate-hive-pop-in rounded-full border-link/40 bg-link-soft px-2.5 py-0",
 									"text-caption leading-5 font-semibold tracking-normal text-link normal-case",
 								)}
-								onClick={apply}
+								onClick={(event) => {
+									keepFocus(event, inFlightTitle);
+									apply();
+								}}
 								aria-label={`${pendingWords(arrived, finished)}: show them`}
 							>
 								{pendingWords(arrived, finished)}
@@ -322,7 +329,14 @@ export function GoalsPanel(props: GoalsPanelProps) {
 							{filter ? (
 								<>
 									{" "}
-									<Button variant="link" className="leading-[inherit]" onClick={() => props.onFilter(null)}>
+									<Button
+										variant="link"
+										className="leading-[inherit]"
+										onClick={(event) => {
+											keepFocus(event, inFlightTitle);
+											props.onFilter(null);
+										}}
+									>
 										Show every goal
 									</Button>
 								</>
@@ -391,6 +405,40 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			</div>
 		</section>
 	);
+}
+
+/**
+ * Whether the focus is in an element, asked of the document rather than told by its blur: an element removed while it
+ * has the focus ("2 new" once it's clicked, the filter's chip once cleared) never says it lost it. So it's asked again
+ * after every render, too.
+ */
+function useFocusWithin(ref: RefObject<HTMLElement | null>): boolean {
+	const [inside, setInside] = useState(false);
+	useEffect(() => {
+		const focused = (event: FocusEvent) => setInside(!!ref.current?.contains(event.target as Node));
+		const left = (event: FocusEvent) => setInside(!!ref.current?.contains(event.relatedTarget as Node | null));
+		document.addEventListener("focusin", focused);
+		document.addEventListener("focusout", left);
+		return () => {
+			document.removeEventListener("focusin", focused);
+			document.removeEventListener("focusout", left);
+		};
+	}, [ref]);
+	useEffect(() => {
+		const now = !!ref.current?.contains(document.activeElement);
+		if (now !== inside) setInside(now);
+	});
+	return inside;
+}
+
+/**
+ * A control that goes once it's used ("2 new", the filter's chip) hands the keyboard's focus to a heading that stays,
+ * so the reader keeps their place in the panel. A click lets it go with the control: the pointer says where the
+ * reader is.
+ */
+function keepFocus(event: MouseEvent, to: RefObject<HTMLElement | null>) {
+	// A click from Enter or Space, or a screen reader's, has no pointer's count of clicks.
+	if (event.detail === 0) to.current?.focus({ preventScroll: true });
 }
 
 /**
