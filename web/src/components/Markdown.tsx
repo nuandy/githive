@@ -3,6 +3,7 @@ import { languageOf } from "../lib/highlight";
 import { type Block, type Inline, linkTarget, parseMarkdown } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import { TokenLine, useHighlighted } from "./Highlighted";
+import { Icon } from "./Icon";
 
 // A Markdown file as formatted text (lib/markdown.ts reads it): React elements only, so nothing in the file reaches
 // the page as HTML. Links go where linkTarget lets them, or show as their words. Its headings sit a level under the
@@ -87,16 +88,21 @@ function Inlines({ inlines, where }: { inlines: Inline[]; where: Where }) {
 					case "break":
 						return <br key={index} />;
 					case "task":
-						// A task list's box: it says whether it's ticked, and can't be changed here. It hangs where the
-						// item's bullet would be.
+						// A task list's box: it says whether it's ticked, and that it can't be changed here, as a checkbox
+						// does, drawn at full contrast (a disabled one fades to nothing). It hangs where the bullet would be.
 						return (
-							<input
+							<span
 								key={index}
-								type="checkbox"
-								disabled
-								checked={inline.checked}
-								className="mr-1.5 -ml-5.5 size-3.5 align-[-2px]"
-							/>
+								role="checkbox"
+								aria-checked={inline.checked}
+								aria-disabled="true"
+								className={cn(
+									"mr-1.5 -ml-5.5 inline-flex size-3.5 items-center justify-center rounded-xs border align-[-2px]",
+									inline.checked ? "border-link bg-link text-card" : "border-input bg-card",
+								)}
+							>
+								{inline.checked ? <Icon name="check" size={14} className="size-3" /> : null}
+							</span>
 						);
 				}
 			})}

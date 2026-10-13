@@ -90,7 +90,7 @@ describe("Markdown blocks", () => {
 	});
 
 	it("reads a task list's boxes, ticked or not", () => {
-		const [list] = parseMarkdown("- [ ] write it\n- [x] test it\n- [X] ship it\n- [] not a box\n- [ ]");
+		const [list] = parseMarkdown("- [ ] write it\n- [x] test it\n- [X] `ship` it\n- [] not a box\n- [ ]");
 		expect(list).toEqual({
 			kind: "list",
 			ordered: false,
@@ -98,7 +98,12 @@ describe("Markdown blocks", () => {
 			items: [
 				[{ kind: "paragraph", children: [{ kind: "task", checked: false }, text("write it")] }],
 				[{ kind: "paragraph", children: [{ kind: "task", checked: true }, text("test it")] }],
-				[{ kind: "paragraph", children: [{ kind: "task", checked: true }, text("ship it")] }],
+				[
+					{
+						kind: "paragraph",
+						children: [{ kind: "task", checked: true }, { kind: "code", text: "ship" }, text(" it")],
+					},
+				],
 				[{ kind: "paragraph", children: [text("[] not a box")] }],
 				[{ kind: "paragraph", children: [text("[ ]")] }],
 			],

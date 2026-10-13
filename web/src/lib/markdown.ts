@@ -58,7 +58,7 @@ const INDENTED = /^(?: {4})(.*)$/;
 const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const DELIMITER_CELL = /^:?-+:?$/;
 const DEFINITION = /^ {0,3}\[([^\]]+)\]:[ \t]*<?([^\s>]+)>?(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
-const TASK = /^\[([ xX])\][ \t]+(?=\S)/;
+const TASK = /^\[([ xX])\][ \t]+/;
 
 const blank = (line: string) => line.trim() === "";
 const indentOf = (line: string) => /^ */.exec(line)![0].length;
@@ -255,11 +255,15 @@ function itemOf(line: string): Item | null {
 /** A list item's blocks, its box first in its paragraph where it starts "[ ] " or "[x] " (a task list's). */
 function withTask(blocks: Block[]): Block[] {
 	const [first] = blocks;
-	const lead = first?.kind === "paragraph" ? first.children[0] : undefined;
+	if (first?.kind !== "paragraph") return blocks;
+	const [lead, ...after] = first.children;
 	const task = lead?.kind === "text" ? TASK.exec(lead.text) : null;
-	if (first?.kind !== "paragraph" || lead?.kind !== "text" || !task) return blocks;
+	if (lead?.kind !== "text" || !task) return blocks;
+	// Something must follow the box: its words, or code, a link…
 	const rest = lead.text.slice(task[0].length);
-	first.children.splice(0, 1, { kind: "task", checked: task[1] !== " " }, { kind: "text", text: rest });
+	if (!rest && !after.length) return blocks;
+	const box: Inline = { kind: "task", checked: task[1] !== " " };
+	first.children = [box, ...(rest ? [{ kind: "text" as const, text: rest }] : []), ...after];
 	return blocks;
 }
 

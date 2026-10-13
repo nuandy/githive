@@ -48,9 +48,12 @@ describe("a Markdown file, formatted", () => {
 	it("draws a task list's boxes as checkboxes that say whether they're ticked, and can't be changed", () => {
 		const html = render("- [ ] write it\n- [x] ship it");
 		expect(html).toMatch(
-			/<li class="[^"]*list-none[^"]*"><p[^>]*><input type="checkbox" disabled="" class="[^"]*"\/>write it/,
+			/<li class="[^"]*list-none[^"]*"><p[^>]*><span role="checkbox" aria-checked="false" aria-disabled="true"[^>]*><\/span>write it/,
 		);
-		expect(html).toMatch(/<input type="checkbox" disabled="" class="[^"]*" checked=""\/>ship it/);
+		expect(html).toMatch(
+			/<span role="checkbox" aria-checked="true" aria-disabled="true"[^>]*><svg[^>]*>.*?<\/svg><\/span>ship it/,
+		);
+		expect(html).not.toContain("<input");
 	});
 
 	it("links outside in a new tab, inside to the Code tab, and nowhere for anything else", () => {
