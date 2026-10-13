@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import type { DemoRunStatus } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
-import { messageOf } from "../lib/errors";
+import { messageOf, sentence } from "../lib/errors";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
+import { Icon } from "./Icon";
 import { Box, calloutVariants } from "./ui/box";
 import { Button } from "./ui/button";
 
@@ -18,33 +19,140 @@ export interface DemoApi {
 	runs(): Promise<{ running: { fullName: string } | null; newest?: DemoRunStatus | null }>;
 }
 
-/** Starts a demo run and opens its repo's Hive tab; or says a run is going, or why one can't start. */
-export function DemoCard({ api }: { api: DemoApi }) {
+const STRIP_DISMISSED = "githive:demo-strip-dismissed";
+
+function readStripDismissed(): boolean {
+	try {
+		return localStorage.getItem(STRIP_DISMISSED) === "1";
+	} catch {
+		return false;
+	}
+}
+
+/** "0:42": how long since `since`, ticking each second. */
+function Elapsed({ since }: { since: number }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
+	}, []);
+	const seconds = Math.max(0, Math.floor((now - since) / 1000));
+	return (
+		<span className="tabular-nums">
+			{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+		</span>
+	);
+}
+
+/**
+ * Starting a demo run: the runs as last read, and start(), which makes one and opens its repo once it's set up. A run
+ * refused (another is going, or today's are used up) reads the runs again, so a run going shows as one to watch.
+ */
+function useDemoStart(api: DemoApi) {
 	const runs = usePoll("demo:runs", () => api.runs(), 30_000);
-	const [busy, setBusy] = useState(false);
+	const [settingUpSince, setSettingUpSince] = useState<number | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const running = runs.data?.running;
-	const newest = runs.data?.newest;
-	// Once the runs are read, what they change (a run going, a game to play) fades in.
-	const appear = useChanged(runs.loaded) && "animate-fade";
 	const start = async () => {
-		setBusy(true);
+		setSettingUpSince(Date.now());
 		setError(null);
 		try {
 			const made = await api.start();
 			// The run makes its repo itself, a few seconds on: open it once it's there, or say why the run failed.
 			const failed = await setUpOf(api, made.id);
 			if (failed) {
-				setError(failed);
-				setBusy(false);
+				setError(sentence(failed));
+				setSettingUpSince(null);
 				return;
 			}
 			window.location.hash = href.repo(made.repo);
 		} catch (err) {
 			setError(messageOf(err));
-			setBusy(false);
+			setSettingUpSince(null);
+			runs.refresh();
 		}
 	};
+	return { runs, running: runs.data?.running, newest: runs.data?.newest, settingUpSince, error, start };
+}
+
+/**
+ * Starts a demo run and opens its repo's Hive tab; or says a run is going, or why one can't start. Prominent for an
+ * account with no repositories; otherwise a line, which can be put away.
+ */
+export function DemoCard({ api, compact = false }: { api: DemoApi; compact?: boolean }) {
+	const { runs, running, newest, settingUpSince, error, start } = useDemoStart(api);
+	const [stripDismissed, setStripDismissed] = useState(readStripDismissed);
+	// Once the runs are read, what they change (a run going, a game to play) fades in.
+	const appear = useChanged(runs.loaded) && "animate-fade";
+	const busy = settingUpSince !== null;
+	// A run refused because another started first: the card offers that one to watch, and says why.
+	const said = running && error ? "Another demo run started first. Watch it instead." : error;
+	const action = running ? (
+		<Button asChild size={compact ? "sm" : "default"} className={cn(appear)}>
+			<a href={href.repo(running.fullName)}>Watch the run going now</a>
+		</Button>
+	) : (
+		<Button variant="primary" size={compact ? "sm" : "default"} onClick={start} disabled={busy}>
+			{busy ? "Setting up the repo…" : "Start a demo run"}
+		</Button>
+	);
+	const settingUp =
+		settingUpSince !== null ? (
+			<p className="m-0 text-meta text-muted-foreground" role="status">
+				<span aria-hidden="true">
+					<Elapsed since={settingUpSince} /> ·{" "}
+				</span>
+				It can take up to 2 minutes.
+			</p>
+		) : null;
+	const problem = said ? (
+		<p className={cn("m-0 animate-appear", running ? "text-ui" : "text-bad")} role={running ? "status" : "alert"}>
+			{said}
+		</p>
+	) : null;
+
+	if (compact) {
+		if (stripDismissed) return null;
+		return (
+			<section
+				aria-labelledby="demo-card-title"
+				className="mb-5 flex animate-fade flex-wrap items-center gap-x-4 gap-y-2 border-l-3 border-l-link bg-surface-2 py-2 pr-2 pl-3.5"
+			>
+				<p className="m-0 min-w-0 flex-[1_1_320px] text-ui">
+					<strong id="demo-card-title">Watch a hive build a game.</strong>{" "}
+					<span className="text-muted-foreground">
+						Thirteen of GitHive's agents build Honeycomb, a word game, in about 10 minutes.
+					</span>
+				</p>
+				<div className="flex flex-wrap items-center gap-2">
+					{newest && gameLanded(newest) ? <PlayLink repo={newest.fullName} className={cn("text-ui", appear)} /> : null}
+					{action}
+					<Button
+						variant="ghost"
+						size="icon"
+						className="size-7"
+						aria-label="Dismiss the demo"
+						onClick={() => {
+							try {
+								localStorage.setItem(STRIP_DISMISSED, "1");
+							} catch {
+								// Without storage, it's put away until the page reloads.
+							}
+							setStripDismissed(true);
+						}}
+					>
+						<Icon name="x" />
+					</Button>
+				</div>
+				{settingUp || problem ? (
+					<div className="grid basis-full gap-1">
+						{settingUp}
+						{problem}
+					</div>
+				) : null}
+			</section>
+		);
+	}
+
 	return (
 		<Box
 			className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-l-3 border-l-link px-5 py-4"
@@ -59,22 +167,11 @@ export function DemoCard({ api }: { api: DemoApi }) {
 					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
 					it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game when it's done.
 				</p>
-				{error ? (
-					<p className="m-0 animate-appear text-bad" role="alert">
-						{error}
-					</p>
-				) : null}
+				{problem}
 			</div>
 			<div className="flex flex-none flex-col items-end gap-2">
-				{running ? (
-					<Button asChild className={cn(appear)}>
-						<a href={href.repo(running.fullName)}>Watch the run going now</a>
-					</Button>
-				) : (
-					<Button variant="primary" onClick={start} disabled={busy}>
-						{busy ? "Setting up the repo…" : "Start a demo run"}
-					</Button>
-				)}
+				{action}
+				{settingUp}
 				{newest && gameLanded(newest) ? <PlayLink repo={newest.fullName} className={cn(appear)} /> : null}
 			</div>
 		</Box>

@@ -243,6 +243,59 @@ const APP: Scene[] = [
 	page("repos-demo-running", "/", {
 		act: answering("/demo/runs", { running: { fullName: "acme/storefront" }, newest: LANDED_RUN }),
 	}),
+	// A new account: no repos, no agents. Get started leads, the demo card is prominent.
+	page("repos-get-started", "/", {
+		act: steps(answering("/me/agents", []), answering("/me/connections", []), answering("/summaries", { repos: [] })),
+	}),
+	// A first repo, an agent connected and its first claim: three steps ticked, the landing next.
+	page("repos-get-started-claimed", "/", {
+		act: steps(
+			answering("/me/agents", []),
+			answering("/summaries", {
+				repos: [
+					{
+						repo: "robin/widgets",
+						since: new Date(FIXED_NOW - 60 * 60_000).toISOString(),
+						summary: {
+							open: 1,
+							needsYou: 0,
+							merged: 0,
+							violations: 0,
+							lastActivity: new Date(FIXED_NOW).toISOString(),
+						},
+					},
+				],
+			}),
+		),
+	}),
+	// A demo run starting: how long so far, and how long it can take.
+	page("repos-demo-setting-up", "/", {
+		act: steps(
+			answering("/demo/runs", { id: "run-9", repo: "acme/storefront" }, { status: 201, method: "POST" }),
+			answering("/demo/runs", {
+				running: null,
+				recent: [],
+				newest: { ...LANDED_RUN, id: "run-9", status: "running", settingUp: true },
+			}),
+			click("Start a demo run"),
+		),
+	}),
+	// A run refused because another started first: the card offers that one to watch.
+	page("repos-demo-refused", "/", {
+		act: async (p) => {
+			let refused = false;
+			await p.route("**/demo/runs", (route) => {
+				const post = route.request().method() === "POST";
+				if (post) refused = true;
+				const body = post
+					? { error: "a demo run is going already: watch it at acme/storefront" }
+					: { running: refused ? { fullName: "acme/storefront" } : null, recent: [], newest: null };
+				return route.fulfill({ status: post ? 429 : 200, contentType: "application/json", body: JSON.stringify(body) });
+			});
+			await p.reload();
+			await click("Start a demo run")(p);
+		},
+	}),
 	page("repos-demo-error", "/", {
 		act: steps(
 			answering("/demo/runs", { error: "another demo run is going" }, { status: 409, method: "POST" }),
