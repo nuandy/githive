@@ -17,7 +17,17 @@ type Offer = { change: string; head: string; role: string };
  * A repo's six hosted agents over a small stand-in for the toolkit: who claims which piece, its head once its builder
  * has pushed, who holds its review, its votes, and what merged. A builder pushes at once; a reviewer votes at once.
  */
-function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: string[]; stalls?: string[] } = {}) {
+interface HiveOptions {
+	reject?: string[];
+	takenElsewhere?: string[];
+	stalls?: string[];
+	/** Claims of these are written, then the call fails, once each: a busy store answering an error after a write. */
+	failAfterWrite?: string[];
+	/** Claims of these are refused once each, leaving the claim behind, as a claim refused partway in shards can. */
+	refusedPartway?: string[];
+}
+
+function hive(pieces: Piece[], options: HiveOptions = {}) {
 	const claimed = new Map<string, string>();
 	const heads = new Map<string, string>();
 	const holds = new Map<string, string>();
@@ -29,6 +39,13 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const rechecks: string[] = [];
 	const approved = (change: string) =>
 		(votes.get(change) ?? []).some((vote) => vote.verdict === "approve" && vote.reviewer !== claimed.get(change));
+	const happened = new Set<string>();
+	const once = (list: string[] | undefined, change: string) => {
+		if (!list?.includes(change)) return false;
+		if (happened.has(change)) return false;
+		happened.add(change);
+		return true;
+	};
 	const tools = (name: string, args: Record<string, unknown>): unknown => {
 		const agent = String(args.agent);
 		const change = String(args.change ?? "");
@@ -64,6 +81,8 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 			case "claim":
 				if (claimed.has(change)) return { ok: false };
 				claimed.set(change, agent);
+				if (once(options.failAfterWrite, change)) throw new Error("[500] the store is busy");
+				if (once(options.refusedPartway, change)) return { ok: false, conflicts: [], stillHeld: [change] };
 				if (args.after) claimedAfter.set(change, args.after as string[]);
 				return { ok: true };
 			case "release":
@@ -163,6 +182,14 @@ describe("a repo's hosted agents", () => {
 		await first!.stop();
 		await turn;
 		expect(((await first!.account()) as HostedAgentState).done).toBe(true);
+	});
+
+	it("give back a claim that failed partway, so the piece isn't left claimed with nobody building it", async () => {
+		const { repoHive, rounds, log, merged } = hive(pieces("a", "b"), { failAfterWrite: ["a"], refusedPartway: ["b"] });
+		await start(repoHive);
+		await rounds(6);
+		expect(log).toEqual(expect.arrayContaining(["builder on a", "builder on b"]));
+		expect(merged).toEqual(new Set(["a", "b"]));
 	});
 
 	it("claim a piece that lands after others with them as after, so it's built alongside them", async () => {

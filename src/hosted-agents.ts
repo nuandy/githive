@@ -343,10 +343,12 @@ export class HostedAgent extends DurableObject<Env> {
 		const after = piece.landsAfter ?? [];
 		const claim = { change: piece.id, paths: piece.paths ?? [], intent, ...(after.length ? { after } : {}) };
 		// Another agent may have claimed it since the backlog was read: then it tries again next turn.
-		const claimed = (await call("claim", claim).catch((err) => {
+		const claimed = (await call("claim", claim).catch(async (err) => {
 			if (statusOf(err).status === 409) return { ok: false };
+			await giveBack(call, piece.id, "its claim failed partway");
 			throw err;
-		})) as { ok?: boolean };
+		})) as { ok?: boolean; stillHeld?: string[] };
+		if (claimed.stillHeld?.length) await giveBack(call, piece.id, "its refused claim left records behind");
 		if (claimed.ok === false) return;
 		state.tried.push(piece.id);
 		try {
@@ -358,6 +360,18 @@ export class HostedAgent extends DurableObject<Env> {
 			await call("release", { change: piece.id, reason: "its builder didn't start" }).catch(() => undefined);
 		}
 	}
+}
+
+/**
+ * Releases a claim this agent may hold without knowing it: one refused partway, whose records in some shards weren't
+ * undone, or one written although the call failed, as a busy repo's storage can answer an error after a write. Either
+ * way nobody would build it, and the piece would sit claimed until it counted as abandoned. Releasing a claim the
+ * agent doesn't hold changes nothing.
+ */
+async function giveBack(call: Call, change: string, reason: string) {
+	await call("release", { change, reason }).catch((err) =>
+		console.error(`giving ${change} back failed`, statusOf(err).message),
+	);
 }
 
 /** Remembers a change the agent's reviewer rejected, the latest few and once each. */
