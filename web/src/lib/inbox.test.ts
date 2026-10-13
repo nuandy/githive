@@ -87,12 +87,41 @@ describe("the inbox", () => {
 			["acme/shop", 4],
 			["acme/audited", 1],
 		]);
+		// Questions first, then votes, as the Hive's banner lists them.
 		expect(groups[0]!.items.map((item) => [item.kind, item.title, item.href])).toEqual([
-			["vote", "Handle Stripe refund webhooks", "#/repos/acme/shop/changes/refunds"],
 			["question", "Cache the cart", "#/repos/acme/shop/changes/cache"],
+			["vote", "Handle Stripe refund webhooks", "#/repos/acme/shop/changes/refunds"],
 			["audit", "2 merges for the audit to look at", "#/repos/acme/shop/audit"],
 		]);
-		expect(groups[0]!.items[0]).toMatchObject({ role: "payments" });
+		expect(groups[0]!.items[1]).toMatchObject({ role: "payments" });
+	});
+
+	it("orders a repo's questions, then its votes, each most urgent first and then waiting longest first", () => {
+		const at = (hour: number) => `2026-10-13T${String(hour).padStart(2, "0")}:00:00Z`;
+		const { groups } = buildInbox({
+			repos: [
+				{
+					repo: "acme/shop",
+					since: "",
+					summary: {
+						waiting: [
+							{ kind: "vote", role: "qa", change: "vote-new", title: "", reason: "", at: at(11) },
+							{ kind: "question", change: "ask-new", title: "", reason: "?", at: at(10) },
+							{ kind: "vote", role: "qa", change: "vote-old", title: "", reason: "", at: at(8) },
+							{ kind: "question", change: "ask-urgent", title: "", reason: "?", urgency: 1.8, at: at(11) },
+							{ kind: "question", change: "ask-old", title: "", reason: "?", at: at(9) },
+						],
+					},
+				},
+			],
+		});
+		expect(groups[0]!.items.map((item) => item.change)).toEqual([
+			"ask-urgent",
+			"ask-old",
+			"ask-new",
+			"vote-old",
+			"vote-new",
+		]);
 	});
 
 	it("is empty before the summaries arrive, or when nothing waits", () => {
@@ -153,6 +182,9 @@ describe("the inbox", () => {
 		expect(itemAction(audit!)).toEqual({ label: "See the audit", href: "#/repos/acme/shop/audit" });
 		expect(audit).not.toHaveProperty("at");
 		expect(itemWho(question!)).toBe("mara/claude asks");
+		// GitHive's own agents are GitHive, as in the Hive's banner.
+		expect(itemWho({ ...question!, agent: "githive-builder" })).toBe("GitHive says");
+		expect(itemWho({ ...vote!, agent: "githive-builder" })).toBe("GitHive waits on a payments vote");
 		expect(itemWho(vote!)).toBe("sam/codex waits on a payments vote");
 		expect(itemWho(audit!)).toBe("The audit flags");
 		// An older summary's item, with no agent.

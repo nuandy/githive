@@ -180,8 +180,10 @@ lucide icons for `Icon`, and restyle it from the theme.
 - **The Inbox leads the top bar.** It fills `needs-soft` while something waits and keeps its name on a phone, where
   light and dark move into the user menu; its count is the bar's one red number (Admin's is neutral). A repo's crumbs
   are its owner (the org or person's page) and its name, a switcher to the reader's other repos. An Inbox row has its
-  kind's icon, who waits and for how long ("mara/claude asks · 38m"), the question at body size in ink, and a verb
-  (Answer, "Vote as payments", See the audit) that opens the change at its decision.
+  kind's icon, who waits and for how long ("mara/claude asks · 38m", "GitHive says" for its own agents), the question
+  at body size in ink, and a verb (Answer, "Vote as payments", See the audit) that opens the change at its decision.
+  A repo's rows, like the Hive's banner, list questions, then votes, each most urgent and then longest waiting first
+  (`byWaiting`); the banner shows three and counts the rest, other branches' too, for the Inbox.
 - **Moving between places.** A new place starts at the top with its `h1` focused (no ring: it isn't a control), so a
   screen reader starts there; Back and Forward go back to where each history entry was scrolled once the page has
   filled in; a tab of the same place stays where it is. A view that changes the address in place (a search typed)

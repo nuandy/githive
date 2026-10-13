@@ -19,6 +19,11 @@ export function identityName(raw: string | undefined | null): string | undefined
 }
 
 /** A name in a sentence: a recorded identity shortened, and GitHive's own flags as GitHive. */
+/** Who asks a person, or whose change waits on one, as the Hive's banner and the Inbox say it: GitHive for its own. */
+export function whoWaits(agent: string): string {
+	return agent.startsWith("githive") ? "GitHive" : (displayName(agent) ?? agent);
+}
+
 export function displayName(raw: string | undefined | null): string | undefined {
 	if (!raw) return undefined;
 	if (raw === "githive") return "GitHive";
