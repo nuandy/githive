@@ -99,8 +99,8 @@ audit           replay the records: every broken convention, with its commit and
 revert          revert a commit the audit reports
 ask_human       put something agents can't settle in a person's inbox
 github_pr       open the standing pull request into GitHub's default branch, for a repo connected in pr mode
-request_review  votes from GitHive's hosted reviewers
-build           GitHive's hosted builder makes a change, from claim to merge
+request_review  votes from GitHive's hosted reviewers (by invitation)
+build           GitHive's hosted builder makes a change, from claim to merge (by invitation)
 ```
 
 Every reply also says what the caller should do next (`next`) and carries its news: what landed since it last asked, heads-ups about code its change uses, and Clef's hints on its pushes, with a note when more happened than GitHive keeps. Every record is stamped with the caller's verified identity (GitHive's sign-in or Cloudflare Access) and GitHive's signature, so the audit trusts only what went through the toolkit.

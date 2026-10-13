@@ -391,7 +391,9 @@ const TOOL_LIST = [
 		name: "build",
 		description:
 			"Have GitHive's hosted builder make a change: it claims the paths, builds on changes/<change>, " +
-			"asks the hosted reviewers when done, and the change merges once approved and checked.",
+			"asks the hosted reviewers when done, and the change merges once approved and checked. It's by " +
+			"invitation, since it runs on GitHive's model account: without one, claim the paths and build the " +
+			"change yourself.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, intent: str, paths: { type: "array", items: str } },
