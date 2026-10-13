@@ -201,7 +201,6 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 - **Scale beyond what's tested.** Nothing has run with more than 1,000 agents at once.
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
 - **Containers run Linux.** Checks that need macOS (iOS apps), Windows or a GPU can't run in them.
-- **A hosted agent that hangs.** A hosted builder or reviewer that fails gives its work back at once (its claim, or its review with `leave_review`). One that hangs without failing holds its review until the hold runs out (15 minutes), or its claim until the claim counts as abandoned (30 minutes).
 
 ## How this was built
 
