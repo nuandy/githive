@@ -10,7 +10,7 @@ import { cn } from "../lib/utils";
 import { DemoCard, type DemoApi } from "./DemoRun";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
-import { Lamp, type LampColor } from "./ui/badge";
+import { Badge, Lamp, type LampColor } from "./ui/badge";
 import { Box } from "./ui/box";
 import { Button } from "./ui/button";
 import { Fold } from "./ui/collapse";
@@ -116,6 +116,12 @@ function RepoLine({ row, ruled }: { row: RepoRow; ruled: boolean }) {
 					<span className="font-normal text-muted-foreground">{owner}/</span>
 					{name}
 				</a>
+				{/* Other people's public repos are listed under Public, which says so already. */}
+				{row.visibility === "public" && !row.public ? (
+					<Badge tone="accent" size="sm" className="ml-2 align-[2px]">
+						Public
+					</Badge>
+				) : null}
 				<p className="mt-0.5 mb-0 text-body-sm">
 					{parts.map((part, i) => (
 						<span key={i}>

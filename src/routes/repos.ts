@@ -127,6 +127,8 @@ interface RepoListing {
 	summary: RepoSummary | null;
 	started: boolean;
 	public?: true;
+	/** Readable by anyone, signed in or not, whoever's it is. */
+	visibility?: "public";
 }
 
 /** The ids of the repos that are the caller's own, or null when every repo it sees is (an Access admin's). */
@@ -244,6 +246,7 @@ export function repoRoutes(app: Hono<AppEnv>) {
 			started: summaries.has(repo.id),
 			// Someone else's, listed only because it's public: the page shows it apart, and the Inbox leaves it out.
 			...(yours && !yours.has(repo.id) ? { public: true } : {}),
+			...(repo.visibility === "public" ? { visibility: "public" as const } : {}),
 		}));
 		c.executionCtx.waitUntil(recountStale(index, toolContext(c.env, c.get("principal")), listings));
 		return c.json({ repos: listings.map(({ started: _started, ...listing }) => listing) });

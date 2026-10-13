@@ -40,6 +40,23 @@ describe("the Repositories page", () => {
 		expect(text).toContain("1 repository 1 open change");
 	});
 
+	it("marks the reader's own public repos, and not the others' under Public", () => {
+		const since = ago(5);
+		const summary = { open: 1, countedAt: ago(1) };
+		const rows = buildRepoRows({
+			repos: [
+				{ repo: "ada/site", since, summary, visibility: "public" },
+				{ repo: "ada/notes", since, summary },
+				{ repo: "bob/shared-demo", since, summary, public: true, visibility: "public" },
+			],
+		});
+		const text = visibleText(renderToStaticMarkup(<RepoList rows={rows} loaded />));
+		expect(text).toMatch(/ada\/ site\s+Public/);
+		expect(text).not.toMatch(/ada\/ notes\s+Public/);
+		// The Public section's heading says it for bob's.
+		expect(text).not.toMatch(/bob\/ shared-demo\s+Public/);
+	});
+
 	it("says a repo's work all landed, how much and when, once its last stretch finishes", () => {
 		const lastStretch = { landed: 200, failed: 0, agents: 200, from: ago(37), to: ago(5) };
 		const rows = buildRepoRows({

@@ -203,12 +203,14 @@ describe("what each person can see", () => {
 				{ ...(env as object), REPO_INDEX: index } as never,
 				{ waitUntil: () => {} } as never,
 			);
-			const { repos } = (await response.json()) as { repos: { repo: string; public?: boolean }[] };
-			return Object.fromEntries(repos.map((row) => [row.repo, !!row.public]));
+			const { repos } = (await response.json()) as {
+				repos: { repo: string; public?: boolean; visibility?: string }[];
+			};
+			return Object.fromEntries(repos.map((row) => [row.repo, [!!row.public, row.visibility ?? "private"]]));
 		};
-		// acme/docs is eve's to see only because it's public; bob is in acme, so it's his own.
-		expect(await listed("eve")).toEqual({ "acme/docs": true, "eve/notes": false });
-		expect(await listed("bob")).toEqual({ "acme/docs": false, "acme/web": false });
+		// acme/docs is eve's to see only because it's public; bob is in acme, so it's his own, and public all the same.
+		expect(await listed("eve")).toEqual({ "acme/docs": [true, "public"], "eve/notes": [false, "private"] });
+		expect(await listed("bob")).toEqual({ "acme/docs": [false, "public"], "acme/web": [false, "private"] });
 	});
 
 	it("lets anyone signed in read a public repo, and nothing more", async () => {
