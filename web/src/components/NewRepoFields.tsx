@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Gitignore, MyOrg } from "../api";
 import { useChanged } from "../hooks/useChanged";
+import { sentence } from "../lib/errors";
 import { cn } from "../lib/utils";
 import { Page } from "./Page";
 import { Fold } from "./ui/collapse";
@@ -57,18 +58,33 @@ export function Folding({ open, className, children }: { open: boolean; classNam
 	);
 }
 
+/** What went wrong with a field, under it in red, as a sentence; it fades in as it comes. */
+function FieldError({ id, error }: { id: string; error: string }) {
+	return (
+		<FieldHint key={error} id={id} className="animate-fade text-bad">
+			{sentence(error)}
+		</FieldHint>
+	);
+}
+
 /** Who owns the new repository, and its name, with a hint for the name. */
 export function OwnerAndName(props: {
 	owners: MyOrg[];
 	chosen: string;
 	setOwner: (owner: string) => void;
+	/** The server's refusal of the owner (you can't make repos there), if it refused. */
+	ownerError?: string | null;
 	name: string;
 	setName: (name: string) => void;
+	/** The name's field was left: its whole check applies from now on. */
+	onNameLeft?: () => void;
 	hint: ReactNode;
 	/** What the hint says, in a word: as it says something else (a problem, say), it fades in. */
 	hintKey: string;
+	/** The hint says what's wrong with the name. */
+	nameInvalid?: boolean;
 }) {
-	const { owners, chosen, setOwner, name, setName, hint, hintKey } = props;
+	const { owners, chosen, setOwner, ownerError, name, setName, onNameLeft, hint, hintKey, nameInvalid } = props;
 	const changed = useChanged(hintKey);
 	return (
 		<>
@@ -76,13 +92,20 @@ export function OwnerAndName(props: {
 				<Label htmlFor="new-repo-owner" className="text-body-sm">
 					Owner
 				</Label>
-				<NativeSelect id="new-repo-owner" className={WIDE} value={chosen} onChange={(e) => setOwner(e.target.value)}>
+				<NativeSelect
+					id="new-repo-owner"
+					className={WIDE}
+					value={chosen}
+					onChange={(e) => setOwner(e.target.value)}
+					{...(ownerError ? { "aria-invalid": true, "aria-describedby": "new-repo-owner-hint" } : {})}
+				>
 					{owners.map((o) => (
 						<option key={o.slug} value={o.slug}>
 							{o.personal ? `${o.slug} (you)` : o.slug}
 						</option>
 					))}
 				</NativeSelect>
+				{ownerError ? <FieldError id="new-repo-owner-hint" error={ownerError} /> : null}
 			</Field>
 			<Field>
 				<Label htmlFor="new-repo-name" className="text-body-sm">
@@ -94,10 +117,12 @@ export function OwnerAndName(props: {
 					className={WIDE}
 					value={name}
 					onChange={(e) => setName(e.target.value)}
+					onBlur={onNameLeft}
 					autoComplete="off"
 					spellCheck={false}
 					placeholder="my-project"
 					aria-describedby="new-repo-name-hint"
+					{...(nameInvalid ? { "aria-invalid": true } : {})}
 				/>
 				<FieldHint key={hintKey} id="new-repo-name-hint" className={cn(changed && "animate-fade")}>
 					{hint}
@@ -169,8 +194,10 @@ export function ImportSource(props: {
 	setBranch: (branch: string) => void;
 	token: string;
 	setToken: (token: string) => void;
+	/** Why the import failed, if it did. */
+	error?: string | null;
 }) {
-	const { url, setUrl, branch, setBranch, token, setToken } = props;
+	const { url, setUrl, branch, setBranch, token, setToken, error } = props;
 	return (
 		<div className="grid gap-3">
 			<Field>
@@ -186,7 +213,14 @@ export function ImportSource(props: {
 					placeholder="https://github.com/octocat/Spoon-Knife"
 					autoComplete="off"
 					spellCheck={false}
+					aria-describedby="new-repo-url-hint"
+					{...(error ? { "aria-invalid": true } : {})}
 				/>
+				{error ? (
+					<FieldError id="new-repo-url-hint" error={error} />
+				) : (
+					<FieldHint id="new-repo-url-hint">Its HTTPS address. GitHive copies it with its history.</FieldHint>
+				)}
 			</Field>
 			{/* The URL as wide as the name above it, the branch a short field below. */}
 			<Field>
@@ -237,14 +271,23 @@ export function CopySource(props: {
 	repos: { name: string }[] | undefined;
 	copyFrom: string;
 	setCopyFrom: (name: string) => void;
+	/** Why the copy failed, if it did. */
+	error?: string | null;
 }) {
-	const { repos, copyFrom, setCopyFrom } = props;
+	const { repos, copyFrom, setCopyFrom, error } = props;
 	return (
 		<Field>
 			<Label htmlFor="new-repo-copy" className="text-body-sm">
 				Repository to copy
 			</Label>
-			<NativeSelect id="new-repo-copy" className={WIDE} value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
+			<NativeSelect
+				id="new-repo-copy"
+				className={WIDE}
+				value={copyFrom}
+				onChange={(e) => setCopyFrom(e.target.value)}
+				aria-describedby="new-repo-copy-hint"
+				{...(error ? { "aria-invalid": true } : {})}
+			>
 				<option value="">Choose one…</option>
 				{(repos ?? []).map((r) => (
 					<option key={r.name} value={r.name}>
@@ -252,6 +295,11 @@ export function CopySource(props: {
 					</option>
 				))}
 			</NativeSelect>
+			{error ? (
+				<FieldError id="new-repo-copy-hint" error={error} />
+			) : (
+				<FieldHint id="new-repo-copy-hint">Its default branch, with its history.</FieldHint>
+			)}
 		</Field>
 	);
 }
