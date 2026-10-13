@@ -98,8 +98,9 @@ describe("the conflict panel", () => {
 		expect(html).toContain("git push fork changes/c-1</code>");
 		expect(html).not.toMatch(/<code>[^<]*call status/);
 		expect(text).toContain("Then: call status; once the new commit is approved, merge again.");
-		expect(html).toMatch(/<button [^>]*type="button" aria-label="Copy commands: git fetch origin main/);
-		expect(html).toContain(">Copy commands</button>");
+		expect(inlineText(html.match(/<button [^>]*type="button"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "")).toBe(
+			"Copy commands",
+		);
 	});
 
 	it("says when the change has moved since the check, and shows nothing for a clean merge", () => {

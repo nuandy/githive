@@ -34,7 +34,15 @@ export interface AgentActions {
 	disconnect(id: string): Promise<unknown>;
 }
 
-type Issued = { agentId: string; token: string };
+/** New tokens shown once, by agent: each stays until its Done. */
+type Issued = Record<string, string>;
+
+/** The new tokens shown, with an agent's new one added beside the others', or with its own put away (null). */
+export function withIssued(issued: Issued, agentId: string, token: string | null): Issued {
+	if (token !== null) return { ...issued, [agentId]: token };
+	const { [agentId]: _done, ...rest } = issued;
+	return rest;
+}
 
 /** The Agents page as it looks: how to connect, your agents and their tokens, and connected apps. */
 export function AgentsView({
@@ -44,7 +52,7 @@ export function AgentsView({
 	connections,
 	error,
 	actions,
-	initialIssued = null,
+	initialIssued = {},
 	now = Date.now(),
 }: {
 	me: User;
@@ -53,13 +61,13 @@ export function AgentsView({
 	connections: Connection[] | undefined;
 	error?: string;
 	actions: AgentActions;
-	/** A token just made, shown once (tests start with one). */
-	initialIssued?: Issued | null;
+	/** Tokens just made, by agent, shown once (tests start with some). */
+	initialIssued?: Issued;
 	now?: number;
 }) {
 	const { run, busy, confirming, setConfirming, failed: showError, errorText: errorFor } = useRowActions();
 	const [expiry, setExpiry] = useState<Record<string, number | null>>({});
-	const [issued, setIssued] = useState<Issued | null>(initialIssued);
+	const [issued, setIssued] = useState<Issued>(initialIssued);
 	const { client, chooseClient, clientLabel, yourClient } = useChosenClient();
 	/** The apps connected as an agent over OAuth, each named once. */
 	const signsInFrom = (agentId: string) => {
@@ -81,8 +89,8 @@ export function AgentsView({
 			fullName={`${me.handle}/${agent.name}`}
 			days={daysFor(agent.id)}
 			chooseDays={(days) => setExpiry({ ...expiry, [agent.id]: days })}
-			issued={issued?.agentId === agent.id ? issued.token : null}
-			setIssued={(token) => setIssued(token === null ? null : { agentId: agent.id, token })}
+			issued={issued[agent.id] ?? null}
+			setIssued={(token) => setIssued((current) => withIssued(current, agent.id, token))}
 			error={errorFor(agent.id)}
 			setError={showError(agent.id)}
 			signsInFrom={signsInFrom(agent.id)}

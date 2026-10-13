@@ -5,7 +5,7 @@ import { repoSnapshot, stubApi, visibleText } from "../test/fixtures";
 import { newRepoInput, NewRepoView } from "./NewRepoPage";
 import { type OrgActions, OrgView } from "./OrgPage";
 import { OrgsView } from "./OrgsPage";
-import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
+import { RepoAdmin, type RepoManageApi, VisibilityToggle } from "./RepoAdmin";
 import { RepoPage } from "./RepoPage";
 
 const noop = async () => ({}) as never;
@@ -241,9 +241,46 @@ describe("a repo's access settings", () => {
 			),
 		);
 		expect(text).toContain("Admin: write, and change settings");
-		expect(text).toContain("Make it Public");
+		expect(text).toContain("Make public");
 		expect(text).toContain("Collaborators");
 		expect(text).toContain("Delete this repository");
+	});
+
+	describe("its visibility", () => {
+		const rest = {
+			manage: manageApi,
+			onChanged: () => {},
+			setConfirming: () => {},
+			run: async () => true,
+			busy: null,
+			errorFor: () => null,
+		};
+
+		it("names the visibility action and asks before making a repo public", () => {
+			const text = visibleText(
+				renderToStaticMarkup(
+					<VisibilityToggle repo="acme/docs" visibility="private" confirming="visibility" {...rest} />,
+				),
+			);
+			expect(text).toContain("Make acme/docs public? Anyone signed in to GitHive can read its code and history.");
+			expect(text).toContain("Yes, make public");
+		});
+
+		it("offers making a private repo public by name, before asking", () => {
+			const text = visibleText(
+				renderToStaticMarkup(<VisibilityToggle repo="acme/docs" visibility="private" confirming={null} {...rest} />),
+			);
+			expect(text).toContain("Make public");
+			expect(text).not.toContain("?");
+		});
+
+		it("makes a public repo private without asking", () => {
+			const text = visibleText(
+				renderToStaticMarkup(<VisibilityToggle repo="acme/docs" visibility="public" confirming={null} {...rest} />),
+			);
+			expect(text).toContain("Make private");
+			expect(text).not.toContain("?");
+		});
 	});
 
 	it("shows everyone else what they may do, and nothing to change", () => {
