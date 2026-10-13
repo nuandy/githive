@@ -12,7 +12,7 @@ import { Empty } from "./ui/empty";
 /** Every change waiting on a person, across repos, with why. */
 export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loaded: boolean; error?: string }) {
 	return (
-		<Page id="main">
+		<Page>
 			<div className="mb-4">
 				<h1 className="text-display tracking-[-0.01em]">Inbox</h1>
 				<p className="mt-1 mb-0 text-muted-foreground">

@@ -73,7 +73,7 @@ export function useHashRoute(): Route {
 
 function Loading({ what }: { what: string }) {
 	return (
-		<Page id="main">
+		<Page>
 			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
 				Loading {what}…
 			</p>

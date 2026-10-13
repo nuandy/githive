@@ -395,7 +395,7 @@ export function RepoPage({
 				homeHref={href.repo(repo)}
 				live={liveStatus}
 			/>
-			<Page id="main">
+			<Page>
 				{!snapshot ? (
 					<NotStarted
 						repo={repo}

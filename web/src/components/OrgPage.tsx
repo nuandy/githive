@@ -315,7 +315,7 @@ export function OrgPage({ slug, me, manage }: { slug: string; me: { handle: stri
 	};
 	if (!org.data)
 		return (
-			<Page id="main">
+			<Page>
 				<OrgUnavailable slug={slug} error={org.error} />
 			</Page>
 		);

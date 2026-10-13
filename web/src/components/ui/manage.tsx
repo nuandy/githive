@@ -47,7 +47,7 @@ export const TERMS = [
 
 /** A page that manages an organization's or GitHive's people: its sections a little apart, under its header. */
 export function ManagePage({ className, ...props }: ComponentProps<typeof Page>) {
-	return <Page id="main" className={cn("grid gap-5", className)} {...props} />;
+	return <Page className={cn("grid gap-5", className)} {...props} />;
 }
 
 /** A managing page's header: its title and a line under it, and its actions at the far end. */
