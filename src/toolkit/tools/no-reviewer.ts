@@ -1,6 +1,7 @@
-import type { AgentRecord, ClaimRecord } from "../claims";
+import type { ClaimRecord } from "../claims";
+import { isHiveAgent } from "../hive-agents";
 import { type ChangeSigns, waitingOn } from "../staleness";
-import { personOf } from "../votes";
+import { isPerson, personOf } from "../votes";
 import type { HostedStatus } from "./context";
 
 // A change waiting for review that only a person can review: no agent of another person works in its repo, or none
@@ -15,16 +16,46 @@ export interface ReviewState {
 	trusted?: string;
 }
 
-/** The agents in the repo, other than GitHive's own, that belong to someone other than the change's author. */
-export function otherPeoplesAgents(agents: AgentRecord[], claim: ClaimRecord): string[] {
+/** An agent that works in the repo, and the identity it writes as when that's verified. */
+export interface AgentAtWork {
+	agent: string;
+	by?: string;
+}
+
+/**
+ * The agents that work in the repo, once each: those registered with a key, and those whose claims, releases and
+ * votes are in its records, since a signed-in agent and GitHive's own never register.
+ */
+export function agentsAtWork(sources: {
+	registered: AgentAtWork[];
+	claims: AgentAtWork[];
+	released: AgentAtWork[];
+	votes: { reviewer: string; by?: string }[];
+}): AgentAtWork[] {
+	const voters = sources.votes.map(({ reviewer, by }) => (by ? { agent: reviewer, by } : { agent: reviewer }));
+	const everyone = new Map<string, AgentAtWork>();
+	for (const record of [...sources.registered, ...sources.claims, ...sources.released, ...voters]) {
+		if (isPerson(record.agent)) continue;
+		const known = everyone.get(record.agent);
+		if (!known?.by) everyone.set(record.agent, record.by ? { agent: record.agent, by: record.by } : record);
+	}
+	return [...everyone.values()];
+}
+
+/**
+ * The agents in the repo that belong to someone other than the change's author. GitHive's hive agents review each
+ * other's changes and count; its other agents (a one-off builder, the GitHub importer) never review.
+ */
+export function otherPeoplesAgents(agents: AgentAtWork[], claim: ClaimRecord): string[] {
+	const reviews = (record: AgentAtWork) => !record.agent.startsWith("githive") || isHiveAgent(record.agent);
 	const author = personOf(claim.by);
-	const othersOnly = (record: AgentRecord) => {
+	const othersOnly = (record: AgentAtWork) => {
 		const person = personOf(record.by);
 		if (author && person) return person !== author;
 		return record.agent !== claim.agent;
 	};
 	return agents
-		.filter((record) => !record.agent.startsWith("githive"))
+		.filter(reviews)
 		.filter(othersOnly)
 		.map((record) => record.agent);
 }
@@ -33,7 +64,7 @@ export function otherPeoplesAgents(agents: AgentRecord[], claim: ClaimRecord): s
 export async function onlyAPersonCanReview(
 	claim: ClaimRecord,
 	state: ReviewState,
-	agents: AgentRecord[],
+	agents: AgentAtWork[],
 	notReviewing: (agents: string[]) => Promise<Set<string>>,
 ): Promise<string | null> {
 	if (state.trusted) return null;

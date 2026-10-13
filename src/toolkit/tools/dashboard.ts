@@ -14,7 +14,7 @@ import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
-import { onlyAPersonCanReview } from "./no-reviewer";
+import { type AgentAtWork, agentsAtWork, onlyAPersonCanReview } from "./no-reviewer";
 import { giveUpGitHubChange } from "./github-tools";
 import type { HostedStatus, ToolContext } from "./context";
 import {
@@ -287,7 +287,13 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			held.claims.map((record) => claimInto(record, projectBranch(state))),
 		),
 	);
-	const notReviewing = limitsOnce(ctx, state);
+	const atWork = agentsAtWork({
+		registered: Object.values(state.agents ?? {}),
+		claims: held.claims,
+		released: held.released,
+		votes: votes.votes,
+	});
+	const notReviewing = limitsOnce(ctx, atWork);
 	const claims = await timing.time("status", () =>
 		Promise.all(
 			held.claims.map((record) =>
@@ -299,7 +305,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 					held.released,
 					record,
 					landings.get(claimInto(record, projectBranch(state))),
-					notReviewing,
+					{ atWork, notReviewing },
 				),
 			),
 		),
@@ -395,9 +401,9 @@ interface ClaimSnapshot extends ClaimRecord {
  * Which of the repo's agents may review no other person's change today, read once a snapshot and only if a change
  * asks. One that can't be read counts every agent as able, so a lookup that fails sends nothing to the inbox.
  */
-function limitsOnce(ctx: ToolContext, state: Registry) {
+function limitsOnce(ctx: ToolContext, atWork: AgentAtWork[]) {
 	let barred: Promise<Set<string>> | undefined;
-	const everyone = Object.values(state.agents ?? {}).map((record) => record.agent);
+	const everyone = atWork.map((record) => record.agent);
 	return () => {
 		barred ??= Promise.resolve()
 			.then(() => ctx.notReviewing?.(everyone) ?? new Set<string>())
@@ -433,7 +439,7 @@ async function claimSnapshot(
 	released: ReleaseRecord[],
 	record: ClaimRecord,
 	landing: LandingView | null | undefined,
-	notReviewing: () => Promise<Set<string>>,
+	reviewers: { atWork: AgentAtWork[]; notReviewing: () => Promise<Set<string>> },
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
 	const { status, counted } = await changeState(ctx, repo, state, async () => votes.votes, claim.change, claim);
@@ -453,9 +459,9 @@ async function claimSnapshot(
 			console.error(`working out where ${claim.change} stands for the dashboard failed`, String(err));
 			return undefined;
 		});
-	const agents = Object.values(state.agents ?? {});
+	const { atWork, notReviewing } = reviewers;
 	const onlyAPerson = signs
-		? await onlyAPersonCanReview(claim, { signs, approval, hosted, trusted }, agents, notReviewing)
+		? await onlyAPersonCanReview(claim, { signs, approval, hosted, trusted }, atWork, notReviewing)
 		: null;
 	const attention = attentionFor(flag, hosted, claim, onlyAPerson);
 	// Dependencies not yet merged into the branch this change lands on.

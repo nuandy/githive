@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ClaimRecord } from "../src/toolkit/claims";
 import { repoSnapshot } from "../src/toolkit/tools/dashboard";
-import { onlyAPersonCanReview, otherPeoplesAgents, type ReviewState } from "../src/toolkit/tools/no-reviewer";
+import {
+	agentsAtWork,
+	onlyAPersonCanReview,
+	otherPeoplesAgents,
+	type ReviewState,
+} from "../src/toolkit/tools/no-reviewer";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -88,6 +93,21 @@ describe("a change only a person can review", { timeout: 60_000 }, () => {
 		expect(await attention()).toMatchObject({ agent: "alice-agent", reason: "is 64 entries enough?" });
 	});
 
+	it("counts agents that never register, signed in or GitHive's own, by the claims they hold", async () => {
+		const { attention } = await aliceAndBob();
+		const key = await generateStampKey();
+		const carol = toolCalls(() => server, {
+			identity: "person:carol",
+			agent: "carol/claude",
+			stamper: (agent?: string) => makeStamper(key.privateKey, agent ? `person:carol/${agent}` : "person:carol"),
+		});
+		const claim = { change: "c9", agent: "carol/claude", paths: ["src/c9/"], intent: "c9" };
+		expect(await carol.call("claim", claim)).toMatchObject({ ok: true });
+		expect(await attention()).toBeUndefined();
+		const barred = async () => new Set(["carol/claude"]);
+		expect(await attention({ notReviewing: barred })).toMatchObject({ reason: expect.stringMatching(NOT_ALLOWED) });
+	});
+
 	it("doesn't count before anything is pushed", async () => {
 		const alice = toolCalls(() => server, { identity: "person:alice" });
 		await alice.call("settings", { required: 1 });
@@ -101,15 +121,38 @@ describe("who else could review a change", () => {
 	const claim = { change: "c1", agent: "alice/claude", by: "person:alice" } as ClaimRecord;
 	const agent = (name: string, by?: string) => ({ agent: name, keyHash: "", at: "", ...(by ? { by } : {}) });
 
-	it("is another person's agent, not its own owner's, nor GitHive's", () => {
+	it("is another person's agent, or a hive agent of GitHive's, not its own owner's nor GitHive's builder", () => {
 		const agents = [
 			agent("alice/claude", "person:alice"),
 			agent("alice/helper", "person:alice"),
 			agent("bob/claude", "person:bob"),
-			agent("githive-reviewer"),
+			agent("githive-builder"),
+			agent("githive-github"),
+			agent("githive-scout", "service:githive-scout"),
 			agent("unsigned-agent"),
 		];
-		expect(otherPeoplesAgents(agents, claim)).toEqual(["bob/claude", "unsigned-agent"]);
+		expect(otherPeoplesAgents(agents, claim)).toEqual(["bob/claude", "githive-scout", "unsigned-agent"]);
+	});
+
+	it("are found in the registry, claims, releases and votes, once each, people left out", () => {
+		const found = agentsAtWork({
+			registered: [agent("keyed")],
+			claims: [agent("githive-scout", "service:githive-scout"), agent("bob/claude", "person:bob")],
+			released: [agent("githive-scout")],
+			votes: [{ reviewer: "githive-nurse", by: "service:githive-nurse" }, { reviewer: "person:alice" }],
+		});
+		expect(found.map(({ agent: name, by }) => [name, by])).toEqual([
+			["keyed", undefined],
+			["githive-scout", "service:githive-scout"],
+			["bob/claude", "person:bob"],
+			["githive-nurse", "service:githive-nurse"],
+		]);
+	});
+
+	it("counts the other hive agents for a hive agent's own change, as in a demo run", () => {
+		const theirs = { change: "help-2", agent: "githive-scout", by: "service:githive-scout" } as ClaimRecord;
+		const hive = ["githive-scout", "githive-nurse", "githive-forager"].map((name) => agent(name, `service:${name}`));
+		expect(otherPeoplesAgents(hive, theirs)).toEqual(["githive-nurse", "githive-forager"]);
 	});
 
 	it("isn't needed while a hosted reviewer is on it, or once it has its approvals", async () => {
