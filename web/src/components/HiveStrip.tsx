@@ -85,7 +85,7 @@ export function HiveStrip({
 							className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 transition-[border-color,background-color] duration-300 ease-[ease]"
 						>
 							{state ? (
-								<StateMark state={state} className={SWATCH} glyph="text-[10px]" />
+								<StateMark state={state} className={SWATCH} />
 							) : (
 								<span className={cn(SWATCH, "flex-none border-dashed border-border-strong")} aria-hidden="true" />
 							)}

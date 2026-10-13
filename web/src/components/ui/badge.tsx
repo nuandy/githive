@@ -75,7 +75,8 @@ const LAMP: Record<LampColor, string> = {
 /**
  * A lamp: amber, green or red, and always the same meaning (theme.css). Without a color it takes the one set around it.
  * A change state's lamp (`state`) is in that state's color and pattern with its glyph on it, so color never says it
- * alone (see status.ts).
+ * alone (see status.ts): a size bigger than a plain lamp, so its 10px glyph reads, and as big for every state, so
+ * lamps in a row line up.
  */
 export function Lamp({
 	color,
@@ -91,7 +92,7 @@ export function Lamp({
 			className={cn(
 				"inline-block size-2.5 flex-none rounded-full bg-[var(--lamp,var(--border-strong))] transition-[background-color] duration-slow",
 				color ? LAMP[color] : "",
-				look && ["inline-grid place-items-center border text-[7px] leading-none font-black", look.mark],
+				look && ["inline-grid size-3.5 place-items-center border text-[10px] leading-none font-black", look.mark],
 				className,
 			)}
 			{...props}

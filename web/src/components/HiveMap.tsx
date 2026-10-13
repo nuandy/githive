@@ -395,7 +395,7 @@ function RedKey() {
 		>
 			{KEYED.map((state) => (
 				<li key={state} className="inline-flex items-center gap-1.5">
-					<StateMark state={state} className="size-3.5 rounded-xs" glyph="text-[10px]" />
+					<StateMark state={state} className="size-3.5 rounded-xs" />
 					{STATES[state].short}
 				</li>
 			))}
@@ -694,9 +694,7 @@ function CellDetails({
 		<div className="grid gap-2">
 			<p className="m-0 font-mono text-meta font-semibold wrap-anywhere">{cellPlace(cell)}</p>
 			<p className="m-0 flex items-center gap-1.5 text-ui">
-				{state === "free" || state === "next" ? null : (
-					<StateMark state={state} className="size-3.5 rounded-xs" glyph="text-[10px]" />
-				)}
+				{state === "free" || state === "next" ? null : <StateMark state={state} className="size-3.5 rounded-xs" />}
 				<span className={state === "free" || state === "next" ? "text-muted-foreground" : STATES[state].text}>
 					{state === "free"
 						? cell.kind === "file"
