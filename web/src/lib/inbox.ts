@@ -1,6 +1,6 @@
 import { counted } from "./plural";
 import { type Summaries, waitingIn, type WaitingItem } from "./repos";
-import { href } from "./routes";
+import { href, withQuery } from "./routes";
 import { timeOf } from "./model";
 
 // The Inbox: everything, across repos, that waits on a person, with why: agents' questions, changes waiting on a vote
@@ -20,6 +20,10 @@ export interface InboxItem {
 	urgency?: number;
 	/** The role a vote is for. */
 	role?: string;
+	/** Who asked, or whose change waits on the vote (newer summaries). */
+	agent?: string;
+	/** Since when it waits (newer summaries). */
+	at?: string;
 }
 
 /** From here up, a question shows as urgent. */
@@ -66,6 +70,35 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 	return { groups, count };
 }
 
+/** Who waits, as a row's line starts: "mara/claude asks", "sam/codex waits on a payments vote", "The audit flags". */
+export function itemWho(item: InboxItem): string {
+	if (item.kind === "audit") return "The audit flags";
+	const who = item.agent || (item.kind === "vote" ? "A change" : "An agent");
+	return item.kind === "vote" ? `${who} waits on a ${item.role} vote` : `${who} asks`;
+}
+
+/** What the reader does about an item, on its button: answer, vote, or read the audit. */
+export function itemAction(item: InboxItem): { label: string; href: string } {
+	if (item.kind === "audit") return { label: "See the audit", href: item.href };
+	// The change's page, opened at its decision.
+	const decide = withQuery(item.href, { decide: true });
+	return { label: item.kind === "vote" ? `Vote as ${item.role}` : "Answer", href: decide };
+}
+
+/**
+ * What's in the Inbox now that wasn't when the page last looked (`seen`, the keys it saw). The first look finds
+ * nothing new: it's what the page opened on.
+ */
+export function inboxArrivals(
+	seen: ReadonlySet<string> | undefined,
+	groups: InboxGroup[],
+): { fresh: { repo: string; item: InboxItem }[]; seen: Set<string> } {
+	const all = groups.flatMap((group) => group.items.map((item) => ({ repo: group.repo, item })));
+	const keyOf = (each: { repo: string; item: InboxItem }) => `${each.repo}\n${each.item.key}`;
+	const fresh = seen ? all.filter((each) => !seen.has(keyOf(each))) : [];
+	return { fresh, seen: new Set([...(seen ?? []), ...all.map(keyOf)]) };
+}
+
 /** A change waiting on a person, as a row: a vote only a person may give, or (as older summaries are) a question. */
 function waitingItem(repo: string, item: WaitingItem): InboxItem {
 	const shared = {
@@ -73,6 +106,8 @@ function waitingItem(repo: string, item: WaitingItem): InboxItem {
 		change: item.change,
 		title: item.title || item.change,
 		href: href.change(repo, item.change),
+		...(item.agent ? { agent: item.agent } : {}),
+		...(item.at ? { at: item.at } : {}),
 	};
 	if (item.kind === "vote" && item.role)
 		return { kind: "vote", ...shared, role: item.role, reason: `Only a person can vote as ${item.role}.` };

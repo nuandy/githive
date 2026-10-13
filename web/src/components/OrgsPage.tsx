@@ -7,7 +7,7 @@ import { href } from "../lib/routes";
 import { messageOf } from "../lib/errors";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Badge } from "./ui/badge";
 import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
@@ -24,13 +24,16 @@ export interface OrgsViewProps {
 export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 	return (
 		<Page className="grid gap-5">
-			<header>
-				<h1 className="text-display-sm tracking-[-0.01em]">Your organizations</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					An organization is a shared owner for repositories, with members and teams. You don't need one: your own
-					repositories are under {me.handle}.
-				</p>
-			</header>
+			<PageHeader
+				className="mb-0"
+				title="Your organizations"
+				description={
+					<>
+						An organization is a shared owner for repositories, with members and teams. You don't need one: your own
+						repositories are under {me.handle}.
+					</>
+				}
+			/>
 
 			<OrgList me={me} orgs={orgs} />
 

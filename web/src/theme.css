@@ -140,8 +140,12 @@
 	--stagger-step: 35ms;
 
 	--page-width: 1180px;
-	/* How far the sticky top bar reaches down the window; what sticks under it starts below this. */
-	--topbar-height: 56px;
+	/* The top bar's own height: it's drawn this tall. A repo's tabs stick under it. */
+	--bar-height: 52px;
+	/* How far what sticks at the top reaches down the window; what sticks under it starts below this. Under a repo's
+	   tabs, which stick under the bar too, it's their foot (RepoPage sets it). */
+	--topbar-height: var(--bar-height);
+	--repo-tabs-height: 44px;
 }
 
 .dark {
@@ -488,6 +492,10 @@
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;
 		border-radius: var(--radius);
+	}
+	/* A page's heading takes focus as the page changes, so a screen reader starts there. It isn't a control, so no ring. */
+	h1[tabindex="-1"]:focus {
+		outline: none;
 	}
 	code,
 	pre {

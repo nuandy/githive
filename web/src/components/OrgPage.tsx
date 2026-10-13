@@ -11,7 +11,7 @@ import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
 import { MembersSection } from "./OrgMembers";
 import { TeamsSection } from "./OrgTeams";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Badge } from "./ui/badge";
 import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
@@ -323,6 +323,7 @@ export function OrgPage({ slug, me, manage }: { slug: string; me: { handle: stri
 	if (!org.data)
 		return (
 			<Page>
+				<PageHeader title={slug} />
 				<OrgUnavailable slug={slug} error={org.error} />
 			</Page>
 		);

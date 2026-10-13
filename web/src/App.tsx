@@ -17,10 +17,11 @@ import {
 import { AdminPage } from "./components/AdminPage";
 import { AgentsPage } from "./components/AgentsPage";
 import { InboxPage } from "./components/InboxPage";
+import { DashboardKeys } from "./components/Keyboard";
 import { NewRepoPage } from "./components/NewRepoPage";
 import { OrgPage } from "./components/OrgPage";
 import { OrgsPage } from "./components/OrgsPage";
-import { EmptyPage, Page, Shell, SkipLink } from "./components/Page";
+import { EmptyPage, Shell, SkipLink } from "./components/Page";
 import { PageBoundary } from "./components/PageBoundary";
 import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
@@ -29,11 +30,13 @@ import { SECTION_TITLES } from "./components/RepoSettings";
 import { TopBar, type Crumb } from "./components/TopBar";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
+import { replaceHash, routePlace, useHashRoute } from "./hooks/useHashRoute";
 import { useLingering } from "./hooks/useLingering";
 import { useLiveFeed } from "./hooks/useLiveFeed";
 import { usePoll } from "./hooks/usePoll";
 import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
+import { isLoose, splitRepo } from "./lib/repoName";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type RepoTab, type Route } from "./lib/routes";
 import {
@@ -45,49 +48,6 @@ import {
 	withoutSigninError,
 } from "./lib/session";
 import { cn } from "./lib/utils";
-// The page column's classes, for the pages not yet on utilities.
-
-/** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
-export function routePlace(route: Route): string {
-	if (route.page === "repo") return `repo:${route.repo}`;
-	if (route.page === "change") return `change:${route.repo}:${route.change}`;
-	if (route.page === "org") return `org:${route.org}`;
-	return route.page;
-}
-
-// Moving between files in the Code tab scrolls to the top too, without remounting the page.
-function scrollPlace(route: Route): string {
-	const inCode = route.page === "repo" && route.tab === "code";
-	const codePlace = inCode ? `:code:${route.path ?? ""}:${route.ref ?? ""}` : "";
-	return `${routePlace(route)}${codePlace}`;
-}
-
-export function useHashRoute(): Route {
-	const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
-	const place = useRef(scrollPlace(route));
-	useEffect(() => {
-		const onChange = () => {
-			const next = parseRoute(window.location.hash);
-			const nextPlace = scrollPlace(next);
-			if (nextPlace !== place.current) window.scrollTo(0, 0);
-			place.current = nextPlace;
-			setRoute(next);
-		};
-		window.addEventListener("hashchange", onChange);
-		return () => window.removeEventListener("hashchange", onChange);
-	}, []);
-	return route;
-}
-
-function Loading({ what }: { what: string }) {
-	return (
-		<Page>
-			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
-				Loading {what}…
-			</p>
-		</Page>
-	);
-}
 
 /** What couldn't be refreshed, in a bar under the top bar: it folds open, and folds away once all is well again. */
 function PageErrors({ errors }: { errors: string[] }) {
@@ -165,8 +125,7 @@ export function App() {
 	if (me === undefined) {
 		if (!bootError) return null;
 		return (
-			<EmptyPage role="alert">
-				<h1>GitHive didn't answer</h1>
+			<EmptyPage role="alert" title="GitHive didn't answer">
 				<p>{bootError} Reload the page to try again.</p>
 			</EmptyPage>
 		);
@@ -242,8 +201,8 @@ function Visitor({
 	}, [title]);
 	const view = repoViewOf(route);
 	if (data.snapshot.error === SIGNED_OUT_MESSAGE) return signIn;
-	// The Repositories list is for people signed in, so the trail starts at the repo.
-	const trail = crumbs.filter((crumb) => crumb.href !== href.repos());
+	// An owner's page is for people signed in, so the trail names the owner without leading there.
+	const trail = crumbs.map((crumb) => (crumb.repo ? crumb : { label: crumb.label }));
 	return (
 		<Shell>
 			<SkipLink />
@@ -266,6 +225,11 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	// For GitHive's operators (Access): orgs' requests waiting for approval, counted on the Admin link.
 	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
+	// The reader's own repos, most recently active first, for the repo crumb's switcher.
+	const repoRows = summaries.data ? buildRepoRows(summaries.data) : [];
+	const yourRepos = repoRows.filter((row) => !row.public).map((row) => row.name);
+	// The keyboard's shortcuts, listed: from ? or the user menu.
+	const [shortcutsShown, setShortcutsShown] = useState(false);
 
 	const changeId = route.page === "change" ? route.change : null;
 	const { liveStatus, snapshot, audit, access, change } = useRepoData(repoName, changeId);
@@ -308,8 +272,10 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "repos") {
 		page = (
 			<RepoList
-				rows={summaries.data ? buildRepoRows(summaries.data) : []}
+				rows={repoRows}
 				loaded={summaries.loaded}
+				query={route.q ?? ""}
+				onQueryChange={(q) => replaceHash(href.repos(q))}
 				canCreate={me.kind === "user"}
 				{...(me.kind === "user" ? { demo, start: account } : {})}
 			/>
@@ -333,6 +299,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<SkipLink />
 			<TopBar
 				crumbs={crumbs}
+				repos={yourRepos}
+				onRepos={onRepos}
+				onShortcuts={() => setShortcutsShown(true)}
 				inboxCount={inbox.count}
 				inboxCurrent={route.page === "inbox"}
 				me={me}
@@ -344,6 +313,14 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			/>
 			<PageErrors errors={errors} />
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
+			<DashboardKeys
+				route={route}
+				repos={yourRepos}
+				snapshot={snapshot.data}
+				people={me.kind === "user"}
+				help={shortcutsShown}
+				onHelp={setShortcutsShown}
+			/>
 		</Shell>
 	);
 }
@@ -390,15 +367,17 @@ function RepoRoute(props: {
 	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
 	const ready = !!snapshot.data || notStarted;
-	const phase = ready ? "page" : snapshot.error ? "unavailable" : "loading";
-	// What takes the place of "Loading…" fades in; a page that's ready at once comes in with the page's own fade.
+	// While it loads, the page shows its header and tabs from the address, and its content takes the place of
+	// "Loading…" under them; a repo that can't be shown fades in in its place.
+	const phase = ready || !snapshot.error ? "page" : "unavailable";
 	const swapped = useChanged(phase);
 	let shown: ReactNode;
-	if (ready) {
+	if (phase === "page") {
 		shown = (
 			<RepoPage
 				repo={repo}
 				view={view}
+				loading={!ready}
 				snapshot={snapshot.data ? { ...snapshot.data, audit: audit.data } : null}
 				onStarted={() => {
 					snapshot.refresh();
@@ -423,13 +402,11 @@ function RepoRoute(props: {
 				}}
 			/>
 		);
-	} else if (!snapshot.error) {
-		shown = <Loading what={repo} />;
 	} else {
-		shown = <RepoUnavailable repo={repo} error={snapshot.error} />;
+		shown = <RepoUnavailable repo={repo} error={snapshot.error!} />;
 	}
 	return (
-		<div key={phase} className={cn("flex flex-col", swapped && "animate-fade")}>
+		<div key={phase} className={cn("flex flex-1 flex-col", swapped && "animate-fade")}>
 			{shown}
 		</div>
 	);
@@ -437,7 +414,8 @@ function RepoRoute(props: {
 
 /** What the repo page shows for a route, or null when the route isn't a repo's. */
 function repoViewOf(route: Route): RepoView | null {
-	if (route.page === "change") return { kind: "change", change: route.change, tab: route.tab };
+	if (route.page === "change")
+		return { kind: "change", change: route.change, tab: route.tab, ...(route.decide ? { decide: true } : {}) };
 	if (route.page !== "repo") return null;
 	return {
 		kind: "repo",
@@ -471,10 +449,12 @@ function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: s
 	switch (route.page) {
 		case "repo":
 		case "change": {
+			// The repo as its owner, which is a place of its own, then its name, which switches to another repo.
 			const repoName = route.repo;
+			const { owner, name } = splitRepo(repoName);
 			const crumbs: Crumb[] = [
-				{ label: "Repositories", href: href.repos() },
-				{ label: repoName, href: href.repo(repoName) },
+				...(isLoose(repoName) ? [] : [{ label: owner, href: href.org(owner) }]),
+				{ label: name, href: href.repo(repoName), repo: repoName },
 			];
 			if (route.page !== "change") return { crumbs, title: [...tabTitle(route), repoName].join(" · ") };
 			crumbs.push({ label: changeLabel });
@@ -532,8 +512,7 @@ function tabTitle(route: Extract<Route, { page: "repo" }>): string[] {
 /** For pages that belong to a person signed in to GitHive, not an Access caller. */
 function ForPeople({ what }: { what: string }) {
 	return (
-		<EmptyPage>
-			<h1>{what} belong to people signed in to GitHive</h1>
+		<EmptyPage title={`${what} belong to people signed in to GitHive`}>
 			<p>
 				Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -544,8 +523,7 @@ function ForPeople({ what }: { what: string }) {
 
 function NotAnOperator() {
 	return (
-		<EmptyPage>
-			<h1>Admin is for GitHive's operators</h1>
+		<EmptyPage title="Admin is for GitHive's operators">
 			<p>
 				It's reached through Cloudflare Access, on GitHive's admin address.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -556,8 +534,7 @@ function NotAnOperator() {
 
 function NoAgentsHere() {
 	return (
-		<EmptyPage>
-			<h1>Agents belong to people signed in to GitHive</h1>
+		<EmptyPage title="Agents belong to people signed in to GitHive">
 			<p>
 				Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make some.{" "}
 				<a href={href.repos()}>Back to Repositories</a>.
@@ -572,8 +549,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 	const heading = hidden ? `There's no ${repo} you can see` : `${repo} isn't open for agents yet`;
 	const reason = hidden ? "It doesn't exist, or you aren't one of the people who can see it." : error;
 	return (
-		<EmptyPage>
-			<h1>{heading}</h1>
+		<EmptyPage title={heading}>
 			<p>
 				{reason} <a href={href.repos()}>Back to Repositories</a>.
 			</p>
@@ -583,8 +559,7 @@ function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
 
 function PageNotFound() {
 	return (
-		<EmptyPage>
-			<h1>Page not found</h1>
+		<EmptyPage title="Page not found">
 			<p>
 				<a href={href.repos()}>Go to Repositories</a>.
 			</p>

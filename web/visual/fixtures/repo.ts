@@ -77,7 +77,16 @@ export function summaryOf(
 function waitingItem(snapshot: RepoSnapshot, claim: RepoSnapshot["claims"][number]): WaitingItem | null {
 	const { change, attention, approval, head } = claim;
 	const title = (claim.intent.split("\n")[0] ?? "").slice(0, 120);
-	if (attention) return { kind: "question", change, title, reason: attention.reason.slice(0, 500) };
+	if (attention)
+		return {
+			kind: "question",
+			change,
+			title,
+			reason: attention.reason.slice(0, 500),
+			agent: attention.agent,
+			at: attention.at,
+			...(attention.urgency === undefined ? {} : { urgency: attention.urgency }),
+		};
 	if (!head || approval.approved || approval.vetoedBy.length) return null;
 	const sentBack = snapshot.votes.some(
 		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
@@ -87,7 +96,15 @@ function waitingItem(snapshot: RepoSnapshot, claim: RepoSnapshot["claims"][numbe
 	const peopleOnly = (role: string) => (snapshot.policy.grants?.[role] ?? ["githive"]).every(people);
 	const role = (approval.awaiting ?? []).find(peopleOnly);
 	if (!role) return null;
-	return { kind: "vote", change, title, role, reason: `Waiting for a ${role} vote, which only a person can give.` };
+	return {
+		kind: "vote",
+		change,
+		title,
+		role,
+		reason: `Waiting for a ${role} vote, which only a person can give.`,
+		agent: claim.agent,
+		at: claim.active,
+	};
 }
 
 /** A branch's landing view from a hive. */

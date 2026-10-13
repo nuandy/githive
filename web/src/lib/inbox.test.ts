@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInbox, isUrgent } from "./inbox";
+import { buildInbox, inboxArrivals, isUrgent, itemAction, itemWho } from "./inbox";
 
 describe("the inbox", () => {
 	it("groups waiting changes by repo, most recently active first, and counts them", () => {
@@ -106,5 +106,70 @@ describe("the inbox", () => {
 			repos: [{ repo: "bob/demo", since: "2026-01-01T00:00:00Z", summary: { waiting }, public: true }],
 		});
 		expect(count).toBe(0);
+	});
+
+	it("says who waits and since when, and links a question or a vote to the change's decision", () => {
+		const { groups } = buildInbox({
+			repos: [
+				{
+					repo: "acme/shop",
+					since: "",
+					summary: {
+						violations: 1,
+						waiting: [
+							{
+								kind: "question",
+								change: "cache",
+								title: "Cache the cart",
+								reason: "Which TTL?",
+								agent: "mara/claude",
+								at: "2026-10-13T10:00:00Z",
+							},
+							{
+								kind: "vote",
+								role: "payments",
+								change: "refunds",
+								title: "Refunds",
+								reason: "",
+								agent: "sam/codex",
+								at: "2026-10-13T09:00:00Z",
+							},
+						],
+					},
+				},
+			],
+		});
+		const [question, vote, audit] = groups[0]!.items;
+		expect(question).toMatchObject({
+			kind: "question",
+			agent: "mara/claude",
+			at: "2026-10-13T10:00:00Z",
+			href: "#/repos/acme/shop/changes/cache",
+		});
+		expect(itemAction(question!)).toEqual({ label: "Answer", href: "#/repos/acme/shop/changes/cache?decide" });
+		expect(vote).toMatchObject({ kind: "vote", agent: "sam/codex", href: "#/repos/acme/shop/changes/refunds" });
+		expect(itemAction(vote!)).toEqual({ label: "Vote as payments", href: "#/repos/acme/shop/changes/refunds?decide" });
+		expect(audit).toMatchObject({ kind: "audit", href: "#/repos/acme/shop/audit" });
+		expect(itemAction(audit!)).toEqual({ label: "See the audit", href: "#/repos/acme/shop/audit" });
+		expect(audit).not.toHaveProperty("at");
+		expect(itemWho(question!)).toBe("mara/claude asks");
+		expect(itemWho(vote!)).toBe("sam/codex waits on a payments vote");
+		expect(itemWho(audit!)).toBe("The audit flags");
+		// An older summary's item, with no agent.
+		expect(itemWho({ kind: "question", key: "x", title: "x", reason: "?", href: "" })).toBe("An agent asks");
+	});
+
+	it("finds what arrived since the page last looked, once it has looked", () => {
+		const item = (key: string) => ({ kind: "question" as const, key, title: key, reason: "?", href: "" });
+		const group = (repo: string, keys: string[]) => ({ repo, repoHref: "", items: keys.map(item), count: keys.length });
+		// The first look announces nothing: it's what the page opened on.
+		const first = inboxArrivals(undefined, [group("a", ["c-1"])]);
+		expect(first.fresh).toEqual([]);
+		const second = inboxArrivals(first.seen, [group("a", ["c-1", "c-2"]), group("b", ["c-1"])]);
+		expect(second.fresh.map((each) => [each.repo, each.item.key])).toEqual([
+			["a", "c-2"],
+			["b", "c-1"],
+		]);
+		expect(inboxArrivals(second.seen, [group("a", ["c-2"])]).fresh).toEqual([]);
 	});
 });

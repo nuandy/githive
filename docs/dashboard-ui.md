@@ -9,7 +9,10 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | --- | --- |
 | Every design value (colors, radius, type, shadows, motion), light and dark | `web/src/theme.css` |
 | Shared components (Button, Badge, Box, Callout, Empty, fields, Collapse, DropdownMenu, Tooltip, Dialog, …) | `web/src/components/ui/` |
-| The frame every page sits in (`Shell`, `Page`, `EmptyPage`) | `web/src/components/Page.tsx` |
+| The frame every page sits in (`Shell`, `Main`, `Page`, `PageHeader`, `EmptyPage`) | `web/src/components/Page.tsx` |
+| Routes, and views kept in the address (`readQuery`, `withQuery`) | `web/src/lib/routes.ts` |
+| Focus and scroll as the route changes (`useHashRoute`, `replaceHash`) | `web/src/hooks/useHashRoute.ts`, `lib/scrollMemory.ts` |
+| The keyboard's shortcuts, the ⌘K palette and their list | `lib/shortcuts.ts`, `lib/palette.ts`, `components/Keyboard.tsx` |
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `ThemeMenu.tsx` |
 | Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) and `useAnnouncer` | `web/src/hooks/` |
@@ -122,6 +125,7 @@ Reach for `components/ui` before writing a control by hand:
   the row was. What changes at once (a role, a permission) says Saved by it (`useSavedNote`, `SAVED_NOTE`).
 - Managing pages (`ui/manage.tsx`): a row's actions go under what it's about below 560px; a form that adds to a list
   sits at the list's end (`ADD_FORM`), its fields labelled (`INLINE_FIELDS`), never by a placeholder alone.
+- `PageHeader`, `PageTitle`, `EmptyPage`, `Main`, `COLUMN`: the page frame (below).
 - `Announcer` with `useAnnouncer()`: a page's polite live region, for what changes under a screen reader. `say(words)`
   speaks at most once every four seconds and drops what comes sooner; draw `<Announcer said={said} />` once.
 - `Icon` comes in three sizes: 14 beside small text (13px and under), 16 (the default) beside body text and alone in a
@@ -131,6 +135,51 @@ Reach for `components/ui` before writing a control by hand:
 To add a shadcn component, run from the repository root: `npx shadcn@latest add <name>` (`components.json` points it
 at `web/src/components/ui`). Then point its `cn` import at `@/lib/utils` (ours knows the theme's names), swap
 lucide icons for `Icon`, and restyle it from the theme.
+
+## The page frame
+
+- **One header, one heading.** A page opens with `PageHeader`: its title (the page's one `h1`, `text-display`), a
+  line about it at `max-w-measure`, and its actions at the far end, wrapping under on a phone. A page with nothing but
+  a message is an `EmptyPage` with a `title`, the same `h1` centered. A repo's pages are headed by `RepoHeader`, whose
+  `h1` is the repo's name (a change's page has its own title instead).
+- **One width.** Every page's column is `--page-width` wide at most (`COLUMN`), and no tab narrows it; long text keeps
+  to `max-w-measure` instead.
+- **Landmarks.** Everything under the top bar is in `<main id="main">` (`Main`; `Page` is `Main` as a column), a
+  repo's header and tabs too, so the skip link reaches them.
+- **The top bar** is `--bar-height` tall and sticks. A repo's tabs stick under it; under them `--topbar-height` (where
+  what sticks starts) reaches their foot. On a narrow screen the current tab is scrolled into view, and an end of the
+  tabs with more past it fades out. A tab with nothing to show yet (before GitHive starts on a repo) is dimmed, isn't a
+  link, and says why in a tooltip (`TabItem.unavailable`).
+- **The Inbox leads the top bar.** It fills `needs-soft` while something waits and keeps its name on a phone, where
+  light and dark move into the user menu; its count is the bar's one red number (Admin's is neutral). A repo's crumbs
+  are its owner (the org or person's page) and its name, a switcher to the reader's other repos. An Inbox row has its
+  kind's icon, who waits and for how long ("mara/claude asks · 38m"), the question at body size in ink, and a verb
+  (Answer, "Vote as payments", See the audit) that opens the change at its decision.
+- **Moving between places.** A new place starts at the top with its `h1` focused (no ring: it isn't a control), so a
+  screen reader starts there; Back and Forward go back to where each history entry was scrolled once the page has
+  filled in; a tab of the same place stays where it is. A view that changes the address in place (a search typed)
+  uses `replaceHash`, which keeps the entry.
+- **Linkable views.** What a view shows that's worth a link goes in the hash's query: a route reads its names with
+  `readQuery`, its link writes them with `withQuery` (a text as `name=value`, a flag as `name`). `#/?q=` is the
+  Repositories search; `#/repos/o/n/changes/c?decide` opens a change at its decision (`href.change(repo, change, tab,
+  { decide: true })`).
+
+## The keyboard
+
+Everything is reached with Tab, and these save the trip (`?`, or Keyboard shortcuts in the user menu, lists them):
+
+| Keys | Does |
+| --- | --- |
+| `g` then `i` | Goes to the Inbox |
+| `g` then `r` | Goes to Repositories |
+| `/` | Finds a repository, on Repositories |
+| `1` to `8` | Chooses a repo's tab, Hive to Settings |
+| `⌘K` or `Ctrl-K` | Opens the palette: a repo, an open change in the repo shown, or a page |
+| `?` | Lists the shortcuts |
+
+Keys typed in a field, held with a modifier, or pressed in an open menu or dialog are left alone, but for ⌘K. The
+palette is a combobox over a listbox: arrow keys choose, Enter goes, Escape closes. A new shortcut is a case in
+`readShortcut` (`lib/shortcuts.ts`) and a line in `SHORTCUTS` (`components/Keyboard.tsx`).
 
 ## Motion: nothing changes abruptly
 

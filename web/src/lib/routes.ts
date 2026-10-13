@@ -1,5 +1,5 @@
 // Hash routes. A repo is two segments, its owner and its name (each URI-encoded):
-//   #/                                        Repositories
+//   #/[?q=<search>]                           Repositories, searched
 //   #/new[?owner=<owner>]                     a new repository
 //   #/inbox                                   what waits on a person, across repos
 //   #/orgs                                    your organizations, and making one
@@ -8,9 +8,13 @@
 //                                             (the Hive tab without one)
 //   #/repos/:owner/:name/settings/:section    a part of Settings (General without one)
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
-//   #/repos/:owner/:name/changes/:id[/commits]
+//   #/repos/:owner/:name/changes/:id[/commits][?decide]
+//                                             (?decide: opened at its decision, to vote or answer)
 //   #/settings/agents                         your agents, their tokens, and connected apps
 // Inside the dashboard a repo is named by its full name, "<owner>/<name>".
+//
+// A view that can be linked keeps what it shows in the query: a search, a flag. Each route reads the names it knows
+// (readQuery), and its link writes them back (withQuery); a name nobody reads is ignored.
 
 import { repoPath } from "./repoName";
 
@@ -29,7 +33,7 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export type Route =
-	| { page: "repos" }
+	| { page: "repos"; /** The repo search. */ q?: string }
 	| { page: "new-repo"; owner?: string }
 	| { page: "orgs" }
 	| { page: "org"; org: string }
@@ -45,8 +49,16 @@ export type Route =
 			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
 			/** Settings tab: the part shown. */ section?: SettingsSection;
 	  }
-	| { page: "change"; repo: string; change: string; tab: ChangeTab }
+	| {
+			page: "change";
+			repo: string;
+			change: string;
+			tab: ChangeTab;
+			/** Opened at its decision: to vote on it, or answer its agent. */ decide?: true;
+	  }
 	| { page: "not-found" };
+
+const encode = encodeURIComponent;
 
 const REPO_TABS: RepoTab[] = ["hive", "changes", "history", "claims", "code", "agents", "settings", "audit"];
 const CHANGE_TABS: ChangeTab[] = ["commits"];
@@ -60,17 +72,39 @@ function decode(segment: string | undefined): string | null {
 	}
 }
 
+/** A query's values by name: a text, absent when empty, or a flag, there or not. */
+export function readQuery(query: string) {
+	const params = new URLSearchParams(query);
+	return {
+		text: (name: string): string | undefined => params.get(name) || undefined,
+		flag: (name: string): boolean => params.has(name),
+	};
+}
+
+/** A link with these in its query: a text as name=value, a flag (true) as its name; what's unset, false or empty isn't. */
+export function withQuery(path: string, values: Record<string, string | boolean | undefined>): string {
+	const parts = Object.entries(values).flatMap(([name, value]) => {
+		if (value === true) return [encode(name)];
+		if (!value) return [];
+		return [`${encode(name)}=${encode(value)}`];
+	});
+	return parts.length ? `${path}?${parts.join("&")}` : path;
+}
+
+/** Only what's set, so a route without a view's values equals one that never had them. */
+const set = <T extends Record<string, unknown>>(values: T) =>
+	Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== false)) as {
+		[K in keyof T]?: Exclude<T[K], undefined | false>;
+	};
+
 export function parseRoute(hash: string): Route {
 	const raw = hash.replace(/^#/, "");
 	const [path = "", query = ""] = raw.split("?");
 	const parts = path.split("/").filter(Boolean);
-	if (parts.length === 0) return { page: "repos" };
-	const params = new URLSearchParams(query);
+	const params = readQuery(query);
+	if (parts.length === 0) return { page: "repos", ...set({ q: params.text("q") }) };
 	if (parts[0] === "inbox" && parts.length === 1) return { page: "inbox" };
-	if (parts[0] === "new" && parts.length === 1) {
-		const owner = params.get("owner") || undefined;
-		return { page: "new-repo", ...(owner ? { owner } : {}) };
-	}
+	if (parts[0] === "new" && parts.length === 1) return { page: "new-repo", ...set({ owner: params.text("owner") }) };
 	if (parts[0] === "orgs" && parts.length === 1) return { page: "orgs" };
 	if (parts[0] === "orgs" && parts.length === 2) {
 		const org = decode(parts[1]);
@@ -88,8 +122,7 @@ export function parseRoute(hash: string): Route {
 		if (rest[0] === "code") {
 			const segments = rest.slice(1).map(decode);
 			if (segments.some((segment) => segment === null)) return { page: "not-found" };
-			const ref = params.get("ref") || undefined;
-			return { page: "repo", repo, tab: "code", path: segments.join("/"), ...(ref ? { ref } : {}) };
+			return { page: "repo", repo, tab: "code", path: segments.join("/"), ...set({ ref: params.text("ref") }) };
 		}
 		if (rest[0] === "settings" && rest.length <= 2) {
 			const section = (rest[1] ?? "general") as SettingsSection;
@@ -97,26 +130,23 @@ export function parseRoute(hash: string): Route {
 			return { page: "repo", repo, tab: "settings", section };
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
-			const branch = params.get("branch") || undefined;
 			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
-			return { page: "repo", repo, tab, ...(branch ? { branch } : {}) };
+			return { page: "repo", repo, tab, ...set({ branch: params.text("branch") }) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
 			if (!change) return { page: "not-found" };
 			if (rest.length === 3 && !CHANGE_TABS.includes(rest[2] as ChangeTab)) return { page: "not-found" };
-			return { page: "change", repo, change, tab: (rest[2] as ChangeTab | undefined) ?? "conversation" };
+			const tab = (rest[2] as ChangeTab | undefined) ?? "conversation";
+			return { page: "change", repo, change, tab, ...set({ decide: params.flag("decide") || undefined }) };
 		}
 	}
 	return { page: "not-found" };
 }
 
-const encode = encodeURIComponent;
-
 function repoHref(repo: string, tab: RepoTab = "hive", branch?: string): string {
 	const tabPart = tab === "hive" ? "" : `/${tab}`;
-	const query = branch ? `?branch=${encode(branch)}` : "";
-	return `#/repos/${repoPath(repo)}${tabPart}${query}`;
+	return withQuery(`#/repos/${repoPath(repo)}${tabPart}`, { branch });
 }
 
 /** A part of a repo's Settings; General is Settings itself. */
@@ -124,20 +154,25 @@ function settingsHref(repo: string, section: SettingsSection = "general"): strin
 	return `#/repos/${repoPath(repo)}/settings${section === "general" ? "" : `/${section}`}`;
 }
 
-function changeHref(repo: string, change: string, tab: ChangeTab = "conversation"): string {
+function changeHref(
+	repo: string,
+	change: string,
+	tab: ChangeTab = "conversation",
+	view: { decide?: boolean } = {},
+): string {
 	const tabPart = tab === "conversation" ? "" : `/${tab}`;
-	return `#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`;
+	return withQuery(`#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`, { decide: view.decide });
 }
 
 function codeHref(repo: string, path = "", ref?: string): string {
 	const segments = path.split("/").filter(Boolean).map(encode).join("/");
 	const pathPart = path ? `/${segments}` : "";
-	const query = ref ? `?ref=${encode(ref)}` : "";
-	return `#/repos/${repoPath(repo)}/code${pathPart}${query}`;
+	return withQuery(`#/repos/${repoPath(repo)}/code${pathPart}`, { ref });
 }
 
 export const href = {
-	repos: () => "#/",
+	/** Repositories, searched for `q` when given. */
+	repos: (q?: string) => withQuery("#/", { q }),
 	repo: repoHref,
 	settings: settingsHref,
 	change: changeHref,
@@ -145,7 +180,7 @@ export const href = {
 	code: codeHref,
 	/** A public repo's site as its default branch has it, or as a change has it. Outside the dashboard, so no "#". */
 	site: (repo: string, change?: string) => `/site/${repoPath(repo)}/${change ? `@${encode(change)}/` : ""}`,
-	newRepo: (owner?: string) => `#/new${owner ? `?owner=${encode(owner)}` : ""}`,
+	newRepo: (owner?: string) => withQuery("#/new", { owner }),
 	orgs: () => "#/orgs",
 	org: (org: string) => `#/orgs/${encode(org)}`,
 	inbox: () => "#/inbox",

@@ -3,13 +3,20 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<!-- The browser's own bar in the top bar's color (--card), light and dark (lib/theme.ts keeps it to a choice). -->
+		<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfcfb" />
+		<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#172127" />
 		<!-- Light or dark before the first paint, so no page flashes the wrong one (the same rule as lib/theme.ts). -->
 		<script>
 			try {
 				const choice = localStorage.getItem("githive.theme");
 				const dark = choice === "dark" || (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
 				document.documentElement.classList.toggle("dark", dark);
-				if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
+				if (choice === "light" || choice === "dark") {
+					document.documentElement.dataset.theme = choice;
+					for (const meta of document.querySelectorAll('meta[name="theme-color"]'))
+						meta.content = dark ? "#172127" : "#fbfcfb";
+				}
 			} catch {}
 		</script>
 		<title>GitHive</title>

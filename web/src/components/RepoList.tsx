@@ -11,7 +11,7 @@ import { cn } from "../lib/utils";
 import { DemoCard, type DemoApi } from "./DemoRun";
 import { GetStarted, type StartApi } from "./GetStarted";
 import { Icon } from "./Icon";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Lamp } from "./ui/badge";
 import { Box } from "./ui/box";
 import { Button } from "./ui/button";
@@ -27,6 +27,9 @@ export interface RepoListProps {
 	demo?: DemoApi;
 	/** Your agents and apps, for the Get started checklist (people signed in). */
 	start?: StartApi;
+	/** The search, as the address has it (#/?q=…), and keeping it there as it's typed. */
+	query?: string;
+	onQueryChange?: (query: string) => void;
 }
 
 /** A repo's lamp: what needs a person, work being built, or work landed, as a change's lamp says each; quiet is unlit. */
@@ -219,8 +222,16 @@ const NOTE = "my-3.75 border-t border-border px-0.5 py-3 text-muted-foreground";
  * The home page: the reader's own repos (theirs, their orgs' and those shared with them), those that need a person
  * first, then those at work, then the quiet ones; then other people's public repos, apart.
  */
-export function RepoList({ rows: all, loaded, canCreate = false, demo, start }: RepoListProps) {
-	const [query, setQuery] = useState("");
+export function RepoList({
+	rows: all,
+	loaded,
+	canCreate = false,
+	demo,
+	start,
+	query: asked = "",
+	onQueryChange,
+}: RepoListProps) {
+	const [query, setQuery] = useState(asked);
 	const rows = all.filter((row) => !row.public);
 	const others = all.filter((row) => row.public);
 	const matching = new Set(filterRepos(all, query).map((row) => row.name));
@@ -248,24 +259,26 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo, start }: 
 
 	return (
 		<Page>
-			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-				<div className="grid min-w-0 gap-2">
-					<h1 className="text-display tracking-[-0.01em]">Repositories</h1>
-					{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
-				</div>
-				{canCreate ? (
-					<div className="flex flex-wrap gap-2">
-						<Button asChild>
-							<a href={href.orgs()}>Create an organization</a>
-						</Button>
-						<Button asChild variant="primary">
-							<a href={href.newRepo()}>
-								<Icon name="plus" /> New repository
-							</a>
-						</Button>
-					</div>
-				) : null}
-			</div>
+			<PageHeader
+				title="Repositories"
+				className="items-center"
+				actions={
+					canCreate ? (
+						<>
+							<Button asChild>
+								<a href={href.orgs()}>Create an organization</a>
+							</Button>
+							<Button asChild variant="primary">
+								<a href={href.newRepo()}>
+									<Icon name="plus" /> New repository
+								</a>
+							</Button>
+						</>
+					) : null
+				}
+			>
+				{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
+			</PageHeader>
 
 			{start ? <GetStarted rows={rows} loaded={loaded} api={start} /> : null}
 			{/* Prominent for an account with no repositories; otherwise a line. */}
@@ -283,7 +296,10 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo, start }: 
 						className="h-9 w-full pl-8.5"
 						placeholder="Find a repository…"
 						value={query}
-						onChange={(event) => setQuery(event.target.value)}
+						onChange={(event) => {
+							setQuery(event.target.value);
+							onQueryChange?.(event.target.value);
+						}}
 					/>
 				</div>
 			) : null}

@@ -151,6 +151,31 @@ const PATHS = {
 			<path d="m3 3 18 18" />
 		</>
 	),
+	inbox: (
+		<>
+			<path d="M22 12h-6l-2 3h-4l-2-3H2" />
+			<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+		</>
+	),
+	more: (
+		<>
+			<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+			<circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+			<circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+		</>
+	),
+	question: (
+		<>
+			<circle cx="12" cy="12" r="9" />
+			<path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" />
+		</>
+	),
+	keyboard: (
+		<>
+			<rect width="20" height="14" x="2" y="5" rx="2" />
+			<path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 15h6" />
+		</>
+	),
 	sun: (
 		<>
 			<circle cx="12" cy="12" r="4" />
@@ -158,14 +183,6 @@ const PATHS = {
 		</>
 	),
 	moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
-	// Three dots in a row: a menu of what else there is to do.
-	more: (
-		<>
-			<circle cx="5" cy="12" r="1" />
-			<circle cx="12" cy="12" r="1" />
-			<circle cx="19" cy="12" r="1" />
-		</>
-	),
 	monitor: (
 		<>
 			<rect width="20" height="14" x="2" y="3" rx="2" />

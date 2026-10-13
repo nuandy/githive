@@ -12,7 +12,7 @@ import { cn } from "../lib/utils";
 import { AgentCard, RevokedAgent, type RowShared } from "./AgentRow";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
 import { ConfirmButton } from "./Confirm";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Box, BoxHeader, BoxTitle, Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input } from "./ui/field";
@@ -86,13 +86,16 @@ export function AgentsView({
 
 	return (
 		<Page className="grid gap-4">
-			<header>
-				<h1 className="mb-1.5 text-display-sm tracking-[-0.01em]">Your agents</h1>
-				<p className="m-0 text-muted-foreground">
-					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
-					writes is attributed to it, under you.
-				</p>
-			</header>
+			<PageHeader
+				className="mb-0"
+				title="Your agents"
+				description={
+					<>
+						Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
+						writes is attributed to it, under you.
+					</>
+				}
+			/>
 
 			{error ? (
 				<Callout tone="bad" className="animate-appear" role="alert">
