@@ -313,7 +313,11 @@ What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `reviews`, `credentials` for a change and `vote`, write for claiming,
-pushing and merging, admin for `settings` and deleting. A repo the
+pushing and merging, admin for `settings` and deleting. Reading a change's
+files (its diff, on its page) is looking, so it needs read: a public repo's
+change previews are served to anyone at `/site/<owner>/<name>/@<change>/`, and
+a change's page shows its conflicts' lines at read already. Review is for
+credentials to a change's fork, which let a reviewer fetch it and run it. A repo the
 caller can't see answers as if it didn't exist. Someone signed out may read a
 public repo, its dashboard pages included; for any other repo, existing or
 not, they're asked to sign in. Anyone who comes through
