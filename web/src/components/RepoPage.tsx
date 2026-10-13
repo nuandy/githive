@@ -103,6 +103,9 @@ export interface RepoPageProps {
 	snapshot: RepoSnapshot | null;
 	/** On a change page: the change's history (undefined while loading, null if unreadable). */
 	changeHistory?: ChangeHistory | null;
+	/** Why the audit couldn't be read, and reading it again: the Audit tab says so in its place. */
+	auditError?: string;
+	onAuditRetry?: () => void;
 	liveStatus?: LiveStatus;
 	/** The repo's last stretch of work, from the repo list's summary: "all landed" by its name once it ends. */
 	lastStretch?: LandingStretch;
@@ -213,7 +216,7 @@ function SettingsEditor({
 
 interface RepoTabContentProps extends Pick<
 	RepoPageProps,
-	"repo" | "view" | "snapshot" | "changeHistory" | "api" | "access" | "manage"
+	"repo" | "view" | "snapshot" | "changeHistory" | "auditError" | "onAuditRetry" | "api" | "access" | "manage"
 > {
 	/** The tab shown: a change's page shows under Changes. */
 	current: RepoTab | "changes";
@@ -231,6 +234,8 @@ function RepoTabContent({
 	current,
 	snapshot,
 	changeHistory,
+	auditError,
+	onAuditRetry,
 	branch,
 	api,
 	access,
@@ -270,7 +275,7 @@ function RepoTabContent({
 	}
 	switch (current) {
 		case "audit":
-			return <AuditTab snapshot={snapshot} />;
+			return <AuditTab snapshot={snapshot} error={auditError} onRetry={onAuditRetry} />;
 		case "hive":
 			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "history":
@@ -323,6 +328,8 @@ export function RepoPage({
 	view,
 	snapshot,
 	changeHistory,
+	auditError,
+	onAuditRetry,
 	liveStatus = "off",
 	lastStretch,
 	api,
@@ -412,6 +419,8 @@ export function RepoPage({
 						current={current}
 						snapshot={snapshot}
 						changeHistory={changeHistory}
+						auditError={auditError}
+						onAuditRetry={onAuditRetry}
 						branch={branch}
 						api={api}
 						access={access}

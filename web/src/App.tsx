@@ -223,9 +223,14 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		document.title = title;
 	}, [title]);
 
+	// A repo's audit and access count once its page shows (before that, the page says what's wrong), and the Audit
+	// tab says itself why it has no audit to show.
+	const auditTab = route.page === "repo" && route.tab === "audit" && !audit.data;
 	const errors = [
 		summaries.error && `Repositories: ${summaries.error}`,
 		snapshot.data && snapshot.error && `${repoName}: ${snapshot.error}`,
+		snapshot.data && !auditTab && audit.error && `${repoName} audit: ${audit.error}`,
+		snapshot.data && access.error && `${repoName} access: ${access.error}`,
 	].filter((error): error is string => !!error);
 
 	const view = repoViewOf(route);
@@ -342,6 +347,8 @@ function RepoRoute(props: {
 				}}
 				onSettingsChanged={() => snapshot.refresh()}
 				changeHistory={change.data ?? (change.error ? null : undefined)}
+				auditError={audit.error}
+				onAuditRetry={audit.refresh}
 				liveStatus={liveStatus}
 				{...(lastStretch ? { lastStretch } : {})}
 				api={api}

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { historyFixture, repoSnapshot as snapshot, stubApi } from "../test/fixtures";
+import { historyFixture, repoSnapshot as snapshot, stubApi, visibleText } from "../test/fixtures";
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
 import { RepoPage } from "./RepoPage";
 
@@ -30,6 +30,21 @@ describe("a repo", () => {
 		expect(
 			renderToStaticMarkup(<AuditTab snapshot={{ ...snapshot, audit: { merges: 1, open: 0, violations: [] } }} />),
 		).toMatch(/No violations/);
+	});
+
+	it("stops replaying once the audit fails, and says why", () => {
+		const text = visibleText(
+			renderToStaticMarkup(
+				<AuditTab
+					snapshot={{ ...snapshot, audit: undefined }}
+					error="the records couldn't be read"
+					onRetry={() => undefined}
+				/>,
+			),
+		);
+		expect(text).not.toContain("Replaying");
+		expect(text).toContain("The audit couldn t be loaded: the records couldn t be read.");
+		expect(text).toContain("Try again");
 	});
 
 	it("shows the settings: approvals, vetoes, checks and signed records", () => {

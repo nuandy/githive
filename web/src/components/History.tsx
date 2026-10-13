@@ -8,6 +8,7 @@ import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { COMMIT_LIST, COMMIT_META, COMMIT_SUBJECT, CommitRow, CommitsBox } from "./Commits";
 import { Icon } from "./Icon";
+import { LoadError } from "./LoadError";
 import { Box } from "./ui/box";
 import { Empty } from "./ui/empty";
 
@@ -19,25 +20,28 @@ export interface HistoryApi {
 export function HistoryTab({ repo, branch, api }: { repo: string; branch: string; api: HistoryApi }) {
 	const load = api.history;
 	const poll = usePoll(load ? `history:${repo}:${branch}` : null, () => load!(repo, branch), 60_000);
-	return <History repo={repo} history={poll.data} error={poll.data ? undefined : poll.error} />;
+	return <History repo={repo} history={poll.data} error={poll.data ? undefined : poll.error} onRetry={poll.refresh} />;
 }
 
 /** Each change landed on the branch, newest first: why it was made, who made it, and who approved it. */
 export interface HistoryProps {
 	repo: string;
 	history: BranchHistory | undefined;
-	error?: unknown;
+	/** Why it couldn't be loaded, while there's none to show. */
+	error?: string;
+	onRetry?: () => void;
 }
 
-export function History({ repo, history, error }: HistoryProps) {
+export function History({ repo, history, error, onRetry }: HistoryProps) {
 	// What loads fades in where "Loading" was: the changes, that there are none, or that they couldn't be read.
 	const phase = history ? (history.changes.length ? "list" : "empty") : error ? "error" : "loading";
 	const fades = useChanged(phase) && "animate-fade";
 	if (!history) {
-		const status = error ? "The history couldn't be loaded." : "Loading history…";
+		if (error)
+			return <LoadError key={phase} what="The history" error={error} onRetry={onRetry} className={cn(fades)} />;
 		return (
 			<p key={phase} className={cn("my-3.75 text-muted-foreground", fades)} role="status">
-				{status}
+				Loading history…
 			</p>
 		);
 	}
