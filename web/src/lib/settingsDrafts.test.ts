@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { draftFrom, partDirty, partInput, rebase, withFresh } from "./mergeSettings";
-import { createDraftStore, dirtySections, draftKey, shownDraft } from "./settingsDrafts";
+import { createDraftStore, dirtySections, draftKey, forgetDrafts, shownDraft } from "./settingsDrafts";
 
 // Edits in Settings are kept for the session, outside the page: moving to another section or tab and back finds them
 // as they were. A section with edits has a dot in the nav, and closing the window with any asks first.
@@ -77,6 +77,21 @@ describe("settings drafts", () => {
 		// to the checks it was made from.
 		expect(partInput("review", shown.draft, shown.base).input).toMatchObject({ required: 4 });
 		expect(rebase(shown.draft, shown.base, shown.base, "checks").verify).toEqual(["npm test"]);
+	});
+
+	it("let go of a deleted repo's drafts, so closing the window no longer asks", () => {
+		const said: boolean[] = [];
+		const store = createDraftStore((dirty) => said.push(dirty));
+		store.set(draftKey("acme/web", "merge"), { draft: 1, base: 0, dirty: true });
+		store.set(draftKey("acme/web", "github"), { draft: 1, base: 0, dirty: true });
+		store.set(draftKey("acme/other", "branch-rules"), { draft: 0, base: 0, dirty: false });
+		forgetDrafts(store, "acme/web");
+		expect(store.get(draftKey("acme/web", "merge"))).toBeUndefined();
+		expect(store.get(draftKey("acme/web", "github"))).toBeUndefined();
+		expect(store.anyDirty()).toBe(false);
+		expect(said).toEqual([true, false]);
+		// Another repo's are kept.
+		expect(store.get(draftKey("acme/other", "branch-rules"))).toBeDefined();
 	});
 
 	it("put a dot by each section with edits", () => {

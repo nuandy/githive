@@ -18,7 +18,8 @@ export interface Held<T> {
 }
 
 /** The forms held per repo: the merge settings (review, path rules, checks share one), branch rules and GitHub. */
-export type DraftForm = "merge" | "branch-rules" | "github";
+const DRAFT_FORMS = ["merge", "branch-rules", "github"] as const;
+export type DraftForm = (typeof DRAFT_FORMS)[number];
 export const draftKey = (repo: string, form: DraftForm) => `${repo}:${form}`;
 
 export function createDraftStore(onDirty?: (dirty: boolean) => void) {
@@ -67,6 +68,11 @@ export function shownDraft<T>(
 	}
 	if (held.dirty) return follow ? follow(held, fresh) : held;
 	return sameSettings(held.base, fresh) ? held : { draft: fresh, base: fresh, dirty: false };
+}
+
+/** Lets go of a repo's drafts (once it's deleted), so closing the window no longer asks about them. */
+export function forgetDrafts(store: DraftStore, repo: string) {
+	for (const form of DRAFT_FORMS) if (store.get(draftKey(repo, form))) store.set(draftKey(repo, form), undefined);
 }
 
 /** The sections of a repo's Settings with edits not yet saved. */
