@@ -338,3 +338,19 @@ describe("the hooks tools reach it through", () => {
 		await expect(unreachable.attemptsOf!("p", ["c-1"])).resolves.toEqual({});
 	});
 });
+
+describe("the doorbell's hold", () => {
+	it("answers at once once it has rung past the mark, holds until the next ring, and gives up after ms", async () => {
+		const { live } = feed();
+		expect(await live.rings()).toBe(0);
+		expect(await live.ringAfter(0, 50)).toBeNull();
+		const held = live.ringAfter(0, 5_000);
+		await live.ping("records");
+		expect(await held).toBe(1);
+		// A ring before the hold began still counts: the caller read the count before it.
+		expect(await live.ringAfter(0, 5_000)).toBe(1);
+		// Reads ring nothing.
+		await live.ping("records", false);
+		expect(await live.rings()).toBe(1);
+	});
+});

@@ -44,10 +44,11 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 		principal && principal.kind !== "access"
 			? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id))
 			: undefined;
-	const githubAccount =
-		principal && principal.kind !== "access"
-			? async () => (env.DB ? new IdentityStore(env.DB).githubAccountOf(principal.user.id) : null)
-			: undefined;
+	// Access callers have no GitHub account of their own here.
+	const person = principal?.kind === "access" ? undefined : principal?.user;
+	const githubAccount = person
+		? async () => (env.DB ? new IdentityStore(env.DB).githubAccountOf(person.id) : null)
+		: undefined;
 	const caller: Parameters<typeof toolContextFor>[2] = {};
 	if (agent) caller.agent = agent;
 	else if (agentKey) caller.agentKey = agentKey;

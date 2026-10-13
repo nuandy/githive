@@ -310,6 +310,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 				change: claim.change,
 				title: (claim.intent.split("\n")[0] ?? "").slice(0, 120),
 				reason: claim.attention!.reason.slice(0, 500),
+				...(claim.attention!.urgency === undefined ? {} : { urgency: claim.attention!.urgency }),
 			})),
 			countedAt: new Date().toISOString(),
 		})
@@ -372,7 +373,8 @@ async function githubView(ctx: ToolContext, repo: string, state: Registry) {
 	};
 }
 
-type Attention = { reason: string; agent: string; at: string };
+/** Why a change waits on a person. `urgency` is how urgent Clef found an agent's question, from 0 to 2. */
+type Attention = { reason: string; agent: string; at: string; urgency?: number };
 type ChangeStatus = Awaited<ReturnType<typeof changeStatus>>;
 
 interface ClaimSnapshot extends ClaimRecord {
@@ -448,7 +450,10 @@ async function claimSnapshot(
 
 // What needs a person on a claim: an open question, or a hosted builder that failed.
 function attentionFor(flag: FlagRecord | null, hosted: HostedStatus | undefined, claim: ClaimRecord): Attention | null {
-	if (flag) return { reason: flag.reason, agent: flag.agent, at: flag.at };
+	if (flag) {
+		const asked = { reason: flag.reason, agent: flag.agent, at: flag.at };
+		return flag.urgency === undefined ? asked : { ...asked, urgency: flag.urgency };
+	}
 	if (hosted?.builder?.status !== "failed") return null;
 	const error = hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : "";
 	return { reason: `GitHive's builder failed${error}`, agent: "githive-builder", at: claim.active };

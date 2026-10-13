@@ -65,6 +65,8 @@ function When({ at }: { at?: string }) {
 	);
 }
 
+const THIN_NOTE = "Clef found this approval's evidence too thin to show what was checked.";
+
 /** A review, shown as a card like a pull request review. */
 function ReviewCard({ item }: { item: TimelineItem }) {
 	const review = item.review!;
@@ -96,6 +98,7 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 				</span>
 			</div>
 			{review.summary ? <div className="px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div> : null}
+			{review.thin ? <p className="m-0 px-3.5 py-3 wrap-anywhere text-muted-foreground">{THIN_NOTE}</p> : null}
 			{review.evidence ? (
 				<details className="disclosure px-3.5 pb-3">
 					<summary className="mb-1.5 cursor-pointer text-ui text-muted-foreground">Evidence</summary>

@@ -57,7 +57,23 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 			approval: { approved: false, approvals: 0, required: 2, awaiting: ["security"], vetoedBy: [] },
 			merge: { into: "main", clean: true, outsideClaim: [] },
 		},
-		"Waiting for 2 more approvals (including security, which can veto it); agents who may give them see it in `reviews`.",
+		"Waiting for 2 more approvals (including security, which can veto it); agents who may give them see it in " +
+			"`reviews`. Meanwhile, work or `wait`.",
+	],
+	["reviews", { agent: "a" }, { reviews: [] }, /None for you now: .*`wait`/],
+	["backlog", { agent: "a" }, { open: [], waiting: [] }, /None for you now: .*`wait`/],
+	[
+		"wait",
+		{ agent: "a" },
+		{ changed: true, what: ["yours", "backlog"], yours: [{ change: "c-1" }], reviews: 0, backlog: 1, seen: "x" },
+		"Something that concerns you changed: look with `status` on c-1 and `backlog`, then pass this reply's " +
+			"`seen` to `wait`.",
+	],
+	[
+		"wait",
+		{ agent: "a" },
+		{ changed: false, yours: [], reviews: 0, backlog: 0, seen: "x" },
+		"Nothing that concerns you changed: call `wait` again with this reply's `seen`, or stop if you're done.",
 	],
 	[
 		"status",
@@ -105,6 +121,43 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 		},
 		/^Its checks failed: `npm test` exited 1\. Reproduce it in your clone/,
 	],
+	[
+		"status",
+		{ change: "c-1" },
+		{
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			checksEnvironment: 0.9,
+			votes: [
+				{
+					commit: HEAD,
+					reviewer: "githive-checks",
+					verdict: "reject",
+					evidence: "checks failed: npm test exited 1 on 4b825dc6, checked alone on the branch, twice:\nECONNRESET",
+				},
+			],
+			approval: { approved: false, approvals: 0, required: 0, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		},
+		/then call `status`\. Clef thinks something outside the code failed them \(environment, 0\.9\).*`ask_human`\.$/,
+	],
+	[
+		"status",
+		{ change: "c-1" },
+		{
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			hints: [{ kind: "beyond_intent", says: "It seems to change more than its intent says", likelihood: 0.9 }],
+			votes: [],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		},
+		"Clef thinks it may not do just what its intent says (see hints): look before review, or go on if it's wrong.\n" +
+			"Call `merge`.",
+	],
+	["vote", {}, { ok: true, thinEvidence: true }, /^Recorded, but your evidence doesn't say what you checked/],
 	[
 		"status",
 		{ change: "c-1" },

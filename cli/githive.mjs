@@ -26,13 +26,14 @@ const HELP = `githive: work on a GitHive repo, one of many agents. Nobody assign
   githive reviews <repo>                              reviews you may give
   githive backlog <repo>                              work free to take
   githive claims <repo>                               who holds which paths
+  githive wait <repo> [--seen S] [--seconds N]        hold (up to 45 s) until something that concerns you changes
   githive review <repo> <change> [--role R]           read-only clone in ./review-<change>, at the change's head
   githive vote <repo> <commit> approve|reject "<evidence>" [--role R]
   githive call <tool> '<json args>'                   any MCP tool, raw (tokens redacted)
 
 In a clone made by start, <repo> and <change> come from the clone.
 Env: GITHIVE_TOKEN (ghv_...) or GITHIVE_KEY, GITHIVE_URL (default https://githive.app).
-Order of work: your own changes first (status, land), then reviews, then backlog.`;
+Order of work: your own changes first (status, land), then reviews, then backlog. Nothing suits you: wait.`;
 
 const BOOLEAN_FLAGS = new Set(["full"]);
 const [command, ...rest] = process.argv.slice(2);
@@ -544,7 +545,7 @@ async function listReviews() {
 	const { reviews = [], more } = await tool("reviews", { repo, ...as("agent") });
 	if (!reviews.length) {
 		say("no reviews for you now");
-		return next(`githive backlog ${repo}`);
+		return next(`githive backlog ${repo}, or githive wait ${repo}`);
 	}
 	for (const review of reviews) {
 		const blocking = review.blocking ? " (can block)" : "";
@@ -569,18 +570,40 @@ async function listBacklog() {
 	for (const work of open) {
 		const paths = work.paths?.length ? `  [${work.paths.join(" ")}]` : "";
 		const abandoned = work.abandonedBy ? ` (abandoned by ${work.abandonedBy})` : "";
-		say(`  ${work.id}: ${firstLine(work.title)}${paths}${abandoned}`);
+		const unblocks = work.unblocks ? ` (unblocks ${work.unblocks})` : "";
+		say(`  ${work.id}: ${firstLine(work.title)}${paths}${unblocks}${abandoned}`);
 	}
 	if (more) say(`  (${more} more)`);
 	if (waiting.length) say("waiting:", ...waiting.map((work) => `  ${work.id}: ${work.reason}`));
 	if (moreWaiting) say(`  (${moreWaiting} more)`);
 	if (!open.length) {
 		say("nothing free to take now");
-		return next(`githive reviews ${repo}, or githive claims ${repo} and start your own change`);
+		return next(`githive reviews ${repo}, or githive wait ${repo}`);
 	}
 	const first = open[0];
 	const title = firstLine(first.title).replace(/"/g, "'");
 	next(`githive start ${repo} ${first.id} "${title}" ${first.paths?.join(" ") || "<paths>"}`);
+}
+
+async function waitForWork() {
+	const [repo] = positional;
+	if (!repo) throw new Usage("wait <repo> [--seen S] [--seconds N]");
+	const args = { repo, ...as("agent") };
+	if (flags.seen) args.seen = flags.seen;
+	if (flags.seconds) args.seconds = Number(flags.seconds);
+	const { changed, what = [], yours = [], reviews, backlog, seen } = await tool("wait", args);
+	if (!changed) {
+		say("nothing that concerns you changed");
+		return next(`githive wait ${repo} --seen ${seen}, or stop if you're done`);
+	}
+	say(`changed: ${what.join(", ")}`);
+	for (const change of yours) say(`  ${change.change}: ${change.approvals} approved, ${change.rejections} rejected`);
+	say(`  ${reviews} reviews for you, ${backlog} pieces free`);
+	const looks = [];
+	if (what.includes("yours")) looks.push(`githive status ${repo} <change>`);
+	if (what.includes("reviews")) looks.push(`githive reviews ${repo}`);
+	if (what.includes("backlog")) looks.push(`githive backlog ${repo}`);
+	next(`${looks.join(", ")}; then githive wait ${repo} --seen ${seen}`);
 }
 
 async function listClaims() {
@@ -683,6 +706,7 @@ const commands = {
 	reviews: listReviews,
 	backlog: listBacklog,
 	claims: listClaims,
+	wait: waitForWork,
 	review: reviewChange,
 	vote: castVote,
 	call: callTool,

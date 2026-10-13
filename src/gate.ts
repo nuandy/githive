@@ -6,6 +6,7 @@ import { rpc } from "./rpc";
 import { mergeForCheck } from "./gate-check";
 import { type ContainerStart, cloneProject, logGitRequests, logStopped } from "./gate-container";
 import { checkoutDetached, fetchBase } from "./gate-git";
+import { setUpBrowserCheck } from "./gate-browser";
 import { checksFor, installMatches, isInstall, lockHash, setUpToolchains, skippedInstall } from "./gate-install";
 import {
 	type ChecksBranch,
@@ -258,7 +259,7 @@ export class Gate extends DurableObject<Env> {
 		const checks = await checksFor(container, plan.checks);
 
 		// Toolchains are read from the merged code, since a change may add one.
-		const setup = await this.setUpToolchains(container);
+		const setup = [...(await this.setUpToolchains(container)), ...(await setUpBrowserCheck(container, checks))];
 		if (setup.some((r) => r.exitCode !== 0)) return result({ results: setup });
 
 		const results = await this.runChecks(container, checks);
@@ -449,6 +450,7 @@ export class Gate extends DurableObject<Env> {
 			await checkoutDetached(container, `refs/remotes/base/${branch}`);
 			await this.setUpToolchains(container);
 			await this.installForChecks(container, input.checks);
+			await setUpBrowserCheck(container, input.checks);
 		}
 		await this.ctx.storage.put("warmedAt", Date.now());
 		await this.snapshotIfDue(container, input.repo);

@@ -2,15 +2,18 @@ import { fail, requiredString, statusOf } from "../../errors";
 import { branchHead } from "../../git";
 import { checkChange } from "../check";
 import type { ClaimRecord } from "../claims";
+import { likelyEnvironment } from "../failure-hints";
 import { type LandingView, lastLandedOn, type Settled } from "../landing";
 import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
-import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
+import { pieceHints } from "../clef-hints";
+import { addDependencies, addWork, addWorks } from "../backlog-records";
+import { backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
-import { workItemFrom } from "./claim-input";
-import type { ToolCall, ToolHandlers } from "./context";
+import { changeList, workItemFrom } from "./claim-input";
+import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
 import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
 
@@ -33,17 +36,7 @@ export const workTools: ToolHandlers = {
 				state.votes,
 				(claim) => claimPolicy(registered, claim),
 			).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
-		// A change GitHive's builder is still at gets more pushes: a review now would be of a commit it's replacing.
-		const hosted = state.open.filter((entry) => entry.claim.agent.startsWith(HOSTED_PREFIX));
-		const building = ctx.buildersAtWork
-			? await ctx
-					.buildersAtWork(
-						repo,
-						hosted.map((entry) => entry.claim.change),
-					)
-					.catch(() => new Set<string>())
-			: new Set<string>();
-		const options = reviewsFor({ ...state, held }).filter((option) => !building.has(option.change));
+		const options = await reviewOptions(ctx, repo, state, held);
 		return {
 			reviews: options.slice(0, LISTED_AT_MOST),
 			...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
@@ -58,8 +51,10 @@ export const workTools: ToolHandlers = {
 			...(waiting.length > LISTED_AT_MOST ? { moreWaiting: waiting.length - LISTED_AT_MOST } : {}),
 		};
 	},
-	async add_work({ args, ctx, repo, actAs }) {
+	async add_work(call) {
+		const { args, ctx, repo, actAs } = call;
 		const by = actAs("agent");
+		if (args.piece !== undefined) return dependOn(call, by);
 		if (args.items !== undefined) {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
 				fail(400, `items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
@@ -67,12 +62,16 @@ export const workTools: ToolHandlers = {
 			const ids = items.map((item) => item.id);
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
-			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
-			return { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
+			const hints = await piecesLikeOpenWork(call, items);
+			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, sized(items, hints.big));
+			const reply = { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
+			return withPieceHints(reply, hints);
 		}
 		const item = workItemFrom(args);
-		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
-		return added.ok ? { ok: true, id: item.id } : { ok: false, reason: added.refused };
+		const hints = await piecesLikeOpenWork(call, [item]);
+		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...sized([item], hints.big)[0]!, by });
+		if (!added.ok) return { ok: false, reason: added.refused };
+		return withPieceHints({ ok: true, id: item.id }, hints);
 	},
 	async status(call) {
 		const { args, ctx, repo, votes, registered, branch, changeOf, claimOf, waitingOn } = call;
@@ -114,6 +113,11 @@ export const workTools: ToolHandlers = {
 		const reply: Record<string, unknown> = { change, claim: held };
 		if (released) reply.released = released;
 		if (landed) reply.landed = { commit: landed.commit, at: landed.at };
+		// Clef's reading of the head's failed checks, when it found the environment likely to blame.
+		const failedHere = landing?.recent.findLast(
+			(outcome) => outcome.change === change && outcome.head === status.head && outcome.how === "failed",
+		);
+		if (failedHere && likelyEnvironment(failedHere)) reply.checksEnvironment = failedHere.environment;
 		if (waits.length) reply.waitsOn = waits;
 		Object.assign(reply, status);
 		// How long the claim lasts if its agent goes quiet. Advice: a failed read leaves it out.
@@ -122,6 +126,11 @@ export const workTools: ToolHandlers = {
 				console.error(`working out ${change}'s lease failed`, String(err));
 				return undefined;
 			});
+		// What Clef made of the head's push: hints for its agent and its reviewers alike.
+		if (status.head) {
+			const kept = await ctx.pushHints?.(repo, change).catch(() => null);
+			if (kept?.head === status.head && kept.hints.length) reply.hints = kept.hints;
+		}
 		// Whether it merges cleanly and stays inside its claim: worth knowing before asking for review.
 		if (held && status.head && !landed) {
 			const checked = await mergeCheck(call, change, held, status.head).catch((err) => ({
@@ -132,6 +141,68 @@ export const workTools: ToolHandlers = {
 		return reply;
 	},
 };
+
+/**
+ * What Clef sees in new pieces, as advice: a piece already in the backlog or an open change each may duplicate, and
+ * one each may need first without saying so. Merged pieces exist already, so they're neither.
+ */
+async function piecesLikeOpenWork(call: ToolCall, pieces: Parameters<typeof pieceHints>[1]) {
+	const { ctx, repo, adviceView } = call;
+	const [backlog, advice] = await Promise.all([recordLog<Work>(ctx, repo, workRef(repo)).read(), adviceView()]);
+	const merged = new Set(advice.merged);
+	const items = (backlog?.commit.state.items ?? []).filter((item) => !merged.has(item.id));
+	const existing = [
+		...items.map((item) => ({ id: item.id, intent: `${item.title}: ${item.intent}` })),
+		...advice.claims.map((claim) => ({ id: claim.change, intent: claim.intent })),
+	];
+	return pieceHints(ctx, pieces, existing);
+}
+
+function withPieceHints<R extends object>(reply: R, hints: Awaited<ReturnType<typeof pieceHints>>) {
+	const { similar, mayNeed, big } = hints;
+	return {
+		...reply,
+		...(similar.length ? { similar } : {}),
+		...(mayNeed.length ? { mayNeed } : {}),
+		...(big.length ? { tooBig: big } : {}),
+	};
+}
+
+/** Marks the pieces Clef found too big for one change, for whoever takes them from the backlog. */
+const sized = <T extends { id: string }>(items: T[], big: string[]) =>
+	items.map((item) => (big.includes(item.id) ? { ...item, big: true as const } : item));
+
+/**
+ * add_work with `piece`: adds what a piece already in the backlog waits on, such as a dependency Clef suggested. A
+ * claimed piece is its agent's to order, with its claim's `after`.
+ */
+async function dependOn(call: ToolCall, by: string) {
+	const { args, ctx, repo, claimOf } = call;
+	const piece = requiredString(args, "piece");
+	const after = changeList(args.after, "after");
+	const landsAfter = changeList(args.lands_after, "lands_after");
+	const named = [...after, ...landsAfter];
+	if (!named.length) fail(400, "name what it waits on: after, lands_after or both");
+	const claim = await claimOf(piece);
+	if (claim) fail(409, `${piece} is claimed by ${claim.agent}: its claim's after is its agent's to set`);
+	const added = await addDependencies(recordLog<Work>(ctx, repo, workRef(repo)), by, { piece, after, landsAfter });
+	return added.ok ? { ok: true, piece, after, landsAfter } : { ok: false, reason: added.refused };
+}
+
+/** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */
+export async function reviewOptions(ctx: ToolContext, repo: string, state: WorkInput, held: Record<string, string[]>) {
+	// A change GitHive's builder is still at gets more pushes: a review now would be of a commit it's replacing.
+	const hosted = state.open.filter((entry) => entry.claim.agent.startsWith(HOSTED_PREFIX));
+	const building = ctx.buildersAtWork
+		? await ctx
+				.buildersAtWork(
+					repo,
+					hosted.map((entry) => entry.claim.change),
+				)
+				.catch(() => new Set<string>())
+		: new Set<string>();
+	return reviewsFor({ ...state, held }).filter((option) => !building.has(option.change));
+}
 
 /** What renews a claim: claiming again makes it active now (see claims.ts). */
 const RENEW = "claim the same paths again";

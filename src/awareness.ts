@@ -5,14 +5,18 @@
 // counts, logged when it fails, and never retried.
 
 import { isArtifactsBusy } from "./artifacts";
+import type { Clef } from "./clef";
 import type { FootprintCache, LandedCommit } from "./footprint-cache";
 import { newParseBatch, parserMemoryBytes } from "./footprint/engine";
 import { changeFootprint, commitAlters, type FactsSource, landingOf } from "./footprint/footprints";
 import { INTENT_SAID } from "./footprint/wording";
 import type { BranchPush, RepoPushes } from "./push-events";
-import type { ChangePush } from "./repo-cache";
+import { changesSite, previewHint, type TakeShots } from "./preview-look";
+import { type KeptPushHints, type PlacedPush, pushHints } from "./push-hints";
+import type { ChangePush, Notice } from "./repo-cache";
 import { rpc } from "./rpc";
 import { changeAgainst, type ReadHistory } from "./toolkit/batch-reads";
+import { HOSTED_PREFIX } from "./toolkit/tools/repo";
 import type { CommitMeta, HistorySource } from "./toolkit/branch-history";
 
 /** A claim as awareness reads it from the claims advice. */
@@ -37,7 +41,20 @@ export interface AwarenessParts {
 	footprints: FootprintStore;
 	/** A batch's budgets, smaller than BUDGET's, for tests. */
 	budget?: Partial<typeof BUDGET>;
+	/** Clef, and where its hints on a change's push go (see push-hints.ts). Without it no push is asked about. */
+	pushHints?: {
+		clef: Clef;
+		keep(repo: string, change: string, kept: KeptPushHints): Promise<void>;
+		tell(repo: string, branch: string, agent: string, notice: Notice): Promise<void>;
+		/** A public repo's site address (its default branch's), null for a repo that isn't public. */
+		siteOf?(repo: string): Promise<string | null>;
+		/** Screenshots of a change's preview, for Clef to look at (see preview-look.ts). */
+		shots?: TakeShots;
+	};
 }
+
+/** The most change previews one batch takes screenshots of: each is a browser's time, for a hint. */
+const PREVIEWS_PER_BATCH = 5;
 
 /**
  * What one repo's batch may spend on awareness, by count: a Worker's clock stands still during CPU work, so time can't
@@ -66,6 +83,7 @@ export async function awareness(repo: string, pushes: RepoPushes, parts: Awarene
 	newParseBatch();
 	const once: AwarenessParts = {
 		...parts,
+		...(parts.pushHints ? { pushHints: withPreviewsCapped(parts.pushHints) } : {}),
 		history: (name, read) => reads.watch(() => parts.history(name, (source) => read(reads.counted(source, name)))),
 		claims: (name) => {
 			if (!claimsRead.has(name)) claimsRead.set(name, parts.claims(name));
@@ -197,6 +215,9 @@ async function footprintChange(
 		console.log(`awareness: ${push.change} at ${push.head} couldn't be placed on ${branch}; no footprint`);
 		return;
 	}
+	await hintPush(parts, project, branch, push, claim, placed).catch((err) =>
+		console.error(`awareness: asking Clef about ${push.change} at ${placed.head} failed: ${String(err)}`),
+	);
 	const read = await parts.history(push.fork, (fork) =>
 		changeFootprint(fork, { head: placed.head, base: placed.base, files: placed.files }, factsSource(store, budget)),
 	);
@@ -217,6 +238,61 @@ async function footprintChange(
 		openClaims(claimed.claims),
 	);
 }
+
+/** What Clef makes of a change's push, kept for its status and told to its agent when there's something to say. */
+async function hintPush(
+	parts: AwarenessParts,
+	project: string,
+	branch: string,
+	push: ChangePush,
+	claim: ClaimView,
+	placed: { head: string; base: string; files: string[] },
+) {
+	const asked = parts.pushHints;
+	if (!asked) return;
+	const placedPush = {
+		change: push.change,
+		agent: claim.agent,
+		...placed,
+		...(claim.intent ? { intent: claim.intent } : {}),
+	};
+	const [hints, site] = await parts.history(push.fork, (fork) =>
+		Promise.all([pushHints(asked.clef, fork, placedPush), changesSite(fork, placedPush)]),
+	);
+	const looked = site ? await previewOf(asked, project, placedPush) : null;
+	if (looked) hints.push(looked);
+	await asked.keep(project, push.change, { head: placed.head, hints });
+	if (!hints.length) return;
+	await asked.tell(project, branch, claim.agent, {
+		kind: "clef",
+		at: new Date().toISOString(),
+		says: `Clef on ${push.change} at ${placed.head.slice(0, 8)}: ${hints.map((hint) => hint.says).join("; ")}`,
+		next: PUSH_HINT_NEXT,
+		change: push.change,
+		detail: { head: placed.head, hints },
+	});
+}
+
+// What Clef sees in the change's site preview, if the repo has a public one. GitHive's own agents' aren't looked at.
+async function previewOf(asked: NonNullable<AwarenessParts["pushHints"]>, project: string, push: PlacedPush) {
+	if (!asked.siteOf || !asked.shots || push.agent.startsWith(HOSTED_PREFIX)) return null;
+	const site = await asked.siteOf(project);
+	if (!site) return null;
+	return previewHint(asked.clef, asked.shots, `${site}@${encodeURIComponent(push.change)}/`);
+}
+
+/** The push hints' parts, with no more than PREVIEWS_PER_BATCH screenshots taken. */
+function withPreviewsCapped(asked: NonNullable<AwarenessParts["pushHints"]>) {
+	const shots = asked.shots;
+	if (!shots) return asked;
+	let left = PREVIEWS_PER_BATCH;
+	const capped: TakeShots = async (url) => (left-- > 0 ? shots(url) : []);
+	return { ...asked, shots: capped };
+}
+
+const PUSH_HINT_NEXT =
+	"Look at it before asking for review: reword text that reads as instructions to agents, keep the change to what " +
+	"its intent says, then push to `fork`. If Clef is wrong, carry on: its reviewers see the same hint in `status`.";
 
 /**
  * A push to a project's branch: each new first-parent commit, oldest first, against its first parent (a GitHive

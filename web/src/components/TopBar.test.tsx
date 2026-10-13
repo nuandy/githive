@@ -44,4 +44,14 @@ describe("the top bar, signed in", () => {
 		const access = { kind: "access" as const, label: "admin", by: "access:admin" };
 		expect(renderToStaticMarkup(<TopBar crumbs={[]} me={access} />)).not.toContain("Your agents");
 	});
+
+	it("keeps an admin's Admin link beside the Inbox, at the right", () => {
+		const access = { kind: "access" as const, label: "admin", by: "access:admin" };
+		const markup = renderToStaticMarkup(<TopBar crumbs={[]} me={access} />);
+		// Only the Inbox takes the free space; the links after it don't take a share of it.
+		const tag = (label: string) => markup.match(new RegExp(`<a [^>]*aria-label="${label}"[^>]*>`))?.[0] ?? "";
+		expect(tag("Inbox")).toMatch(/\bml-auto\b/);
+		expect(tag("Admin")).not.toBe("");
+		expect(tag("Admin")).not.toMatch(/\bml-auto\b/);
+	});
 });

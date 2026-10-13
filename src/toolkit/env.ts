@@ -1,4 +1,5 @@
 import type { ChangeAwareness } from "../footprint-cache";
+import { clefOn } from "../clef";
 import type { Conversation } from "../sandbox";
 import { type GitHubImportResult, githubGate } from "../gate-github";
 import { linkTo } from "../github";
@@ -229,6 +230,7 @@ export function toolContextFor(
 		...hostedParts(env),
 		...githubApp(env),
 		...githubSyncParts(env),
+		...(env.AI ? { clef: clefOn(env.AI) } : {}),
 		stamper: async (agent) => {
 			if (!env.STAMP_KEY || !by) return undefined;
 			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
@@ -253,6 +255,10 @@ function repoCacheParts(env: Env) {
 		ping: async (repo, event, tool) =>
 			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records", true, event ? [event] : [], tool)),
 		buildersAtWork: (repo, changes) => buildersAtWork(env, repo, changes),
+		doorbell: (repo) => {
+			const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
+			return { rings: () => cache.rings(), ringAfter: (mark, ms) => cache.ringAfter(mark, ms) };
+		},
 		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).
@@ -267,6 +273,7 @@ function repoCacheParts(env: Env) {
 			kept: (repo, change) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).keptMergeCheck(change)),
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
+		pushHints: (repo, change) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).keptPushHints(change)),
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
 		notify: (repo, branch, notices) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),

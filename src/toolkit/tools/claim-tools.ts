@@ -2,6 +2,7 @@ import { changeId, normalizeClaim } from "../../claim-paths";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
+import { claimHints, reasonHints } from "../clef-hints";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
@@ -41,11 +42,13 @@ export const claimTools: ToolHandlers = {
 		const afterOf = async (dependency: string) => (await call.claimOf(dependency))?.after ?? [];
 		const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
 		if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
+		const intent = requiredString(args, "intent");
+		const similar = await sameWorkAs(call, { change, agent, intent, paths });
 		const input = {
 			change,
 			agent,
 			paths: scopePaths(paths, into, branch),
-			intent: requiredString(args, "intent"),
+			intent,
 			...(after.length ? { after } : {}),
 			...(source ? { source } : {}),
 			staleAfterMs: STALE_AFTER_MS,
@@ -61,11 +64,15 @@ export const claimTools: ToolHandlers = {
 		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
 		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-		return claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
+		const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
+		if (!outcome.ok) return reply;
+		return similar ? { ...reply, similar } : reply;
 	},
 	async release({ args, ctx, repo, votes, registered, actAs, stamper, store, claimOf }) {
 		const change = requiredString(args, "change");
 		const agent = actAs("agent");
+		const reason = typeof args.reason === "string" ? args.reason : "released";
+		if (reason !== "released") await reasonHints(ctx, reason);
 		// Only a claim's agent may release it; anyone else may release it only as stale, once abandoned.
 		const held = args.stale === true ? null : await claimOf(change);
 		if (held && held.agent !== agent) {
@@ -85,10 +92,7 @@ export const claimTools: ToolHandlers = {
 				{ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) },
 				stamper,
 			);
-		return store.release(
-			{ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" },
-			stamper,
-		);
+		return store.release({ change, agent, reason }, stamper);
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
 		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");
@@ -111,6 +115,23 @@ export const claimTools: ToolHandlers = {
 		return ctx.startBuilder({ repo, change });
 	},
 };
+
+/**
+ * An open change that may already do what a new claim's intent says, as Clef sees it: advice, since the claim still
+ * goes ahead. Asked of a new claim only; claiming again renews what was asked about then.
+ */
+async function sameWorkAs(call: ToolCall, claim: { change: string; agent: string; intent: string; paths: string[] }) {
+	const held = await call.claimOf(claim.change);
+	if (held?.agent === claim.agent) return undefined;
+	const open = (await call.adviceView()).claims.filter((other) => other.change !== claim.change);
+	const comparable = open.map((other) => ({ id: other.change, intent: other.intent }));
+	const same = await claimHints(call.ctx, claim, comparable);
+	if (!same) return undefined;
+	const match = open.find((other) => other.change === same.id);
+	if (!match) return undefined;
+	const intent = match.intent.split("\n")[0] ?? "";
+	return { change: match.change, agent: match.agent, intent, likelihood: same.likelihood };
+}
 
 // GitHive's copies of GitHub's branches (github/<branch>) are written by the toolkit, forced at each import: no change
 // lands on one or starts from one, and only githive-github merges one.

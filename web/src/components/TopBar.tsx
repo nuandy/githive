@@ -231,7 +231,7 @@ export function TopBar({
 				{me?.kind === "user" ? <AgentsLink agentsCurrent={agentsCurrent} /> : null}
 				{me?.kind === "access" ? (
 					<a
-						className={cn(pill, "ml-auto")}
+						className={pill}
 						href={href.admin()}
 						aria-current={adminCurrent ? "page" : undefined}
 						aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}

@@ -33,7 +33,7 @@ export interface RepoSummary {
 	lastStretch?: LandingStretch;
 	countedAt?: string;
 	/** Changes waiting on a person, with why: the Inbox. */
-	waiting?: { change: string; title: string; reason: string }[];
+	waiting?: { change: string; title: string; reason: string; urgency?: number }[];
 }
 
 export interface Summaries {

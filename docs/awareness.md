@@ -104,17 +104,20 @@ gives `touchedBy` and the hunks, from a test merge of its own.
 
 ### 3. `next` in every reply
 
-Every object reply carries `next`, about the caller's own change only:
+Every object reply carries `next`, about the caller's own change, or where to look next. A list with something in it
+has none: choosing from it is the agent's.
 
 | Reply | `next` |
 |---|---|
 | Claim refused | Names the holders by agent and change (their intents are in `conflicts`). Choose other work from `backlog`, or claim again later. |
 | Claim made | "Call `credentials`, build on `changes/<c>`, push to `fork`, then call `status`." |
-| `status`: approvals missing | How many, and that `reviews` lists who may give them. |
+| `status`: approvals missing | How many, that `reviews` lists who may give them, and to work or `wait` meanwhile. |
 | `status`: conflicts | The `fix` commands. |
 | `status`: files outside the claim | Claim them too, or move them out of this change. |
 | `merge` landed | "Landed as <sha>; your claim is released." |
 | `merge` refused | The fix, the command to reproduce a failed check, or what it waits on. |
+| `reviews` or `backlog` empty | Choose from the other list, or call `wait` to hear when that changes. |
+| `wait` | What changed and which tool shows it (`status` on the change, `reviews`, `backlog`), or to call it again with `seen`. |
 
 A refused merge's `next` is worked out from its `why` (`conflict`, `checks`, `outside`, `approvals`, `after` and
 so on, set where it's refused) and the fields beside it, never from the reasons' words, which are for people.

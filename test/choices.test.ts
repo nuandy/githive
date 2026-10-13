@@ -221,6 +221,39 @@ describe("the backlog as an agent may take it", () => {
 		]);
 	});
 
+	it("lists first the free pieces with the longest chains waiting behind them, saying how many wait on each", () => {
+		// schema → api → ui, one after another; app lands after api; docs and logging stand alone.
+		const work = [
+			item("docs"),
+			item("logging"),
+			item("schema"),
+			{ ...item("api"), after: ["schema"] },
+			{ ...item("ui"), after: ["api"] },
+			{ ...item("app"), landsAfter: ["api", "docs"] },
+		];
+		const backlog = backlogFor(base({ work }));
+		// app is offered at once (it lands after, built alongside); schema's chain is longest, then docs's.
+		expect(backlog.open.map((piece) => [piece.id, piece.unblocks])).toEqual([
+			["schema", 3],
+			["docs", 1],
+			expect.anything(),
+			expect.anything(),
+		]);
+		expect(new Set(backlog.open.slice(2).map((piece) => piece.id))).toEqual(new Set(["logging", "app"]));
+		// Once schema has merged, it waits behind nothing it counted: api leads, with ui and app behind it.
+		const later = backlogFor(base({ work, merged: new Set(["schema"]) }));
+		expect(later.open[0]).toMatchObject({ id: "api", unblocks: 2 });
+	});
+
+	it("keeps each agent's own order among equals, and counts a loop in the backlog once", () => {
+		// a waits on b, and b names a too: a loop, which only counts b's one waiter.
+		const work = [{ ...item("a"), after: ["b"] }, { ...item("b"), landsAfter: ["a"] }, item("c"), item("d")];
+		const looks = Array.from({ length: 12 }, (_, i) => backlogFor(base({ agent: `agent-${i}`, work })).open);
+		expect(looks.map((open) => open[0])).toEqual(looks.map(() => expect.objectContaining({ id: "b", unblocks: 1 })));
+		// c and d are equals: agents look at them in different orders, so a crowd spreads over them.
+		expect(new Set(looks.map((open) => open[1]!.id))).toEqual(new Set(["c", "d"]));
+	});
+
 	it("names work after its title", () => {
 		expect(workId("Use const in lib/ — all of it!")).toBe("use-const-in-lib-all-of-it");
 	});
@@ -660,8 +693,8 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 					note,
 				],
 			});
-			// A list to choose from has no next step: choosing is the agent's.
-			expect(backlog).not.toHaveProperty("next");
+			// A list to choose from names nothing to take: choosing is the agent's. An empty one points at wait.
+			expect((backlog as { next?: string }).next).toMatch(/^None for you now: .*`wait`/);
 			const claims = await call("claims", {}, key);
 			expect(Array.isArray(claims)).toBe(true);
 			expect(claims).not.toHaveProperty("next");
@@ -765,8 +798,15 @@ describe("a change that landed before its claim was released", { timeout: 120_00
 			await landing.settle([
 				{ change: "c-1", head, agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
 			]);
-			expect(await call("reviews", { agent: "b" }, keys.b)).toEqual({ reviews: [] });
-			expect(await call("backlog", { agent: "b" }, keys.b)).toEqual({ open: [], waiting: [] });
+			expect(await call("reviews", { agent: "b" }, keys.b)).toEqual({
+				reviews: [],
+				next: expect.stringMatching(/`wait`/),
+			});
+			expect(await call("backlog", { agent: "b" }, keys.b)).toEqual({
+				open: [],
+				waiting: [],
+				next: expect.stringMatching(/`wait`/),
+			});
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });
@@ -876,7 +916,14 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 		await merge("agent-b");
 		await review("agent-b", "agent-a");
 		await merge("agent-a");
-		expect(await call("reviews", { agent: "agent-a" }, keys["agent-a"])).toEqual({ reviews: [] });
-		expect(await call("backlog", { agent: "agent-a" }, keys["agent-a"])).toEqual({ open: [], waiting: [] });
+		expect(await call("reviews", { agent: "agent-a" }, keys["agent-a"])).toEqual({
+			reviews: [],
+			next: expect.stringMatching(/`wait`/),
+		});
+		expect(await call("backlog", { agent: "agent-a" }, keys["agent-a"])).toEqual({
+			open: [],
+			waiting: [],
+			next: expect.stringMatching(/`wait`/),
+		});
 	});
 });

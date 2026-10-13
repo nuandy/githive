@@ -149,7 +149,7 @@ export interface RepoSnapshot {
 		/** For GitHub's change while the repo trusts GitHub's changes: why it needs no review. */
 		trusted?: string;
 		/** A question for a person, from an agent or a failed GitHive builder. It stays until a person votes. */
-		attention?: { reason: string; agent: string; at: string };
+		attention?: { reason: string; agent: string; at: string; urgency?: number };
 		/** GitHive's hosted agents on the change. */
 		hosted?: {
 			builder?: { status: string; revisions: number; error?: string };
@@ -164,6 +164,8 @@ export interface RepoSnapshot {
 		role: string;
 		verdict: "approve" | "reject";
 		evidence: string;
+		/** Clef found an approval's evidence too thin to show what was checked. */
+		thin?: boolean;
 		at: string;
 		by?: string;
 	}[];

@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { withHistory } from "./artifacts";
+import { OrgStore } from "./auth/orgs";
 import { awareness, type AwarenessParts, type FootprintStore } from "./awareness";
 import { Traffic, objectLabel } from "./cache-traffic";
 import {
@@ -19,6 +20,7 @@ import {
 } from "./footprint";
 import { type Alter, footprintHash, type UseOf } from "./footprint/footprints";
 import type { HiveEvent } from "./hive-events";
+import { browserShots } from "./preview-look";
 import { projectBranch } from "./project-branch";
 import type { AwarenessHandOff, RepoPushes } from "./push-events";
 import type { Notice } from "./repo-cache";
@@ -199,7 +201,27 @@ function awarenessParts(env: Env, footprints: FootprintStore): AwarenessParts {
 		branchHead: (repo, branch) => ctx.branchHead!(repo, branch),
 		forkOf: (repo, agent) => forkName(repo, agent),
 		footprints,
+		...(ctx.clef
+			? {
+					pushHints: {
+						clef: ctx.clef,
+						keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepPushHints(change, kept),
+						tell: (repo, branch, agent, notice) =>
+							env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, [{ agent, notice }]),
+						...(env.BROWSER && env.DB
+							? { siteOf: (repo) => publicSite(env, repo), shots: browserShots(env.BROWSER) }
+							: {}),
+					},
+				}
+			: {}),
 	};
+}
+
+/** A public repo's site, as src/routes/site.ts serves it, or null if the repo isn't public. */
+async function publicSite(env: Env, repo: string) {
+	const found = await new OrgStore(env.DB).repoById(repo);
+	if (found?.visibility !== "public") return null;
+	return `${env.PUBLIC_ORIGIN}/site/${found.fullName}/`;
 }
 
 export class FootprintCache extends DurableObject<Env> {

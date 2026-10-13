@@ -60,6 +60,8 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 			gitGuidance(job.branch),
 			"",
 			"How to work:",
+			"- Before you build or review in a repo, read what it says about itself: its README, and AGENTS.md, " +
+				"CONTRIBUTING, specs or design docs if it has them. Build to them, and review against them.",
 			"- Explore the code you need, implement the change, and run the checks and tests yourself.",
 			`- Only commit_and_push can push (the container has no Git credentials); it pushes to ${job.ref} ` +
 				`and tells you about files outside your claim and conflicts with ${job.branch}.`,

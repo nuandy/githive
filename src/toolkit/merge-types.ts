@@ -1,3 +1,4 @@
+import type { Clef } from "../clef";
 import type { GitHubImportResult } from "../gate-github";
 import type { Hunk, Remote } from "../git";
 import type { ReadHistory, TouchedBy } from "./batch-reads";
@@ -169,6 +170,8 @@ export interface MergeInput {
 	afterLanding?: (commit: string) => Promise<void>;
 	/** Notes a line on a change's attempt to land (a conflict, failed checks) for its merge commit. Never fails. */
 	noteAttempt?: (change: string, line: string) => Promise<void>;
+	/** Clef, asked about a batch's failed checks for hints (see failure-hints.ts). It never changes what lands. */
+	clef?: Clef;
 	/** Timings that default to POLL_MS, ANSWER_WITHIN_MS, HEARTBEAT_MS and LEASE_TTL_MS. Tests shorten them. */
 	pollMs?: number;
 	answerWithinMs?: number;
@@ -226,6 +229,8 @@ export type MergeOutcome =
 			/** The commands that resolve the conflict in the clone credentials gives, then what to call. */
 			fix?: string[];
 			checks?: CheckResult[];
+			/** How likely Clef found it that the environment, not the code, failed its checks, when it's likely. */
+			environment?: number;
 			/** The files it changes outside its own claim, and inside others' claims. */
 			outsideClaim?: string[];
 			insideOthers?: string[];

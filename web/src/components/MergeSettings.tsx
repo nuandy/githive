@@ -75,7 +75,7 @@ export function SaveErrors({ errors }: { errors: string[] }) {
 	if (!errors.length) return null;
 	return (
 		<ul
-			className="m-0 animate-appear rounded-md bg-bad-soft py-2.5 pr-3.5 pl-7.5 text-ui wrap-anywhere text-bad"
+			className="m-0 animate-appear list-disc rounded-md bg-bad-soft py-2.5 pr-3.5 pl-7.5 text-ui wrap-anywhere text-bad"
 			role="alert"
 		>
 			{errors.map((error) => (

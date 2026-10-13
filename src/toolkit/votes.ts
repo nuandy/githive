@@ -18,6 +18,8 @@ export interface VoteRecord {
 	role: string;
 	verdict: "approve" | "reject";
 	evidence: string;
+	/** Clef found an approval's evidence too thin to show what was checked. A hint for people; it still counts. */
+	thin?: true;
 	at: string;
 	by?: string;
 	/** The voter's teams in the repo's org when they voted, as GitHive checked, so a grant to a team counts. */
@@ -87,6 +89,8 @@ export interface FlagRecord {
 	agent: string;
 	/** Set when GitHive flagged a review this role awaits. It's answered once the role signs it off too. */
 	role?: string;
+	/** How urgent Clef found the question, from 0 (can wait) to 2 (urgent), so the Inbox shows urgent ones first. */
+	urgency?: number;
 	at: string;
 	by?: string;
 	stamp?: string;

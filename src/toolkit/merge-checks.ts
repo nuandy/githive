@@ -1,6 +1,7 @@
 import { changeAgainst, type ReadHistory, type TouchedBy, touchedSince } from "./batch-reads";
 import { CONFLICT_FILES_NAMED, CONFLICT_ON, conflictLine, type Landing, type Settled } from "./landing";
 import { type Holding, STEP_MS } from "./merge-lease";
+import { type FailureHint, failureHints } from "./failure-hints";
 import type { BatchChange, CheckResult, Conflict, MergeInput, Ready } from "./merge-types";
 import { fail } from "../errors";
 
@@ -64,11 +65,43 @@ export async function checkAndPutOut(
 		since: new Date().toISOString(),
 		changes: batch.map((ready) => ({ change: ready.change, head: ready.head, agent: ready.agent })),
 	});
-	const failed = await checkBatch(input, baseHead, batch, holding, place, found);
+	// Clef is asked about the first failure while the search goes on, so the search never waits on it.
+	let hinting: Promise<FailureHint> | undefined;
+	const firstFailed = (results: CheckResult[]) => {
+		if (input.clef) hinting = askAboutFailure(input, batch, results);
+	};
+	const failed = await checkBatch(input, baseHead, batch, holding, place, found, firstFailed);
+	const hint = hinting ? await hinting : {};
+	if (hint.suspect) noteSuspect(input, batch, hint.suspect, failed);
 	await holding.step(STEP_MS.records);
 	const settled: Settled[] = [];
-	for (const { ready, failure } of failed) settled.push(await putOut(input, ready, failure, CHECKED_ALONE));
+	for (const { ready, failure } of failed) settled.push(await putOut(input, ready, failure, CHECKED_ALONE, hint));
 	return settled;
+}
+
+function askAboutFailure(input: MergeInput, batch: Ready[], results: CheckResult[]) {
+	const changes = batch.map((ready) => ({ change: ready.change, intent: ready.own.intent, files: ready.files }));
+	const merging = (result: CheckResult) => result.command === BATCH_MERGE;
+	return failureHints(input.clef!, changes, results, merging).catch((err) => {
+		console.error(`asking Clef about ${input.branch}'s failed batch failed`, String(err));
+		return {};
+	});
+}
+
+// Logged so that how often Clef's suspect is the change put out can be counted from the logs, as well as from the
+// outcomes that keep it.
+function noteSuspect(
+	input: MergeInput,
+	batch: Ready[],
+	suspect: NonNullable<FailureHint["suspect"]>,
+	failed: { ready: Ready }[],
+) {
+	const putOutChanges = failed.map(({ ready }) => ready.change);
+	const right = putOutChanges.includes(suspect.change);
+	console.log(
+		`clef suspect on ${input.branch}: ${suspect.change} (${suspect.likelihood}) of ${batch.length}; ` +
+			`put out ${putOutChanges.join(", ") || "none"}; ${right ? "right" : "wrong"}`,
+	);
 }
 
 /** Why a change is put out: its checks' results, and what it doesn't merge on when that's why. */
@@ -79,6 +112,7 @@ export interface Failure {
 
 // Checks `batch` on main in its `place`, passing each part that passes to `found`. A failing batch is split and its
 // halves are checked side by side. A change failing alone is checked once more, then returned to be put out.
+// `firstFailed` hears the results of the batch's own first run if it fails, not its parts'.
 async function checkBatch(
 	input: MergeInput,
 	baseHead: string,
@@ -86,6 +120,7 @@ async function checkBatch(
 	holding: Holding,
 	place: Place,
 	found: (part: Ready[]) => void,
+	firstFailed?: (results: CheckResult[]) => void,
 ): Promise<{ ready: Ready; failure: Failure }[]> {
 	const commands = input.verify!;
 	// A run is its commands plus an install and setup, each allowed as long as the Gate lets a command run.
@@ -104,6 +139,7 @@ async function checkBatch(
 		found(batch);
 		return [];
 	}
+	firstFailed?.(first.results);
 	const [only] = batch;
 	if (only && batch.length === 1) {
 		const again = await run();
@@ -131,7 +167,13 @@ async function checkBatch(
  * commit's story. A conflict is told with what the checks or the landing said of it: nothing more is read under the
  * lease, since the change's `status` or `merge` names who changed its files from a test merge of its own.
  */
-export async function putOut(input: MergeInput, ready: Ready, failure: Failure, how: string): Promise<Settled> {
+export async function putOut(
+	input: MergeInput,
+	ready: Ready,
+	failure: Failure,
+	how: string,
+	hint: FailureHint = {},
+): Promise<Settled> {
 	const { results } = failure;
 	const failed = results.find((result) => result.exitCode !== 0);
 	const { conflict } = failure;
@@ -169,6 +211,8 @@ export async function putOut(input: MergeInput, ready: Ready, failure: Failure, 
 		reasons,
 		...(results.length || !conflict ? { checks } : {}),
 		...(conflict ? kept(conflict) : {}),
+		...(hint.environment !== undefined ? { environment: hint.environment } : {}),
+		...(hint.suspect ? { suspect: hint.suspect } : {}),
 	};
 }
 

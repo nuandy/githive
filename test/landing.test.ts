@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Clef, ClefQuestion } from "../src/clef";
 import { statusOf } from "../src/errors";
 import { GitCasLog } from "../src/record-log";
 import { branchHead } from "../src/git";
@@ -268,6 +269,53 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
 		});
 		expect(runs.length).toBe(before);
+	});
+
+	it("asks Clef which change failed a batch, keeps its guess beside what the search found, and searches the same", async () => {
+		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const asked: { state: string; questions: Record<string, ClefQuestion> }[] = [];
+		const clef: Clef = {
+			ask: async (_model, state, questions) => {
+				asked.push({ state, questions });
+				const suspect = questions.suspect as Extract<ClefQuestion, { type: "choice" }>;
+				const b = Object.entries(suspect.criteria).find(([, text]) => text.startsWith("b-1"))![0];
+				return {
+					environment: { type: "noul", noul: 0.12 },
+					suspect: { type: "choice", choice: b, probabilities: { [b]: 0.64 }, confidence: 0.5 },
+				};
+			},
+		};
+		const runs: string[][] = [];
+		const landing = memoryLanding();
+		expect(await merge("a-1", runner(new Set(["b-1"]), runs), landing, { clef })).toMatchObject({ ok: true });
+		expect(asked).toHaveLength(1);
+		expect(asked[0]!.state).toBe("$ npm test (exited 1)\n1 failing");
+		const failed = (await landing.view()).recent.find((settled) => settled.how === "failed");
+		expect(failed).toMatchObject({ change: "b-1", environment: 0.12, suspect: { change: "b-1", likelihood: 0.64 } });
+		// The search is the one without Clef: halves, then b alone twice.
+		expect(runs.map((run) => run.length)).toEqual([4, 2, 2, 1, 1, 1, 1]);
+	});
+
+	it("tells a change's merge that Clef thinks the environment failed its checks", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const clef: Clef = {
+			ask: async (_model, state, questions) => {
+				expect(questions).not.toHaveProperty("suspect");
+				return { environment: { type: "noul", noul: /ECONNRESET/.test(state) ? 0.93 : 0.1 } };
+			},
+		};
+		const failing: CheckRunner = async () => ({
+			passed: false,
+			results: [{ command: "npm test", exitCode: 1, output: "npm ERR! network ECONNRESET" }],
+		});
+		const landing = memoryLanding();
+		expect(await merge("a-1", failing, landing, { clef })).toMatchObject({
+			ok: false,
+			why: ["checks"],
+			environment: 0.93,
+		});
+		expect((await landing.view()).recent).toMatchObject([{ change: "a-1", how: "failed", environment: 0.93 }]);
+		expect((await landing.view()).recent[0]).not.toHaveProperty("suspect");
 	});
 
 	it("checks a lone failure once more: a flaky run doesn't put a change out", async () => {

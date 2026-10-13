@@ -1,11 +1,11 @@
-import type { InboxGroup } from "../lib/inbox";
+import { type InboxGroup, isUrgent } from "../lib/inbox";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Page } from "./Page";
-import { Counter } from "./ui/badge";
+import { Badge, Counter } from "./ui/badge";
 import { Box, BoxHeader, Callout } from "./ui/box";
 import { Empty } from "./ui/empty";
 
@@ -93,6 +93,11 @@ function InboxRepo({ group, arrived }: { group: InboxGroup; arrived: boolean }) 
 								{item.title}
 							</a>
 							<span className="ml-2 font-mono text-caption text-muted-foreground">{item.change}</span>
+							{isUrgent(item) ? (
+								<Badge tone="bad" className="ml-2 align-[1px]">
+									Urgent
+								</Badge>
+							) : null}
 							<p className="mt-0.75 mb-0 text-ui wrap-anywhere text-muted-foreground">{item.reason}</p>
 						</div>
 					</li>

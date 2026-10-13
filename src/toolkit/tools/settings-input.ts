@@ -92,6 +92,8 @@ export async function githubFrom(
 }
 
 const GITHUB_APP_URL = "https://github.com/apps/githiveapp";
+/** The permissions on a GitHub repo that let someone connect it: it would receive GitHive's work. */
+const WRITERS = new Set(["admin", "write"]);
 
 // The link `value` names: the current one if it's the same repo, else a new connection, which must have the App.
 async function connected(ctx: ToolContext, value: unknown, current: GitHubSettings | undefined) {
@@ -113,7 +115,7 @@ async function mayWriteOn(ctx: ToolContext, link: GitHubLink) {
 	const account = await ctx.githubAccount();
 	if (!account) fail(403, `connecting ${link.repo} needs a GitHive account signed in with GitHub`);
 	const permission = await link.permissionOf(account);
-	if (permission !== "admin" && permission !== "write")
+	if (!WRITERS.has(permission))
 		fail(403, `your GitHub account can't write to ${link.repo}: ask its owner for write access first`);
 }
 

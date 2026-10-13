@@ -26,6 +26,10 @@ export interface Settled {
 	/** If it failed because it doesn't merge onto the branch: its files, and who changed them (see putOut). */
 	conflicts?: string[];
 	touchedBy?: TouchedBy[];
+	/** If its checks failed: how likely Clef found it that the environment failed them (see failure-hints.ts). */
+	environment?: number;
+	/** If it failed in a batch: the change Clef suspected of failing the batch, kept to measure Clef against. */
+	suspect?: { change: string; likelihood: number };
 }
 
 /** The changes being checked together now, on `base`. */

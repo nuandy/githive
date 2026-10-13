@@ -23,6 +23,7 @@ export function voteAsReview(vote: Vote) {
 		verdict: vote.verdict,
 		summary: short,
 		...(evidence && evidence !== short ? { evidence } : {}),
+		...(vote.thin ? { thin: true } : {}),
 		at: vote.at,
 	};
 }

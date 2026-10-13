@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Traffic, objectLabel } from "./cache-traffic";
 import { countingRequests, describeCounts } from "./git-http";
+import type { KeptPushHints } from "./push-hints";
 import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
@@ -130,6 +131,10 @@ const KEPT_PREFIXES = [
 const RECORD_CACHE = "record-cache:";
 /** The repo's hosted agents to ring (see ringHive), with when they asked, so a stale answer can't drop a new hive. */
 const HIVE = "hive";
+/** How many times the doorbell has rung, so a waiting agent can tell whether it missed one (see ringAfter). */
+const RINGS = "rings";
+/** The longest one call holds, well inside the 60 s MCP clients commonly allow a call. */
+export const LONGEST_HOLD_MS = 45_000;
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
 export interface KeptMergeCheck {
@@ -140,6 +145,8 @@ export interface KeptMergeCheck {
 export class RepoCache extends DurableObject<Env> {
 	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
 	private eventWrites = 0;
+	/** Calls held in ringAfter, each woken by the next ring. */
+	private readonly listening = new Set<(rings: number) => void>();
 
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
@@ -156,7 +163,30 @@ export class RepoCache extends DurableObject<Env> {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
 		await this.keepEvents(events);
 		this.broadcast(kind);
-		if (write) this.ringHive(tool ?? kind);
+		if (write) await this.ring(tool ?? kind);
+	}
+
+	/** How many times the doorbell has rung. */
+	async rings() {
+		return (await this.ctx.storage.get<number>(RINGS)) ?? 0;
+	}
+
+	/**
+	 * Holds the call until the doorbell rings past `mark` (from rings), then answers with the new count: at once if
+	 * it already has. Null if `ms` passes first. The caller decides whether what changed concerns it.
+	 */
+	async ringAfter(mark: number, ms: number): Promise<number | null> {
+		const rings = await this.rings();
+		if (rings > mark) return rings;
+		return new Promise((resolve) => {
+			const done = (answer: number | null) => {
+				clearTimeout(giveUp);
+				this.listening.delete(done);
+				resolve(answer);
+			};
+			const giveUp = setTimeout(() => done(null), Math.min(Math.max(ms, 0), LONGEST_HOLD_MS));
+			this.listening.add(done);
+		});
 	}
 
 	/** The repo's hosted agents want to hear when something changes, until none of them is running. */
@@ -255,6 +285,15 @@ export class RepoCache extends DurableObject<Env> {
 		await this.ctx.storage.put(`merge:${change}`, kept);
 	}
 
+	/** What Clef made of a change's latest push, for its status (see push-hints.ts). */
+	async keptPushHints(change: string) {
+		return (await this.ctx.storage.get<KeptPushHints>(`push-hints:${change}`)) ?? null;
+	}
+
+	async keepPushHints(change: string, kept: KeptPushHints) {
+		await this.ctx.storage.put(`push-hints:${change}`, kept);
+	}
+
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */
 	async notePushes(pushes: ChangePush[]) {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
@@ -262,7 +301,7 @@ export class RepoCache extends DurableObject<Env> {
 		await this.keepEvents(events);
 		if (!events.length) return;
 		this.broadcast("pushed");
-		this.ringHive("pushed");
+		await this.ring("pushed");
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
@@ -464,7 +503,7 @@ export class RepoCache extends DurableObject<Env> {
 		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
 		this.broadcast("landing");
-		this.ringHive("landed");
+		await this.ring("landed");
 		return stretch && stretchSummary(stretch);
 	}
 
@@ -620,6 +659,14 @@ export class RepoCache extends DurableObject<Env> {
 
 	// Wakes the repo's hosted agents (see HostedAgent.ring), without holding up the write that rang. Ringing is a hint:
 	// one lost costs only the agents' fallback turn. Once none is running, the repo stops ringing.
+	// Counted first, so a call that read the count just before this can't miss it.
+	private async ring(reason: string) {
+		const rings = (await this.rings()) + 1;
+		await this.ctx.storage.put(RINGS, rings);
+		for (const wake of [...this.listening]) wake(rings);
+		this.ringHive(reason);
+	}
+
 	private ringHive(reason: string) {
 		const ring = async () => {
 			const hive = await this.ctx.storage.get<{ repo: string; since: number }>(HIVE);

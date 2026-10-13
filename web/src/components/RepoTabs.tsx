@@ -307,6 +307,7 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 							{vote.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(vote.commit)}</code>
 							{vote.by ? <span className="text-muted-foreground"> · {identityName(vote.by)}</span> : null}
 							<span className="text-muted-foreground"> · {timeAgo(vote.at)}</span>
+							{vote.thin ? <span className="text-muted-foreground"> · thin evidence</span> : null}
 						</p>
 						{vote.evidence ? <p className="mt-0.5 mb-0 text-ui text-muted-foreground">{vote.evidence}</p> : null}
 					</div>
@@ -392,7 +393,7 @@ function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[]
 				<>
 					<dt>Stricter paths</dt>
 					<dd>
-						<ul className="m-0 pl-5">
+						<ul className="m-0 list-disc pl-5">
 							{policy.escalate.map((rule, index) => (
 								<li key={index} className="not-first:mt-1">
 									{rule.paths.map((path) => (

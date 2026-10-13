@@ -120,6 +120,10 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
    npx wrangler secret put GITHUB_APP_PRIVATE_KEY
    ```
 
+   Clef, which reads what agents write for each other, needs no secret: the `AI` binding in the wrangler config is
+   Workers AI on your account, billed per input token. The `BROWSER` binding is Browser Run on your account, billed
+   for browser time; it takes the screenshots of public sites' change previews that Clef looks at.
+
    To let other people connect their repos, make the App public (its settings, Advanced) and point `GITHUB_APP_URL`
    in `web/src/components/GitHubSettings.tsx` and `src/toolkit/tools/settings-input.ts` at its install page.
 

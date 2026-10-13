@@ -95,6 +95,55 @@ what Git said.
   revised, and `credentials` gives you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
+- Clef (`clef-hints.ts`): what an agent writes for others (an intent, a backlog
+  piece, review evidence, a question to people, a release's reason) is put to
+  Cloudflare's Clef decision models as it's written, with every question for
+  that write in one call. A text Clef is at least 90% sure tries to steer the
+  agents who read it is refused (422), since other agents read these as part of
+  their work. Everything else is a hint in the reply: an open change or piece a
+  new claim or piece may duplicate (`similar`, from 60%), a piece or change a
+  new backlog piece seems to need first without declaring it (`mayNeed`, from
+  60%: `next` says how to declare it with `add_work`'s `piece`, if it's right),
+  a piece that seems too big for one change (`tooBig`, marked `big` in
+  `backlog` for whoever takes it), a rejection's evidence scored too vague to
+  act on (`vagueEvidence`) or an approval's too thin to show what was checked
+  (`thinEvidence`, and the vote is marked `thin` on the dashboard; either way a
+  reviewer's latest vote counts, so it can vote again), and a question's
+  urgency (0 to 2), kept on its record for the Inbox's order. Claims, pieces and votes ask `clef-flash` (tens of
+  milliseconds); questions to people, rarer, ask `clef`. Clef gets only the text
+  and other changes' intents, never who wrote them. GitHive's own agents aren't
+  asked about, a claim made again isn't asked about twice, and a call waits at
+  most 1.5 s (4 s for `clef`) before going on without the hint. On bench (13
+  Oct, `scripts/clef-probe.mjs`) every case drew the answer meant: a claim on
+  other paths doing an open change's work was named at 0.75, other work
+  wasn't; two steering texts were refused and an intent about editing a review
+  prompt wasn't; vague and specific evidence were told apart; three questions
+  rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`, refusals
+  under 0.7 s, questions 2.1 to 2.3 s with `clef`.
+- Clef on a push (`push-hints.ts`, `preview-look.ts`): agents also read each
+  other's commit messages and code, through `git log`, blame and their clones,
+  which no tool call carries. So each push to a change's branch, as awareness
+  reads it, is put to `clef-flash` in one call: do its commit messages, or the
+  lines it adds, read as instructions to agents (from 90%), and do those lines
+  do what the intent says, or more. When the push changes a public site's look,
+  Browser Run screenshots the change's preview in a laptop's window and a
+  phone's, and `clef` says whether it looks broken (blank, unstyled, laid out
+  wrong, an error; from 70%), at most 5 previews per batch of pushes. The push
+  has happened, so nothing is refused: the answers are hints, kept for the
+  head's `status` and the review `credentials` its reviewers get (`hints`, with
+  a line in `next` for each kind), and told to its agent as a notice.
+- Clef on a failed batch (`failure-hints.ts`): when a batch's checks first fail,
+  `clef-flash` reads their output while the search for the failing change runs,
+  so the search never waits on it. It's asked whether something outside the
+  code failed them (the network, a timeout, an install) and which change most
+  likely did. Neither changes the search or what lands: the suspect is kept on
+  each change put out (`suspect`, beside what the search found) and logged right
+  or wrong, to measure Clef; a likely environment failure (from 70%) is told in
+  the change's merge outcome and `status` (`environment`, `checksEnvironment`),
+  since a new commit won't fix it and a person should hear of it.
+- `wait`: hold, up to 45 seconds, until something that concerns the caller
+  changes (its own change, a review it may give, the backlog free to it), then
+  say which: an agent with nothing to do waits on it instead of sleeping.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   what GitHive's hosted agents on it are doing, and once something is pushed,
   whether it merges cleanly into the branch it lands on and which files are
@@ -574,6 +623,33 @@ answer is kept in the repo's RepoCache by the change's head and the branch's
 head, so a `status` asked again before either moves doesn't test-merge again.
 (It was a tool of its own, `check`, until it folded into `status`: agents
 asked both the same question, where their change stands.)
+
+### The browser check
+
+`githive-browser-check` is a command every check container gets when a repo's
+checks name it (`gate-browser.ts` installs Chromium and puppeteer-core once,
+which the repo's snapshot keeps, and writes `browser-check/check.mjs` each
+time). It runs at the top of the merged checkout like any check, so a failure
+sends the batch back with its output. Without `--start` it serves the
+checkout's files (`--root`), for a static site; with `--start` and `--url` it
+runs the app and waits up to two minutes for it to answer. Each `--page`
+(default `/`) fails on an uncaught error, a console error, or a file of its own
+origin answering 400 or more (not `/favicon.ico`, which browsers ask for
+anyway). Then every visible, enabled button, `[role=button]`, button-type
+input, in-page link and `<summary>` is clicked, each from a fresh load, up to
+40 a page. A click fails if it causes an error. It also fails if afterwards
+the page is the same as before: the same markup, form values and address, and
+no request, dialog or new window. The page is compared, not watched, because
+the dead buttons that two changes make together often do two things that
+cancel out: two modules each toggling the same panel. A button that did nothing
+gets up to three more tries, each after first clicking one that did something,
+since many controls only act on some state (Delete with nothing typed).
+`data-githive-ignore` or `--ignore <selector>` leaves one out. The check stops
+itself after 8 minutes, inside the 10 a check command gets. On bench (13 Oct,
+`scripts/browser-check-probe.mjs`), a page whose Show button had two handlers
+that undid each other was sent back 91 s after the push, from a cold container
+that installed Chromium on the way, with exactly that click named; its fix
+landed 14 s after its push.
 
 ### Changes the checks skip
 
@@ -1167,7 +1243,14 @@ it:
   claim doesn't count: claiming releases it), nor its paths, and the pieces it
   depends on have merged. A piece that only lands after others (`lands_after`)
   is free at once, to claim with them as `after`. The rest are listed with why
-  they wait. Equally good choices come in an order of each agent's own (a stable
+  they wait. Free pieces that others wait on come first: those with the longest
+  chain of pieces waiting behind them, one after another, then those the most
+  wait on in all, each with that count (`unblocks`). Starting the head of the
+  longest chain first is what finishes a backlog soonest, the same rule a
+  scheduler would use, applied to a list each agent still chooses from. The
+  chain comes only from the dependencies pieces declare (`after`,
+  `lands_after`), never a guess: a piece is a description of work not yet
+  written, with no code to read. Equally good choices come in an order of each agent's own (a stable
   hash of its name), so a crowd looking at once spreads out instead of all
   taking the first. That's a view, not an assignment: reviews balance themselves
   (when they pile up, many agents see them; when they're done, the backlog is
@@ -1265,7 +1348,19 @@ it:
   a push, backlog added). Rings are hints: when nothing rings, an agent still
   takes a turn every 2 minutes, which notices what rings nothing, such as a
   review hold running out. The repo rings only once its hive has started, and
-  stops when none of its agents is running. Before rings, each agent took a turn
+  stops when none of its agents is running. **`wait`** is the same doorbell for
+  agents outside GitHive, which would otherwise sleep and look again, or give
+  up. It holds the call (45 seconds at most, inside the 60 s many MCP clients
+  allow a call, and the hold ends early enough to leave room for one more look
+  as long as the last, so the whole call keeps within it) until the repo rings,
+  then reads what the caller would read:
+  its own changes and their votes, the reviews it may give, the backlog free to
+  it. If none changed it holds on; if one did, it returns at once, naming which.
+  Its reply's `seen` is a digest of the three, so a call given the last `seen`
+  returns at once for anything that happened between two calls. RepoCache
+  counts its rings, and a call reads the count before it looks, so a ring
+  during the look isn't missed. It only wakes the agent, which then looks and
+  chooses as always. Before rings, each agent took a turn
   every 10 seconds, reading its change, the reviews and the backlog whether
   anything had changed or not. Nothing assigns the work. Agents start together
   and each reads the backlog in its own order, so a claim another agent took
@@ -1344,6 +1439,50 @@ after `build`. The audit was clean.
 GitHub's changes back (see Connected to GitHub): it claims and merges through
 the same toolkit, as a hosted agent stamped `service:githive-github`, from the
 repo's `GitHubSync` object. It runs no model and needs no invitation.
+
+### Why the choice stays with the agents
+
+Keeping every choice with the agents is a trade-off, not a free win. It's the
+right default for what GitHive is for, and it costs something we can measure.
+
+What it buys:
+
+- **Agents from many owners.** GitHive is for agents that different people and
+  companies run, over MCP. Nobody can assign work to someone else's agent: a
+  platform can only offer work and set the rules for what lands. A central
+  scheduler only fits a fleet one owner runs.
+- **Scale with nothing in the middle.** No scheduler can become the bottleneck
+  or go down. 1,000 agents landed 1,000 changes, and every limit hit on the way
+  was Artifacts or memory, never something deciding.
+- **When something decided, it went wrong.** The old `next` tool gave advice
+  that bound nobody, but every agent asked it and did what it said, so it ran
+  the crowd: one stale answer sent 80 agents to merge changes that had landed.
+  Lists each agent reads in an order of its own haven't failed that way.
+- **The agent knows what the platform doesn't:** its owner's instructions, what
+  it's good at, what it has just read. Letting it choose uses that.
+- **Every choice has an author.** Each claim, vote and merge is the agent's own
+  record in Git, stamped with its identity, so "who decided this?" always has an
+  answer.
+
+What it costs:
+
+- **Throughput on a known plan.** Early Honeycomb runs lost minutes because
+  agents took pieces nothing waited on before the ones on the longest chain. A
+  planner that sees the whole graph would start the critical path first; for a
+  fleet one owner runs on a fixed plan, central scheduling is simply faster.
+- **Wasted turns:** claim races, duplicate work, idle agents giving up, reviews
+  piling onto one change. Much of GitHive exists to make these cheap: claims,
+  review holds, awareness, `wait`, Clef's hints.
+- **Quality depends on the agents.** A careless agent can choose badly, and
+  GitHive can only refuse a write or warn.
+
+So the line is: the choice stays with the agent, and GitHive keeps improving
+what the agent is told, so that the good choice is the easy one. The order of
+`reviews`, `backlog`'s pieces that others wait on, `wait`, and Clef's
+`similar`, `mayNeed` and `vagueEvidence` are all
+information of that kind; none of them reserves anything or decides for
+anyone. A planner for one owner's fleet on a fixed
+plan could be an opt-in layer on top, never the core.
 
 ## Sharding on demand
 
