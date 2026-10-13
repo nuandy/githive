@@ -111,4 +111,18 @@ describe("a request to join", () => {
 		expect(withoutSigninError("https://githive.app/?signin_error=not-invited#signin-as=eve%40example.com")).toBe("/");
 		expect(withoutSigninError("https://githive.app/?signin_error=expired#/repos/docs")).toBe("/#/repos/docs");
 	});
+
+	it("shows only what looks like an email: one @, no spaces or control characters, at most 254 characters", () => {
+		const as = (account: string) => signinAccountOf(`#signin-as=${encodeURIComponent(account)}`);
+		expect(as(`${"e".repeat(242)}@example.com`)).toBe(`${"e".repeat(242)}@example.com`);
+		expect(as(`${"e".repeat(243)}@example.com`)).toBeNull();
+		expect(as("Your account is locked: call 555-0100")).toBeNull();
+		expect(as("eve@example.com\nnot@ours.com")).toBeNull();
+		expect(as("eve@example.com\u0000")).toBeNull();
+		expect(as("eve@@example.com")).toBeNull();
+		expect(as("eve")).toBeNull();
+		expect(as("@example.com")).toBeNull();
+		expect(as("eve@")).toBeNull();
+		expect(signinAccountOf("#signin-as=%E0%A4%A")).toBeNull();
+	});
 });

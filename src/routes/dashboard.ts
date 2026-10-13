@@ -179,7 +179,8 @@ function changeViewRoutes(app: Hono<AppEnv>) {
 		);
 	});
 	// A change's files: each one's diff from where it left its branch to its head, or what it brought once it landed
-	// (see changeDiff), capped at 300 files and about 1 MB of diff text. Kept like the change's own view.
+	// (see changeDiff), capped at 300 files and about 900 KB of JSON. Kept like the change's own view, for the 20
+	// changes whose files were kept last.
 	app.get("/repos/:owner/:name/changes/:change/diff", async (c) => {
 		const repo = await routeRepo(c, "read");
 		const change = c.req.param("change");

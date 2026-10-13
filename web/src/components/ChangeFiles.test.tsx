@@ -95,6 +95,10 @@ describe("a change's files", () => {
 		expect(visibleText(render({ diff: { ...diff, base: null, head: null, files: [], total: 0 } }))).toContain(
 			"Nothing is pushed yet",
 		);
+		const unavailable = "It shares no history with main.";
+		const unread = inlineText(render({ diff: { ...diff, base: null, files: [], total: 0, unavailable } }));
+		expect(unread).toContain("Its files can't be shown");
+		expect(unread).toContain(unavailable);
 		expect(visibleText(render({ diff: undefined }))).toContain("Reading its files");
 		expect(inlineText(render({ diff: null, error: "Artifacts is busy" }))).toContain(
 			"This change's files couldn't be loaded: Artifacts is busy.",

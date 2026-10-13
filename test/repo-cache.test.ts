@@ -74,6 +74,21 @@ describe("kept views", () => {
 		await live.keep("snapshot", "{}", 0);
 		expect(await live.view("snapshot", -1)).toMatchObject({ fresh: false });
 	});
+
+	it("keeps the files of the 20 changes kept last, each up to most of a megabyte, forgetting older ones", async () => {
+		const { live } = feed();
+		await live.keep("snapshot", "{}", 0);
+		for (let n = 1; n <= 21; n++) await live.keep(`diff:c-${n}`, `{"n":${n}}`, 0);
+		expect((await live.view("diff:c-1", 60_000)).json).toBeUndefined();
+		expect((await live.view("diff:c-2", 60_000)).json).toBe('{"n":2}');
+		// Kept again, a change's files are kept last, so the next oldest go.
+		await live.keep("diff:c-2", '{"n":2}', 0);
+		await live.keep("diff:c-22", '{"n":22}', 0);
+		expect((await live.view("diff:c-2", 60_000)).json).toBe('{"n":2}');
+		expect((await live.view("diff:c-3", 60_000)).json).toBeUndefined();
+		// Other views aren't counted.
+		expect((await live.view("snapshot", 60_000)).json).toBe("{}");
+	});
 });
 
 /** A time `seconds` from now, so it's after any cursor a test's first call started. */

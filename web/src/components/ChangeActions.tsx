@@ -213,6 +213,7 @@ export function ReleaseDialog({
 							id="release-reason"
 							rows={3}
 							required
+							maxLength={500}
 							value={reason}
 							onChange={(event) => setReason(event.target.value)}
 							placeholder="What it's stuck on, for its agent and the audit"

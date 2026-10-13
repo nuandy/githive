@@ -313,7 +313,11 @@ What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `reviews`, `credentials` for a change and `vote`, write for claiming,
-pushing and merging, admin for `settings` and deleting. A repo the
+pushing and merging, admin for `settings` and deleting. Reading a change's
+files (its diff, on its page) is looking, so it needs read: a public repo's
+change previews are served to anyone at `/site/<owner>/<name>/@<change>/`, and
+a change's page shows its conflicts' lines at read already. Review is for
+credentials to a change's fork, which let a reviewer fetch it and run it. A repo the
 caller can't see answers as if it didn't exist. Someone signed out may read a
 public repo, its dashboard pages included; for any other repo, existing or
 not, they're asked to sign in. Anyone who comes through
@@ -325,7 +329,8 @@ writes the teams of the repo's org they're on into the vote, and the stamp
 covers them, so the audit still needs only Git: a vote counts as the role if
 its voter was on the team when they voted. Someone who joins the team counts
 without the grant changing; someone who leaves stops counting from their next
-vote.
+vote. An agent votes with its owner's teams, so a role granted to a team isn't
+one only people may give: a change waiting on it doesn't wait on people.
 
 ## Changes
 
@@ -477,7 +482,8 @@ merge, so the project's branch never holds half a feature.
 Within a branch, `after` orders dependent changes: a claim (or a backlog item)
 names the changes it depends on, and `merge` refuses it, saying what it waits
 on, until each has merged into the same branch. A release records the branch a
-change merged into, so a dependency that landed elsewhere doesn't count.
+change merged into, or was to, so a dependency that landed elsewhere doesn't
+count, and a change released unmerged still shows its files against its branch.
 `backlog` lists an item as free only once its pieces have merged, and `merge`
 refuses a change still waiting. A backlog item can instead name pieces it
 lands after (`lands_after`): `backlog` offers it at once, to claim with them
@@ -1956,7 +1962,7 @@ lines, the names it alters or uses that other changes touch, and its files:
 `GET /repos/<owner>/<name>/changes/<change>/diff`, each file's unified diff from
 the change's merge base with its branch to its head, or, once landed, from the
 landed commit's first parent to it, with files outside its claim flagged; capped
-at 300 files, about 1 MB of diff text and 256 KB a side, binary and too-big files
+at 300 files, about 900 KB as JSON and 256 KB a side, binary and too-big files
 marked rather than diffed), what landed on a branch and why
 (History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or

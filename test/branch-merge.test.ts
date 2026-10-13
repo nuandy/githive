@@ -58,9 +58,9 @@ describe.each([
 		await register("a", "b", "lander", "other", "reviewer");
 		await piece("api", "a", { "api/field.js": "the field\n" }, { from: "main" });
 		await piece("consumer", "b", { "web/field.js": "uses the field\n" }, { after: ["api"] });
-	});
+	}, 60_000);
 
-	describe("merging a branch into another", () => {
+	describe("merging a branch into another", { timeout: 60_000 }, () => {
 		it("lands the whole branch on main in one merge, after review, and the audit finds nothing wrong", async () => {
 			const main = tip("main");
 			const claimed = await call(

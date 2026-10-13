@@ -345,6 +345,48 @@ describe("status", () => {
 		expect((summaries.at(-1)?.patch.waiting as unknown[]).length).toBe(1);
 	}, 60_000);
 
+	it("doesn't count a change waiting on a team's role as needing a person: an agent on the team can vote", async () => {
+		await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } });
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Handle refund webhooks" });
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
+		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
+		const watched = {
+			...ctx(),
+			summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }),
+		};
+		const waiting = await repoSnapshot(watched, "project");
+		expect(waiting.claims[0]!.approval.awaiting).toEqual(["security"]);
+		expect(summaries.at(-1)?.patch).toMatchObject({ open: 1, needsYou: 0, waiting: [] });
+		// An agent whose owner is on the team signs it off.
+		const vote = { repo: "project", commit: head, reviewer: "sec-bot", role: "security", verdict: "approve" };
+		await callTool("vote", { ...vote, evidence: "ok" }, { ...ctx(), teamsOf: async () => ["@acme/security"] });
+		expect((await repoSnapshot(watched, "project")).claims[0]!.approval).toMatchObject({
+			approved: true,
+			awaiting: [],
+		});
+	}, 60_000);
+
+	it("keeps agents' questions in the Inbox's summary before votes, the most urgent and the oldest first", async () => {
+		await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["person:*"] } });
+		// More changes waiting on a vote than the summary keeps, claimed before the question and listed before it.
+		for (let n = 1; n <= 21; n++)
+			await call("claim", { change: `v-${n}`, agent: "agent-a", paths: [`src/v${n}/`], intent: `Vote ${n}` });
+		await call("claim", { change: "w-1", agent: "agent-b", paths: ["src/w/"], intent: "Ask" });
+		const asked = await pushChange(fork.url, work, "agent-b", "w-1", { "src/w/x.txt": "w\n" });
+		await call("ask_human", { change: "w-1", agent: "agent-b", reason: "which cache size?" });
+		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
+		const watched: ToolContext = {
+			...ctx(),
+			// Each vote's change pushed, without pushing each.
+			forkHead: async (_repo, _agent, ref) => (ref === "changes/w-1" ? asked : "c0ffee"),
+			summarize: async (repo, patch) => void summaries.push({ repo, patch }),
+		};
+		await repoSnapshot(watched, "project");
+		const { needsYou, waiting } = summaries.at(-1)!.patch as { needsYou: number; waiting: { change: string }[] };
+		expect(needsYou).toBe(22);
+		expect(waiting.map((item) => item.change)).toEqual(["w-1", ...Array.from({ length: 19 }, (_, n) => `v-${n + 1}`)]);
+	}, 60_000);
+
 	it("says how a change ended once its claim is gone", async () => {
 		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });

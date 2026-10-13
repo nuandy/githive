@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
 import type { Registry } from "../src/toolkit/claims";
+import { memoryLanding } from "../src/toolkit/landing";
 import { releaseAsPerson, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { RELEASED_NOTE } from "../src/toolkit/tools/dashboard";
@@ -106,6 +107,43 @@ describe("a person releasing a change", { timeout: 120_000 }, () => {
 			/\[409\] nope holds no claim/,
 		);
 		expect((await registryNow()).claims.map((claim) => claim.change)).toEqual(["c-1"]);
+	});
+
+	it("keeps 500 characters of its reason", async () => {
+		await call("settings", { required: 1 });
+		await register("a");
+		await call("claim", { change: "c-1", agent: "a", paths: ["src/a/"], intent: "Work on a" }, "a");
+		const told: { notices: { notice: { says: string } }[] }[] = [];
+		await releaseAsPerson(asPerson(told), "p", "c-1", person, `${"stuck ".repeat(100)}`);
+		const reason = "stuck ".repeat(100).slice(0, 500);
+		expect((await registryNow()).released.at(-1)?.reason).toBe(reason);
+		expect(told[0]?.notices[0]?.notice.says).toBe(`A person released your claim on c-1: ${reason}`);
+	});
+
+	it("waits while its batch is being checked to land, which may land it", async () => {
+		await call("settings", { required: 1 });
+		await register("a");
+		await call("claim", { change: "c-1", agent: "a", paths: ["src/a/"], intent: "Work on a" }, "a");
+		const head = await pushChange(server.url, work, "a", "c-1", { "src/a/x.js": "x\n" });
+		const landing = memoryLanding();
+		const checked: string[] = [];
+		const watching = {
+			...asPerson(),
+			landing: (_repo: string, branch: string) => (checked.push(branch), landing),
+		};
+		await landing.checking({
+			base: "b",
+			since: new Date().toISOString(),
+			changes: [{ change: "c-1", head, agent: "a" }],
+		});
+		await expect(releaseAsPerson(watching, "p", "c-1", person, "stuck")).rejects.toThrow(
+			"[409] c-1 is being checked to land now; release it if the batch sends it back.",
+		);
+		expect(checked).toEqual(["main"]);
+		expect((await registryNow()).claims.map((claim) => claim.change)).toEqual(["c-1"]);
+		// Sent back, it's released.
+		await landing.checking(null);
+		expect(await releaseAsPerson(watching, "p", "c-1", person, "stuck")).toMatchObject({ ok: true });
 	});
 
 	it("still counts an agent's release of another's active claim against the audit", async () => {

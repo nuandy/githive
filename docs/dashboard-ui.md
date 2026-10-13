@@ -158,7 +158,8 @@ Reach for `components/ui` before writing a control by hand:
   as pure functions, not in the component.
 - **The Files tab** (`ChangeFiles`) folds each file, its lines drawn only while open, in `diff-add` and `diff-del`
   (their `-strong` behind the line numbers), with git's hunk headers. `href.change(repo, id, "files", path)` opens one
-  file; link a file of the change there, as Awareness and the Conflict panel do.
+  file; link a file of the change there, as Awareness and the Conflict panel do. When the server can't read them just
+  now, its answer says why (`unavailable`), and the tab's empty state shows that.
 - A person shows as "you" or "a person", never as a `person:` hash; their agents by their `<handle>/<agent>` names.
 
 To add a shadcn component, run from the repository root: `npx shadcn@latest add <name>` (`components.json` points it

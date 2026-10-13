@@ -27,13 +27,19 @@ export function signinErrorOf(search: string): string | null {
 }
 
 // A request to join comes back with the email it's noted under in the fragment, which the browser never sends on.
+// Anyone can link here with any fragment, so only what looks like an email is shown.
 const ACCOUNT_FRAGMENT = "#signin-as=";
+/** One @ with something either side, and no whitespace or control characters. */
+const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+$/u;
+/** The longest an email address can be. */
+const EMAIL_MOST = 254;
 
-/** The email a request to join is noted under (`#signin-as=`), if the address carries it. */
+/** The email a request to join is noted under (`#signin-as=`), if the address carries one. */
 export function signinAccountOf(hash: string): string | null {
 	if (!hash.startsWith(ACCOUNT_FRAGMENT)) return null;
 	try {
-		return decodeURIComponent(hash.slice(ACCOUNT_FRAGMENT.length)) || null;
+		const account = decodeURIComponent(hash.slice(ACCOUNT_FRAGMENT.length));
+		return account.length <= EMAIL_MOST && EMAIL.test(account) ? account : null;
 	} catch {
 		return null;
 	}

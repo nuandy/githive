@@ -6,6 +6,7 @@ import { FakeStorage, namespace } from "./fakes/env";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
+import { callTool } from "../src/toolkit/mcp";
 
 // The dashboard's change view and snapshot, through the Worker's routes: what the RepoCache and the FootprintCache
 // keep about a change reaches its page, built once and kept like the rest of the view. Artifacts is played by a git
@@ -64,7 +65,7 @@ const get = async (env: Env, path: string) => {
 };
 
 describe("a change's page through the dashboard's routes", { timeout: 60_000 }, () => {
-	const { call, register } = toolCalls(() => server);
+	const { ctx, call, register } = toolCalls(() => server);
 
 	it("shows its last merge check, its attempts and where its footprint meets others, and its claim's lease", async () => {
 		await call("settings", { required: 1, vetoes: [] });
@@ -123,5 +124,24 @@ describe("a change's page through the dashboard's routes", { timeout: 60_000 }, 
 		// The repo's snapshot gives each claim's lease: b-1 is pushed, so it waits on review.
 		const snapshot = (await get(env, "/repos/_/p")) as { claims: { change: string; lease?: unknown }[] };
 		expect(snapshot.claims).toEqual([expect.objectContaining({ change: "b-1", lease: { waitingOn: "reviewers" } })]);
+	});
+
+	it("keeps a change's files near the cap, so the next view doesn't diff them again", async () => {
+		// Another repo on the server: the isolate keeps the first test's server as p's for a while.
+		const inQ = (name: string, args: Record<string, unknown>, agentKey?: string) =>
+			callTool(name, { repo: "q", ...args }, { ...ctx(), ...(agentKey ? { agentKey } : {}) });
+		await inQ("settings", { required: 1, vetoes: [] });
+		const { key } = (await inQ("register", { agent: "c" })) as { key: string };
+		await inQ("claim", { change: "c-1", agent: "c", paths: ["data/"], intent: "data" }, key);
+		// Five files near the most a side may weigh, of tabs, quotes and backslashes, which JSON makes twice as long.
+		const text = `${'\t"\\'.repeat(30)}\n`.repeat(2600);
+		const files = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`data/${n}.txt`, text]));
+		await pushChange(server.url, work, "c", "c-1", files);
+
+		const env = workerEnv();
+		const diff = (await get(env, "/repos/_/q/changes/c-1/diff")) as { files: { cut?: true }[]; total: number };
+		expect(diff.total).toBe(5);
+		expect(diff.files.filter((file) => file.cut)).not.toEqual([]);
+		expect((await env.REPO_CACHE.getByName("repo:q").view("diff:c-1", 60_000)).json).toBeDefined();
 	});
 });

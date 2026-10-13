@@ -365,7 +365,7 @@ export interface FileDiff {
 	outside?: true;
 	binary?: true;
 	tooBig?: true;
-	/** Its lines were left out: the diff's text (about 1 MB) ran out before it. */
+	/** Its lines were left out: the diff (about 900 KB) ran out of room before it. */
 	cut?: true;
 	hunks?: DiffHunk[];
 }
@@ -383,6 +383,8 @@ export interface ChangeDiff {
 	files: FileDiff[];
 	/** Every file it changed: more than `files` lists when there were too many. */
 	total: number;
+	/** Why its files can't be shown just now (its branch unreadable, or no history shared with it): no files. */
+	unavailable?: string;
 }
 
 /** What a person's release answers: released, or why not. */
