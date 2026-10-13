@@ -365,7 +365,7 @@ export class RepoCache extends DurableObject<Env> {
 		return at;
 	}
 
-	// Notes a change's files as kept last, and forgets the oldest past DIFFS_KEPT. One read again is built again.
+	// Notes a change's files as kept last, and forgets the oldest past DIFFS_KEPT, to be built again if read again.
 	private async keptDiff(name: string) {
 		const kept = [...((await this.ctx.storage.get<string[]>(DIFFS)) ?? []).filter((each) => each !== name), name];
 		const forgotten = kept.splice(0, Math.max(0, kept.length - DIFFS_KEPT));

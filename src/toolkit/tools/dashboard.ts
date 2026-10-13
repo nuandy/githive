@@ -220,10 +220,10 @@ export async function changeDiff(ctx: ToolContext, repo: string, change: string)
 			.catch(() => null);
 		if (!workspace) return { change, of, base: null, head: null, files: [], total: 0 };
 		const head = await workspace.head();
-		const projectHead = await unless(`${branch} couldn't be read just now.`, head, () =>
+		const projectHead = await orUnavailable(`${branch} couldn't be read just now.`, head, () =>
 			timing.time("project", async () => workspace.fetch("project", await ctx.remote(repo, "read"), branch)),
 		);
-		const base = await unless(
+		const base = await orUnavailable(
 			(err) =>
 				/no common ancestor/.test(String(err))
 					? `It shares no history with ${branch}.`
@@ -231,7 +231,7 @@ export async function changeDiff(ctx: ToolContext, repo: string, change: string)
 			head,
 			() => timing.time("base", () => workspace.mergeBase(projectHead, head)),
 		);
-		const diff = await unless("Its files couldn't be read just now.", head, () =>
+		const diff = await orUnavailable("Its files couldn't be read just now.", head, () =>
 			timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed })),
 		);
 		return { change, of, ...diff };
@@ -245,12 +245,12 @@ export async function changeDiff(ctx: ToolContext, repo: string, change: string)
 async function landedDiff(ctx: ToolContext, repo: string, change: string, mergedAs: string, timing: Timing) {
 	const lost = "The commit it landed as couldn't be read just now.";
 	// The merge and its parents, with their trees, in one fetch.
-	const held = await unless(lost, mergedAs, () =>
+	const held = await orUnavailable(lost, mergedAs, () =>
 		timing.time("fetch", async () => fetchCommits(await ctx.remote(repo, "read"), [mergedAs], "/landed", { depth: 2 })),
 	);
-	const { commit } = await unless(lost, mergedAs, () => git.readCommit({ ...held, oid: mergedAs }));
+	const { commit } = await orUnavailable(lost, mergedAs, () => git.readCommit({ ...held, oid: mergedAs }));
 	const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
-	return unless("Its files couldn't be read just now.", mergedAs, () =>
+	return orUnavailable("Its files couldn't be read just now.", mergedAs, () =>
 		timing.time("diff", () => diffCommits(held, before, mergedAs)),
 	);
 }
@@ -266,7 +266,7 @@ class Unavailable extends Error {
 }
 
 // `work`'s answer, or Unavailable saying why it failed (logged).
-function unless<T>(why: string | ((err: unknown) => string), head: string | null, work: () => Promise<T>) {
+function orUnavailable<T>(why: string | ((err: unknown) => string), head: string | null, work: () => Promise<T>) {
 	return work().catch((err: unknown) => {
 		const said = typeof why === "string" ? why : why(err);
 		console.error(`a change's files: ${said}`, String(err));
