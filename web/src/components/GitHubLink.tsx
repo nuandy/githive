@@ -2,8 +2,9 @@ import { useState } from "react";
 import type { PullAnswer, RepoGitHub } from "../api";
 import { messageOf } from "../lib/errors";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import "./GitHubLink.css";
+import { Button } from "./ui/button";
 
 /** Where bringing GitHub's changes back stands, in words, when it needs anyone to know. */
 export function fromGitHubWords(github: RepoGitHub): string | null {
@@ -71,35 +72,39 @@ export function GitHubLink({
 			? "GitHive's work reaches it through a pull request"
 			: "GitHive pushes main there after every landing";
 	return (
-		<div className="github-link">
-			<a className="github-link__repo" href={`https://github.com/${github.repo}`} title={mode}>
+		<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-ui">
+			<a className="inline-flex items-center gap-1" href={`https://github.com/${github.repo}`} title={mode}>
 				<Icon name="repo" size={14} />
 				{github.repo}
 			</a>
 			{github.sync === "pr" && pull ? (
-				<a className="github-link__pull" href={pull.url} title="The standing pull request from githive/main">
+				<a
+					className="inline-flex items-center gap-1"
+					href={pull.url}
+					title="The standing pull request from githive/main"
+				>
 					<Icon name="pull" size={14} />
 					Pull request #{pull.number}
 				</a>
 			) : null}
 			{github.sync === "pr" && !pull && openPull ? (
-				<button type="button" className="github-link__open" onClick={open} disabled={busy}>
+				<Button size="sm" className="gap-1 py-0.5" onClick={open} disabled={busy}>
 					<Icon name="pull" size={14} />
 					{busy ? "Opening…" : "Open a pull request on GitHub"}
-				</button>
+				</Button>
 			) : null}
-			{github.sync === "mirror" ? <span className="muted">mirrored</span> : null}
+			{github.sync === "mirror" ? <span className="text-muted-foreground">mirrored</span> : null}
 			{note ? (
-				<span className={`github-link__note tone-${job?.step === "needs a person" ? "needs" : "warn"}`}>
+				<span className={cn("max-w-[48ch] wrap-anywhere", job?.step === "needs a person" ? "text-needs" : "text-warn")}>
 					{job?.change && job.step !== "failed" ? <a href={href.change(repo, job.change)}>{note}</a> : note}
 				</span>
 			) : null}
 			{stopped && again ? (
-				<button type="button" className="github-link__open" onClick={tryAgain} disabled={busy}>
+				<Button size="sm" className="gap-1 py-0.5" onClick={tryAgain} disabled={busy}>
 					{busy ? "Asking…" : "Bring them in again"}
-				</button>
+				</Button>
 			) : null}
-			{error ? <span className="error github-link__error">{error}</span> : null}
+			{error ? <span className="basis-full animate-appear text-bad">{error}</span> : null}
 		</div>
 	);
 }

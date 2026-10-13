@@ -3,9 +3,16 @@ import type { ManageApi, RepoAccess } from "../api";
 import { canAdminister, LEVEL_WORDS, LEVELS, type Level } from "../lib/permissions";
 import { isLoose } from "../lib/repoName";
 import { messageOf } from "../lib/errors";
+import { useArrivals } from "../hooks/useArrivals";
+import { useChanged } from "../hooks/useChanged";
 import { useRowActions } from "../hooks/useRowActions";
+import { useStagger } from "../hooks/useStagger";
+import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
-import "./Manage.css";
+import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { Input, NativeSelect } from "./ui/field";
+import { INLINE, INLINE_INPUT, LINE, NOTE, ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED, STACK, TERMS } from "./ui/manage";
 
 /** What the repo's Settings can change. */
 export type RepoManageApi = Pick<
@@ -24,6 +31,10 @@ interface RunProps {
 }
 
 const label = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
+
+// On a page of its own (a repo GitHive hasn't started on), its headings are the browser's own size; in the Settings tab,
+// the tab sets them smaller (SettingsTab).
+const TITLE = "text-[1.5em] font-bold";
 
 function LevelOptions() {
 	return (
@@ -62,12 +73,14 @@ export function RepoAdmin({
 	const runProps = { run, busy, errorFor };
 
 	return (
-		<section className="box" aria-labelledby="repo-access">
-			<div className="box__header">
-				<h2 id="repo-access">Access</h2>
-			</div>
-			<div className="box__body manage__form">
-				<dl className="repo-settings__list">
+		<Box aria-labelledby="repo-access">
+			<BoxHeader>
+				<h2 id="repo-access" className={TITLE}>
+					Access
+				</h2>
+			</BoxHeader>
+			<BoxBody className={STACK}>
+				<dl className={TERMS}>
 					<dt>You</dt>
 					<dd>{access ? LEVEL_WORDS[access.level] : "Loading…"}</dd>
 					<dt>Visible to</dt>
@@ -82,7 +95,7 @@ export function RepoAdmin({
 						onChanged={onChanged}
 					/>
 				) : null}
-			</div>
+			</BoxBody>
 
 			{admin && !loose ? (
 				<CollaboratorsSection
@@ -97,7 +110,7 @@ export function RepoAdmin({
 			{admin ? (
 				<DeleteRepository {...runProps} repo={repo} deleteRepo={() => manage.deleteRepo(repo)} onDeleted={onDeleted} />
 			) : null}
-		</section>
+		</Box>
 	);
 }
 
@@ -137,17 +150,27 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 		}
 	};
 
+	// What's read fades in as it takes the place of "Loading…", and a collaborator added later on its own.
+	const arrived = useArrivals((collaborators ?? []).map((collaborator) => collaborator.handle));
+	const staggers = useStagger(!!collaborators?.length);
+	const read = useChanged(collaborators === undefined && !listError);
+	const line = cn(LINE, read && "animate-fade");
+
 	return (
 		<>
-			<div className="box__header">
-				<h2 id="repo-collaborators">Collaborators</h2>
-			</div>
-			{listError ? <p className="box__row error">{listError}</p> : null}
-			{collaborators === undefined && !listError ? <p className="box__row muted">Loading…</p> : null}
+			<BoxHeader>
+				<h2 id="repo-collaborators" className={TITLE}>
+					Collaborators
+				</h2>
+			</BoxHeader>
+			{listError ? <p className={cn(line, "text-bad")}>{listError}</p> : null}
+			{collaborators === undefined && !listError ? <p className={cn(line, "text-muted-foreground")}>Loading…</p> : null}
 			{collaborators?.length === 0 ? (
-				<p className="box__row muted">No collaborators: the owner's members have what the owner gives them.</p>
+				<p className={cn(line, "text-muted-foreground")}>
+					No collaborators: the owner's members have what the owner gives them.
+				</p>
 			) : null}
-			<ul className="manage__rows" aria-labelledby="repo-collaborators">
+			<ul className={cn(ROWS, staggers && "stagger")} aria-labelledby="repo-collaborators">
 				{(collaborators ?? []).map((collaborator) => (
 					<CollaboratorRow
 						key={collaborator.handle}
@@ -158,17 +181,19 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 						reload={load}
 						confirming={confirming}
 						setConfirming={setConfirming}
+						arrived={arrived(collaborator.handle)}
 					/>
 				))}
 			</ul>
-			<form className="box__body manage__form" onSubmit={add}>
-				<div className="manage__inline">
+			<form className={cn("px-0.5 py-4", STACK)} onSubmit={add}>
+				<div className={INLINE}>
 					<label className="sr-only" htmlFor="collab-handle">
 						Handle
 					</label>
-					<input
+					<Input
 						id="collab-handle"
 						type="text"
+						className={INLINE_INPUT}
 						value={handle}
 						onChange={(event) => setHandle(event.target.value)}
 						placeholder="Their handle"
@@ -178,14 +203,14 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 					<label className="sr-only" htmlFor="collab-level">
 						Permission
 					</label>
-					<select id="collab-level" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
+					<NativeSelect id="collab-level" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
 						<LevelOptions />
-					</select>
-					<button type="submit" className="accent" disabled={!handle.trim() || busy === "add"}>
+					</NativeSelect>
+					<Button type="submit" variant="primary" disabled={!handle.trim() || busy === "add"}>
 						Add collaborator
-					</button>
+					</Button>
 				</div>
-				<p className="manage__hint">
+				<p className="m-0 text-ui text-muted-foreground">
 					They need to have signed in to GitHive once. Their agents act with the same permission.
 				</p>
 				{errorFor("add")}
@@ -214,11 +239,11 @@ function VisibilityToggle({ repo, visibility, manage, onChanged, run, busy, erro
 		return run("visibility", () => manage.setVisibility(repo, next)).then((ok) => ok && onChanged());
 	};
 	return (
-		<div className="manage__inline">
-			<span className="manage__label">Make it</span>
-			<button type="button" className="manage__small" disabled={busy === "visibility"} onClick={toggle}>
+		<div className={INLINE}>
+			<span className="text-body-sm font-semibold">Make it</span>
+			<Button size="sm" disabled={busy === "visibility"} onClick={toggle}>
 				{visibility === "public" ? "Private" : "Public"}
-			</button>
+			</Button>
 			{errorFor("visibility")}
 		</div>
 	);
@@ -232,6 +257,8 @@ interface CollaboratorRowProps extends RunProps {
 	reload: () => Promise<void>;
 	confirming: string | null;
 	setConfirming: (id: string | null) => void;
+	/** Added since the list was first read: it fades in. */
+	arrived: boolean;
 }
 
 function CollaboratorRow({
@@ -244,26 +271,27 @@ function CollaboratorRow({
 	run,
 	busy,
 	errorFor,
+	arrived,
 }: CollaboratorRowProps) {
 	const { handle } = collaborator;
 	const key = `collab:${handle}`;
 	const runThenReload = (work: () => Promise<unknown>) => run(key, work).then((ok) => (ok ? reload() : undefined));
 	return (
-		<li className="box__row">
-			<div className="manage__row">
-				<strong className="manage__row-main">{handle}</strong>
-				<div className="manage__row-actions">
+		<li className={cn(RULED, arrived && "animate-appear")}>
+			<div className={ROW}>
+				<strong className={ROW_MAIN}>{handle}</strong>
+				<div className={ROW_ACTIONS}>
 					<label className="sr-only" htmlFor={`collab-${handle}`}>
 						{handle}'s permission
 					</label>
-					<select
+					<NativeSelect
 						id={`collab-${handle}`}
 						value={collaborator.permission}
 						disabled={busy === key}
 						onChange={(event) => runThenReload(() => manage.setCollaborator(repo, handle, event.target.value as Level))}
 					>
 						<LevelOptions />
-					</select>
+					</NativeSelect>
 					<ConfirmButton
 						id={key}
 						confirming={confirming}
@@ -290,31 +318,32 @@ function DeleteRepository({ repo, deleteRepo, onDeleted, run, busy, errorFor }: 
 	const [typed, setTyped] = useState("");
 	const remove = () => run("delete", deleteRepo).then((ok) => ok && onDeleted());
 	return (
-		<div className="box__body manage__form manage__danger">
-			<h2>Delete this repository</h2>
-			<p className="manage__note">
+		<BoxBody className={STACK}>
+			<h2 className={TITLE}>Delete this repository</h2>
+			<p className={NOTE}>
 				This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks. It
 				can't be undone. The saved setup its containers start from is never used again and is gone within 30 days. Type{" "}
 				<code>{repo}</code> to confirm.
 			</p>
-			<div className="manage__inline">
+			<div className={INLINE}>
 				<label className="sr-only" htmlFor="delete-confirm">
 					Type {repo} to confirm
 				</label>
-				<input
+				<Input
 					id="delete-confirm"
 					type="text"
+					className={INLINE_INPUT}
 					value={typed}
 					onChange={(event) => setTyped(event.target.value)}
 					placeholder={repo}
 					autoComplete="off"
 					spellCheck={false}
 				/>
-				<button type="button" className="danger" disabled={typed !== repo || busy === "delete"} onClick={remove}>
+				<Button variant="danger" disabled={typed !== repo || busy === "delete"} onClick={remove}>
 					{busy === "delete" ? "Deleting…" : "Delete repository"}
-				</button>
+				</Button>
 			</div>
 			{errorFor("delete")}
-		</div>
+		</BoxBody>
 	);
 }

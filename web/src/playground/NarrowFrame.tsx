@@ -3,7 +3,8 @@ import { createRoot, type Root } from "react-dom/client";
 
 // The playground's narrow view. The Hive tab lays itself out by the window's width (media queries), so a narrow
 // container in a wide window wouldn't show its narrow layout. An iframe is a window of its own: the same Hive, from
-// the same run, drawn into it by a React root of its own, with the page's styles copied in and kept in step.
+// the same run, drawn into it by a React root of its own, with the page's styles and its light or dark copied in and
+// kept in step.
 
 const BLANK = "<!doctype html><html><head></head><body></body></html>";
 
@@ -31,6 +32,16 @@ export function NarrowFrame({ width, children }: { width: number; children: Reac
 			copyStyles();
 			const styles = new MutationObserver(copyStyles);
 			styles.observe(document.head, { childList: true, subtree: true, characterData: true });
+			// Light or dark, as the page is: its <html> carries the theme (lib/theme.ts).
+			const copyTheme = () => {
+				doc.documentElement.classList.toggle("dark", document.documentElement.classList.contains("dark"));
+				const chosen = document.documentElement.dataset.theme;
+				if (chosen) doc.documentElement.dataset.theme = chosen;
+				else delete doc.documentElement.dataset.theme;
+			};
+			copyTheme();
+			const theme = new MutationObserver(copyTheme);
+			theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
 			// Nothing sits above the Hive in the frame.
 			doc.documentElement.style.setProperty("--topbar-height", "0px");
 			const container = doc.createElement("div");
@@ -42,6 +53,7 @@ export function NarrowFrame({ width, children }: { width: number; children: Reac
 			setRoot(made);
 			stop = () => {
 				styles.disconnect();
+				theme.disconnect();
 				sizes.disconnect();
 			};
 		};
@@ -64,7 +76,7 @@ export function NarrowFrame({ width, children }: { width: number; children: Reac
 	return (
 		<iframe
 			ref={frame}
-			className="playground__frame"
+			className="mx-auto block max-w-full rounded-md border border-border bg-background"
 			srcDoc={BLANK}
 			title={`The Hive in a window ${width} px wide`}
 			style={{ width, height }}

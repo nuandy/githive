@@ -73,10 +73,11 @@ describe("the conflict panel", () => {
 
 	it("shows the hunks in a monospace block, marking one cut at 4 KB", () => {
 		const html = render(conflict);
-		expect(html).toContain(
-			'<pre tabindex="0"><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours (changes/c-1)\ntotal = sum(lines)\n=======',
+		expect(html).toMatch(
+			/<pre tabindex="0"[^>]*><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours \(changes\/c-1\)\ntotal = sum\(lines\)\n=======/,
 		);
-		expect(html.match(/conflict-panel__hunk--cut/g)).toHaveLength(1);
+		// The cut block's foot is a dashed amber rule.
+		expect(html.match(/border-bottom:2px_dashed_var\(--amber\)/g)).toHaveLength(1);
 		expect(inlineText(html)).toContain("Cut at 4 KB: the whole file is in the agent's clone.");
 		const invoice = html.slice(
 			html.indexOf("<code>src/billing/invoice.ts</code>"),
@@ -97,9 +98,7 @@ describe("the conflict panel", () => {
 		expect(html).toContain("git push fork changes/c-1</code>");
 		expect(html).not.toMatch(/<code>[^<]*call status/);
 		expect(text).toContain("Then: call status; once the new commit is approved, merge again.");
-		expect(html).toMatch(
-			/<button type="button" class="copy-block__button" aria-label="Copy commands: git fetch origin main/,
-		);
+		expect(html).toMatch(/<button [^>]*type="button" aria-label="Copy commands: git fetch origin main/);
 		expect(html).toContain(">Copy commands</button>");
 	});
 
@@ -116,7 +115,7 @@ describe("the conflict panel", () => {
 		const many = render({ into: "main", branchHead: MAIN, clean: false, conflicts: files });
 		const text = inlineText(many);
 		expect(text).toContain("23 files changed on both sides");
-		expect(many.match(/conflict-panel__file"/g)).toHaveLength(20);
+		expect(many.match(/<code>f\d+\.txt<\/code>/g)).toHaveLength(20);
 		expect(text).toContain("Who changed it on main wasn't found.");
 		expect(text).toContain("And 3 more files.");
 		expect(text).not.toContain("The agent's next commands");

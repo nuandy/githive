@@ -1,20 +1,37 @@
-import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { useGlide } from "../hooks/useGlide";
+import { useLingering } from "../hooks/useLingering";
 import { displayName } from "../lib/agent";
 import { type Goal, type GoalStep, goalStatus } from "../lib/goals";
 import { agentChip } from "../lib/hiveCells";
-import type { GoalMotion } from "../lib/hiveMotion";
+import type { GoalMotion, Motion } from "../lib/hiveMotion";
 import { briefPaths, shortSha, timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
 import { clockTime, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { durationWords } from "../lib/stretch";
-import { type Axis, type Bar, goalBar, quietWords, RANGE_WORDS, RANGES, timeAxis } from "../lib/timeAxis";
+import {
+	type Axis,
+	type Bar,
+	type BarMark,
+	type BarPhase,
+	goalBar,
+	quietWords,
+	RANGE_WORDS,
+	RANGES,
+	timeAxis,
+} from "../lib/timeAxis";
+import { cn } from "../lib/utils";
 import type { HiveFilter } from "./HiveTab";
-import "./GoalsPanel.css";
+import { Button } from "./ui/button";
+import { Segmented } from "./ui/segmented";
 
 // The goals panel: one row per goal, in flight on top (newest arrival first), finished below. Story reads in words,
 // with a slim bar on the shared clock; Timeline is the same rows, morphed, the bars taking the room. Rows never jump:
 // a new goal comes in at the top, a landed one stays a minute before it moves down to Finished.
+//
+// The morph is transitions, so a row changes shape instead of being drawn again: switching narrows the words column
+// (--words), packs the rows (--row-pad), folds the second line away and lets the bars take the room, each in 0.45s.
 
 type View = "story" | "timeline";
 
@@ -26,12 +43,52 @@ const HELD_MS = 5 * 60_000;
 const VIEW_KEY = "githive.hive.view";
 
 const TONE_CLASS = {
-	accent: "tone-accent",
-	amber: "tone-warn",
-	good: "tone-good",
-	bad: "tone-bad",
-	muted: "muted",
+	accent: "text-link",
+	amber: "text-warn",
+	good: "text-good",
+	bad: "text-bad",
+	muted: "text-muted-foreground",
 } as const;
+
+/** What folds to its content's height and fades, grid rows 0fr ↔ 1fr around its one child. */
+const FOLD = "grid *:min-h-0 *:overflow-hidden";
+const FOLDS = "[transition:grid-template-rows_0.45s_ease,opacity_0.3s_ease]";
+/** A note among the rows, fading in. */
+const NOTE = "mx-2 my-1.5 animate-hive-fade-in text-ui text-muted-foreground";
+/** A section's heading, in small capitals and ruled to the panel's edge, with room above it. */
+const SECTION =
+	"flex items-center gap-2.5 text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase [transition:margin_0.45s_ease] after:order-1 after:h-px after:flex-1 after:bg-border";
+const sectionRoom = (timeline: boolean) => (timeline ? "mx-0 mt-1.5 mb-0.5" : "mx-0 mt-2.5 mb-1");
+/** A row's line: the agent's chip, then the chevron, the words and the bar. */
+const LINE = "flex items-center gap-2 px-2";
+/** What holds the chevron, the words and the bar: a button on a goal's row. */
+const MAIN = "flex min-w-0 flex-1 items-center justify-start gap-2.5 p-0 text-left whitespace-normal";
+/** The words column, as wide as the view gives it. */
+const WORDS = "w-(--words) min-w-0 flex-none [transition:width_0.45s_ease]";
+/** A row's frame: it folds shut when left out, and its edge and fill fade as it's pointed at or opened. */
+const ROW =
+	"grid rounded-md [transition:grid-template-rows_0.35s_ease,opacity_0.3s_ease,border-width_0.35s_ease,background-color_0.2s_ease,border-color_0.2s_ease]";
+/** The edge of a row that needs someone: a reviewer turned it back, or its agent asks a person. */
+const RED_EDGE = "border-[color-mix(in_srgb,var(--bad)_45%,transparent)]";
+/** Everything on the clock glides when the range changes or time moves it, rather than jumping. */
+const GLIDES = "[transition:left_0.45s_ease,width_0.45s_ease,opacity_0.3s_ease]";
+
+/** The agent's chip: a ring with its short name, smaller in Timeline. */
+const chipBox = (timeline: boolean) =>
+	cn(
+		timeline ? "size-4.5 text-[8px]" : "size-6 text-[9px]",
+		"flex-none rounded-[50%] border border-foreground bg-surface-2 p-0 leading-none font-bold text-foreground",
+		"[transition:width_0.45s_ease,height_0.45s_ease]",
+	);
+
+/** What just happened to a goal, on its row: it arrives, or flashes red or green. */
+const ROW_MOTION: Partial<Record<Motion, string>> = {
+	arrived: "animate-goal-arrive",
+	"changes-asked": "animate-goal-flash-bad",
+	failed: "animate-goal-flash-bad",
+	asking: "animate-goal-flash-bad",
+	landed: "animate-goal-flash-good",
+};
 
 export interface GoalsPanelProps {
 	repo: string;
@@ -56,6 +113,7 @@ export interface GoalsPanelProps {
 export function GoalsPanel(props: GoalsPanelProps) {
 	const { repo, branch, goals, range, filter, now } = props;
 	const [view, setView] = useView(props.view);
+	const timeline = view === "timeline";
 	const [open, setOpen] = useState<Set<string>>(new Set());
 	const [showFinished, setShowFinished] = useState(false);
 	const [held, setHeld] = useState<string | null>(null);
@@ -76,7 +134,12 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	// No goal at all yet: a sample of what one will look like, instead of an empty clock ticking along.
 	const empty = !goals.length;
 	const sample = useLingering(empty, 500);
-	useGlide(panel, `${inFlight.map((goal) => goal.key).join(" ")} | ${done.map((goal) => goal.key).join(" ")}`);
+	// Rows glide to where they now are when a goal arrives or moves down to Finished.
+	useGlide(
+		panel,
+		`${inFlight.map((goal) => goal.key).join(" ")} | ${done.map((goal) => goal.key).join(" ")}`,
+		"li[data-key]",
+	);
 	const toggle = (key: string) => {
 		props.onSeen(key);
 		setOpen((current) => {
@@ -93,6 +156,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			branch={branch}
 			goal={goal}
 			axis={axis}
+			timeline={timeline}
 			hidden={!shows}
 			open={open.has(goal.key)}
 			onToggle={() => toggle(goal.key)}
@@ -110,22 +174,39 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			now={now}
 		/>
 	);
+	// Finished folds into a summary line in Story until it's opened; Timeline unfolds it, since the whole stretch is
+	// the point there.
+	const finishedShown = timeline || showFinished;
 	return (
 		<section
 			ref={panel}
-			className={`goals goals--${view}${showFinished ? " goals--finished-open" : ""}`}
+			data-view={view}
+			className={cn("min-w-0", timeline ? "[--row-pad:2px] [--words:26%]" : "[--row-pad:7px] [--words:56%]")}
 			aria-labelledby="goals-title"
 		>
-			<div className="goals__head">
-				<h2 id="goals-title">Goals</h2>
-				<span className="muted">{working ? `${working} in flight` : "nothing in flight"}</span>
+			<div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+				<h2 id="goals-title" className="m-0 text-lead">
+					Goals
+				</h2>
+				<span className="text-muted-foreground">{working ? `${working} in flight` : "nothing in flight"}</span>
 				{filter ? (
-					<button type="button" className="goals__filter" onClick={() => props.onFilter(null)} title="Show every goal">
+					<Button
+						className="animate-hive-pop-in rounded-full border-link bg-link-soft px-2.5 py-px text-caption leading-5 font-semibold text-link"
+						onClick={() => props.onFilter(null)}
+						title="Show every goal"
+					>
 						{filter.kind === "agent" ? `only ${filter.agent}` : `only ${filter.label}`}{" "}
 						<span aria-hidden="true">×</span>
-					</button>
+					</Button>
 				) : null}
-				<div className={`goals__controls${empty ? " goals__controls--off" : ""}`} inert={empty}>
+				{/* With nothing to act on, the range and view controls fade out. */}
+				<div
+					className={cn(
+						"ml-auto flex gap-2 [transition:opacity_0.3s_ease,visibility_0.3s]",
+						empty && "invisible opacity-0",
+					)}
+					inert={empty}
+				>
 					<Segmented
 						label="Time range"
 						options={RANGES.map((option) => ({ value: option, words: RANGE_WORDS[option] ?? "" }))}
@@ -144,55 +225,79 @@ export function GoalsPanel(props: GoalsPanelProps) {
 				</div>
 			</div>
 			{props.error ? (
-				<p className="muted goals__note">The event log couldn't be read ({props.error}), so steps may be missing.</p>
+				<p className={NOTE}>The event log couldn't be read ({props.error}), so steps may be missing.</p>
 			) : null}
-			<div className={`goals__swap goals__empty${empty ? " goals__swap--open" : ""}`} inert={!empty}>
-				<div>{sample ? <EmptyGoals /> : null}</div>
+			{/* The sample and the goals themselves fold into each other as the first goal arrives. */}
+			<div className={cn(FOLD, FOLDS, empty ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")} inert={!empty}>
+				<div>{sample ? <EmptyGoals timeline={timeline} /> : null}</div>
 			</div>
-			<div className={`goals__swap${empty ? "" : " goals__swap--open"}`} inert={empty}>
+			<div className={cn(FOLD, FOLDS, empty ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]")} inert={empty}>
 				<div>
-					<AxisRow axis={axis} />
-					<div className="goals__section">
+					<AxisRow axis={axis} timeline={timeline} />
+					<div className={cn(SECTION, sectionRoom(timeline))}>
 						<span>In flight · {working}</span>
 					</div>
-					<ol className="goals__rows">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
+					<ol className="m-0 list-none p-0">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
 					{flying.length ? null : (
-						<p className="muted goals__note">
+						<p className={NOTE}>
 							{filter ? "Nothing in flight here." : "Nothing in flight now."}
 							{filter ? (
 								<>
 									{" "}
-									<button type="button" className="link-button" onClick={() => props.onFilter(null)}>
+									<Button variant="link" className="leading-[inherit]" onClick={() => props.onFilter(null)}>
 										Show every goal
-									</button>
+									</Button>
 								</>
 							) : null}
 						</p>
 					)}
 					{done.length ? (
-						<div className={`goals__done${landed.length ? "" : " goals__done--empty"}`} inert={!landed.length}>
+						// Finished as a whole folds away when the filter leaves nothing in it.
+						<div
+							className={cn(FOLD, FOLDS, landed.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}
+							inert={!landed.length}
+						>
 							<div>
-								<div className="goals__section">
+								<div className={cn(SECTION, sectionRoom(timeline))}>
 									<span>Finished · {landed.length}</span>
-									<button type="button" className="link-button goals__fold" onClick={() => setShowFinished(false)}>
+									<Button
+										variant="link"
+										className={cn(
+											"order-2 text-caption leading-[inherit] tracking-normal normal-case",
+											"transition-[opacity,visibility] duration-300 ease-[ease]",
+											showFinished && !timeline ? "" : "invisible opacity-0",
+										)}
+										onClick={() => setShowFinished(false)}
+									>
 										fold
-									</button>
+									</Button>
 								</div>
-								<div className="goals__summary-wrap">
+								<div className={cn(FOLD, FOLDS, finishedShown ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]")}>
 									<div>
 										<button
 											type="button"
-											className="goals__summary"
+											className={cn(
+												"flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-dashed border-border-strong",
+												"bg-transparent px-2.5 py-[7px] text-left [font-family:inherit] text-ui leading-5 font-normal whitespace-normal",
+												"text-foreground no-underline [transition:border-color_0.2s_ease,background-color_0.2s_ease]",
+												"hover:bg-surface-2 focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+											)}
 											onClick={() => setShowFinished(true)}
 											aria-expanded={showFinished}
 										>
 											<FinishedWords goals={landed} />
-											<span className="goals__show">show</span>
+											<span className="text-link">show</span>
 										</button>
 									</div>
 								</div>
-								<div className="goals__finished">
-									<ol className="goals__rows">
+								<div
+									className={cn(
+										FOLD,
+										"[transition:grid-template-rows_0.45s_ease]",
+										finishedShown ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+									)}
+								>
+									<ol className="m-0 list-none p-0">
 										{done.map((goal) => row(goal, matches(goal, filter) && inRange(goal)))}
 									</ol>
 								</div>
@@ -200,7 +305,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 						</div>
 					) : null}
 					{earlier ? (
-						<p className="muted goals__note">
+						<p className={NOTE}>
 							{counted(earlier, "goal")} finished before the range. <a href={href.repo(repo, "history")}>See History</a>
 						</p>
 					) : null}
@@ -210,40 +315,30 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	);
 }
 
-/** True while `on` is, and for `ms` after, so what it shows can fold away before it goes. */
-function useLingering(on: boolean, ms: number): boolean {
-	const [lingering, setLingering] = useState(on);
-	useEffect(() => {
-		if (on) {
-			setLingering(true);
-			return;
-		}
-		const timer = setTimeout(() => setLingering(false), ms);
-		return () => clearTimeout(timer);
-	}, [on, ms]);
-	return on || lingering;
-}
-
 /** Before any goal: a faint sample row, saying what each one will show and where agents come from. */
-function EmptyGoals() {
+function EmptyGoals({ timeline }: { timeline: boolean }) {
 	return (
-		<div className="goals__sample">
-			<div className="goal goal--sample" aria-hidden="true">
-				<div className="goal__body">
-					<div className="goal__line">
-						<span className="goal__chip">?</span>
-						<span className="goal__main">
+		<div className="pt-2 pb-1">
+			{/* Dashed and faint, a picture of a goal rather than one. */}
+			<div
+				className={cn(ROW, "pointer-events-none grid-rows-[1fr] border border-dashed border-border-strong opacity-55")}
+				aria-hidden="true"
+			>
+				<div className="min-h-0 overflow-hidden">
+					<div className={cn(LINE, "py-(--row-pad) [transition:padding_0.45s_ease]")}>
+						<span className={cn(chipBox(timeline), "grid place-items-center border-dashed")}>?</span>
+						<span className={MAIN}>
 							<Chevron />
-							<span className="goal__words">
-								<span className="goal__title">What an agent sets out to do</span>
-								<span className="goal__meta">where it stands · which agent · how long it took</span>
+							<span className={WORDS}>
+								<span className={titleClass(timeline)}>What an agent sets out to do</span>
+								<span className={metaClass(timeline)}>where it stands · which agent · how long it took</span>
 							</span>
-							<span className="goal__track">
-								<span className="bar__phase bar__phase--building" style={{ left: "38%", width: "24%" }} />
-								<span className="bar__phase bar__phase--review" style={{ left: "62%", width: "16%" }} />
-								<span className="bar__mark bar__mark--approved bar__mark--loud" style={{ left: "78%" }} />
-								<span className="bar__phase bar__phase--landing" style={{ left: "78%", width: "8%" }} />
-								<span className="bar__end bar__end--landed" style={{ left: "86%" }}>
+							<span className={TRACK}>
+								<span className={phaseClass("building")} style={{ left: "38%", width: "24%" }} />
+								<span className={phaseClass("review")} style={{ left: "62%", width: "16%" }} />
+								<span className={markClass("approved", true, timeline)} style={{ left: "78%" }} />
+								<span className={phaseClass("landing")} style={{ left: "78%", width: "8%" }} />
+								<span className={endClass("landed")} style={{ left: "86%" }}>
 									✓
 								</span>
 							</span>
@@ -251,41 +346,12 @@ function EmptyGoals() {
 					</div>
 				</div>
 			</div>
-			<p className="muted goals__note">
+			<p className={NOTE}>
 				No goals yet. Each change an agent claims here becomes a row: what it set out to do, where it stands, and what
 				became of it. <a href={href.agents()}>Connect an agent</a>
 			</p>
 		</div>
 	);
-}
-
-/**
- * Rows glide to where they now are when the list changes shape (a goal arrives, or one moves down to Finished)
- * instead of jumping. Positions are measured within the panel, so scrolling moves nothing; and a change that only
- * resizes rows (opening one, switching views) is left to the rows' own transitions.
- */
-function useGlide(panel: RefObject<HTMLElement | null>, shape: string) {
-	const last = useRef<{ shape: string; tops: Map<string, number> }>({ shape, tops: new Map() });
-	useLayoutEffect(() => {
-		const element = panel.current;
-		if (!element) return;
-		const origin = element.getBoundingClientRect().top;
-		const rows = [...element.querySelectorAll<HTMLElement>("li.goal[data-key]")];
-		const tops = new Map(rows.map((row) => [row.dataset.key ?? "", row.getBoundingClientRect().top - origin]));
-		const before = last.current;
-		last.current = { shape, tops };
-		if (before.shape === shape || !before.tops.size) return;
-		if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-		for (const row of rows) {
-			const was = before.tops.get(row.dataset.key ?? "");
-			const is = tops.get(row.dataset.key ?? "");
-			if (was === undefined || is === undefined || Math.abs(was - is) < 2) continue;
-			row.animate([{ transform: `translateY(${was - is}px)` }, { transform: "none" }], {
-				duration: 380,
-				easing: "cubic-bezier(0.2, 0.7, 0.3, 1)",
-			});
-		}
-	});
 }
 
 function matches(goal: Goal, filter: HiveFilter | null): boolean {
@@ -315,34 +381,6 @@ function useView(initial: View = "story"): [View, (view: View) => void] {
 	return [view, pick];
 }
 
-function Segmented<T extends string | number>({
-	label,
-	options,
-	value,
-	onPick,
-}: {
-	label: string;
-	options: { value: T; words: string }[];
-	value: T;
-	onPick(value: T): void;
-}) {
-	return (
-		<div className="segmented" role="group" aria-label={label}>
-			{options.map((option) => (
-				<button
-					key={option.value}
-					type="button"
-					aria-pressed={option.value === value}
-					className={option.value === value ? "segmented__on" : undefined}
-					onClick={() => onPick(option.value)}
-				>
-					{option.words}
-				</button>
-			))}
-		</div>
-	);
-}
-
 /** "✓ 2 landed · 1 dropped", and the first few titles. */
 function FinishedWords({ goals }: { goals: Goal[] }) {
 	const landed = goals.filter((goal) => goal.state === "landed").length;
@@ -350,11 +388,11 @@ function FinishedWords({ goals }: { goals: Goal[] }) {
 	const titles = goals.slice(0, 3).map((goal) => goal.title);
 	const more = goals.length - titles.length;
 	return (
-		<span className="goals__summary-words">
-			{landed ? <b className="tone-good">✓ {landed} landed</b> : null}
+		<span className="truncate">
+			{landed ? <b className="text-good">✓ {landed} landed</b> : null}
 			{landed && dropped ? " · " : null}
 			{dropped ? <b>{dropped} dropped</b> : null}
-			<span className="muted">
+			<span className="text-muted-foreground">
 				{" "}
 				{titles.join(", ")}
 				{more ? `, and ${more} more` : ""}
@@ -366,20 +404,20 @@ function FinishedWords({ goals }: { goals: Goal[] }) {
 const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
 
 /** The clock above the bars, with its folded quiet stretches. */
-function AxisRow({ axis }: { axis: Axis }) {
+function AxisRow({ axis, timeline }: { axis: Axis; timeline: boolean }) {
 	return (
-		<div className="goal__line goals__axis" aria-hidden="true">
-			<span className="goal__chip goal__chip--space" />
-			<span className="goal__main">
-				<span className="goal__chevron goal__chevron--space" />
-				<span className="goal__words" />
-				<span className="goal__track goals__clock">
+		<div className={cn(LINE, "py-0")} aria-hidden="true">
+			<span className={cn(chipBox(timeline), "invisible")} />
+			<span className={MAIN}>
+				<span className="invisible -mr-1 size-2.5 flex-none" />
+				<span className={WORDS} />
+				<span className="relative min-h-4 flex-1 self-stretch font-mono text-[10px] leading-4 font-normal text-muted-foreground">
 					{axis.pieces
 						.filter((piece) => piece.kind === "quiet")
 						.map((piece) => (
 							<span
 								key={piece.from}
-								className="goals__quiet"
+								className={cn("absolute top-0 bg-background text-center", GLIDES)}
 								style={{ left: pct(piece.x0), width: pct(piece.x1 - piece.x0) }}
 								title={quietWords(piece)}
 							>
@@ -387,7 +425,11 @@ function AxisRow({ axis }: { axis: Axis }) {
 							</span>
 						))}
 					{axis.ticks.map((tick, index) => (
-						<span key={index} className="goals__tick" style={{ left: pct(tick.x) }}>
+						<span
+							key={index}
+							className={cn("absolute -translate-x-1/2 whitespace-nowrap last:-translate-x-full", GLIDES)}
+							style={{ left: pct(tick.x) }}
+						>
 							{tick.label}
 						</span>
 					))}
@@ -402,6 +444,7 @@ interface GoalRowProps {
 	branch: string;
 	goal: Goal;
 	axis: Axis;
+	timeline: boolean;
 	/** Left out by the filter or the range: folded away, not gone. */
 	hidden: boolean;
 	open: boolean;
@@ -419,6 +462,7 @@ function GoalRow({
 	branch,
 	goal,
 	axis,
+	timeline,
 	hidden,
 	open,
 	onToggle,
@@ -436,32 +480,49 @@ function GoalRow({
 	useEffect(() => {
 		if (open) setDrawn(true);
 	}, [open]);
-	const className = [
-		"goal",
-		`goal--${goal.state}`,
-		open ? "goal--open" : "",
-		hidden ? "goal--hidden" : "",
-		lit ? "goal--lit" : "",
-		goal.finished ? "goal--done" : "",
-		motion ? `goal--m-${motion.motion}` : "",
-	]
-		.filter(Boolean)
-		.join(" ");
+	// Its edge: red while it needs someone (a reviewer turned it back, or its agent asks a person), darker open,
+	// lighter pointed at.
+	const edge = hidden
+		? "border-0 border-transparent"
+		: cn(
+				"border",
+				goal.state === "in-review" && status.tone === "bad"
+					? RED_EDGE
+					: goal.state === "asking"
+						? cn(RED_EDGE, "hover:border-border")
+						: open
+							? "border-border-strong hover:border-border"
+							: lit
+								? "border-border"
+								: "border-transparent hover:border-border",
+			);
 	const style = motion ? ({ "--motion-delay": `${motion.delay}ms` } as CSSProperties) : undefined;
 	return (
 		<li
-			className={className}
+			className={cn(
+				ROW,
+				"group/goal",
+				hidden ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]",
+				edge,
+				!hidden && (open || lit ? "bg-card" : "hover:bg-card"),
+				motion && ROW_MOTION[motion.motion],
+			)}
 			style={style}
 			data-key={goal.key}
+			data-state={goal.state}
 			inert={hidden}
 			onMouseEnter={() => onHover(true)}
 			onMouseLeave={() => onHover(false)}
 		>
-			<div className="goal__body">
-				<div className="goal__line">
+			<div className="min-h-0 overflow-hidden">
+				<div className={cn(LINE, "py-(--row-pad) [transition:padding_0.45s_ease]")}>
 					<button
 						type="button"
-						className="goal__chip"
+						className={cn(
+							chipBox(timeline),
+							"inline-flex cursor-pointer items-center justify-center gap-1.5 [font-family:inherit] whitespace-nowrap no-underline",
+							"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+						)}
 						title={`Only ${goal.agent}'s goals`}
 						onClick={() => onAgent(goal.agent)}
 					>
@@ -469,39 +530,56 @@ function GoalRow({
 					</button>
 					<button
 						type="button"
-						className="goal__main"
+						className={cn(
+							MAIN,
+							"group/main cursor-pointer rounded-md border-0 bg-transparent [font-family:inherit] [font-size:inherit] leading-[inherit] font-normal text-inherit no-underline",
+							"focus-visible:shadow-focus focus-visible:outline-none",
+						)}
 						aria-expanded={open}
 						onClick={onToggle}
 						onFocus={() => onHover(true)}
 						onBlur={() => onHover(false)}
 						title={goal.intent || goal.title}
 					>
-						<Chevron />
-						<span className="goal__words">
-							<span className="goal__title">
+						<Chevron open={open} />
+						<span className={cn(WORDS, goal.finished && "opacity-75")}>
+							<span className={cn(titleClass(timeline), "group-hover/main:text-link")}>
 								{goal.title}
-								{unseen ? <span className="goal__unseen" title="Changed while you were away" /> : null}
+								{unseen ? (
+									<span
+										className="ml-1.5 inline-block size-[7px] rounded-full bg-link align-[2px]"
+										title="Changed while you were away"
+									/>
+								) : null}
 							</span>
-							<span className="goal__meta">
+							<span className={metaClass(timeline)}>
 								<span className={TONE_CLASS[status.tone]}>{status.words}</span> · {goal.agent} · {whenWords(goal, now)}
 								{goal.paths.length ? ` · ${briefPaths(goal.paths, 1)}` : ""}
 							</span>
 						</span>
-						<span className="goal__track" aria-hidden="true">
-							<BarView bar={bar} axis={axis} now={now} />
+						<span className={cn(TRACK, timeline && goal.finished && "opacity-75")} aria-hidden="true">
+							<BarView
+								bar={bar}
+								axis={axis}
+								timeline={timeline}
+								landing={goal.state === "landing"}
+								motion={motion?.motion}
+								now={now}
+							/>
 						</span>
 					</button>
 				</div>
 				{open || drawn ? (
+					// A row's steps slide open, and fold shut before they go.
 					<div
-						className={`goal__drawer${open ? "" : " goal__drawer--closing"}`}
+						className={cn(FOLD, "grid-rows-[1fr]", open ? "animate-goal-drawer-open" : "animate-goal-drawer-close")}
 						inert={!open}
 						onAnimationEnd={(event) => {
 							if (!open && event.target === event.currentTarget) setDrawn(false);
 						}}
 					>
 						<div>
-							<GoalSteps repo={repo} branch={branch} goal={goal} now={now} />
+							<GoalSteps repo={repo} branch={branch} goal={goal} open={open} now={now} />
 						</div>
 					</div>
 				) : null}
@@ -510,10 +588,38 @@ function GoalRow({
 	);
 }
 
-/** The row's disclosure mark: points at the title shut, down at the steps open. */
-function Chevron() {
+/** A goal's title, smaller in Timeline. */
+const titleClass = (timeline: boolean) =>
+	cn(
+		"block truncate [transition:font-size_0.45s_ease]",
+		timeline ? "text-meta font-medium" : "text-body-sm font-semibold",
+	);
+
+/** Its second line: where it stands, whose, how long. Timeline folds it away. */
+const metaClass = (timeline: boolean) =>
+	cn(
+		"block truncate text-caption text-muted-foreground [transition:max-height_0.45s_ease,opacity_0.3s_ease]",
+		timeline ? "max-h-0 opacity-0" : "max-h-5",
+	);
+
+/** The bar's room, with now drawn at its right edge. */
+const TRACK =
+	"relative min-h-4.5 flex-1 self-stretch after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-link/55";
+
+/** The row's disclosure mark: points at the title shut, down at the steps open, and turns as it does. */
+function Chevron({ open = false }: { open?: boolean }) {
 	return (
-		<svg className="goal__chevron" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
+		<svg
+			className={cn(
+				"-mr-1 size-2.5 flex-none [transition:rotate_0.25s_ease,color_0.2s_ease]",
+				open ? "rotate-90 text-foreground" : "text-muted-foreground",
+				"group-hover/goal:text-link group-focus-visible/main:text-link",
+			)}
+			viewBox="0 0 10 10"
+			width="10"
+			height="10"
+			aria-hidden="true"
+		>
 			<path
 				d="M3.5 1.5 7 5l-3.5 3.5"
 				fill="none"
@@ -534,7 +640,68 @@ function whenWords(goal: Goal, now: number): string {
 	return `${timeAgo(goal.finished, now)}${goal.earlierSteps ? "" : `, took ${durationWords(took)}`}`;
 }
 
-function BarView({ bar, axis, now }: { bar: Bar; axis: Axis; now: number }) {
+// The bar, on the shared clock: building solid, in review dashed, landing amber; marks for the steps.
+
+const PHASE: Record<BarPhase["kind"], string> = {
+	building: "bg-stage-building/60",
+	review:
+		"bg-[repeating-linear-gradient(90deg,color-mix(in_srgb,var(--stage-review)_60%,transparent)_0_4px,transparent_4px_7px)]",
+	landing: "bg-stage-landing",
+	dropped: "bg-muted-foreground/35",
+};
+
+/** A stretch of the bar; the end of one being checked to land blinks. */
+const phaseClass = (kind: BarPhase["kind"], blinks = false) =>
+	cn("absolute top-1/2 -mt-[5px] h-2.5", GLIDES, PHASE[kind], blinks && "animate-goal-blink");
+
+/**
+ * A step's mark: a vote or a failure is a tick in its color, a question for a person a red dot, what agents hear
+ * about each other an amber diamond. Quiet steps (pushes, asking to land) are hairlines, shown in Timeline only.
+ */
+function markClass(kind: BarMark["kind"], loud: boolean, timeline: boolean, pops = false): string {
+	const shape = !loud
+		? cn("-mt-1.5 -ml-px h-3 w-px rounded-[1px] bg-muted-foreground", !timeline && "opacity-0")
+		: kind === "heads-up" || kind === "interface"
+			? "-mt-[3.5px] -ml-[3.5px] size-[7px] rotate-45 rounded-[1px] bg-amber"
+			: kind === "asked"
+				? "-mt-[3px] -ml-[3px] size-[7px] rounded-full bg-bad"
+				: cn("-mt-2 -ml-px h-4 w-[3px] rounded-[1px]", kind === "approved" ? "bg-good" : "bg-bad");
+	return cn("absolute top-1/2", GLIDES, shape, pops && "animate-goal-pop");
+}
+
+/** How a goal ended, at the bar's end: ✓ landed, × released. */
+const endClass = (kind: "landed" | "released", pops = false) =>
+	cn(
+		"absolute top-1/2 -mt-[7.5px] -ml-[7.5px] grid size-[15px] place-items-center rounded-full text-[9px] font-extrabold",
+		GLIDES,
+		kind === "landed"
+			? "bg-good text-background"
+			: "border-[1.5px] border-muted-foreground bg-background text-muted-foreground",
+		pops && "animate-goal-pop",
+	);
+
+/** Of what happened, what pops on the bar: a vote's or a push's mark, when it's the bar's last; its end. */
+const POPS: Motion[] = ["approved", "changes-asked", "pushed"];
+
+function BarView({
+	bar,
+	axis,
+	timeline,
+	landing,
+	motion,
+	now,
+}: {
+	bar: Bar;
+	axis: Axis;
+	timeline: boolean;
+	/** Its goal is being checked to land. */
+	landing: boolean;
+	motion: Motion | undefined;
+	now: number;
+}) {
+	// Only what comes last on the bar blinks or pops: a landing stretch with no marks after it, a mark with no end.
+	const lastPhase = !bar.end && !bar.marks.length ? bar.phases.length - 1 : -1;
+	const lastMark = !bar.end ? bar.marks.length - 1 : -1;
 	return (
 		<>
 			{axis.pieces
@@ -542,28 +709,44 @@ function BarView({ bar, axis, now }: { bar: Bar; axis: Axis; now: number }) {
 				.map((piece) => (
 					<span
 						key={piece.from}
-						className="bar__quiet"
+						className={cn(
+							"absolute inset-y-0 bg-[repeating-linear-gradient(135deg,var(--border)_0_1px,transparent_1px_5px)] opacity-60",
+							GLIDES,
+						)}
 						style={{ left: pct(piece.x0), width: pct(piece.x1 - piece.x0) }}
 					/>
 				))}
-			{bar.clipped ? <span className="bar__clipped" title={bar.clipped} /> : null}
+			{bar.clipped ? (
+				<span
+					className="absolute top-1/2 left-0 -mt-[5px] size-0 -translate-x-[10px] border-[5px] border-transparent border-r-muted-foreground"
+					title={bar.clipped}
+				/>
+			) : null}
 			{bar.phases.map((phase, index) => (
 				<span
 					key={index}
-					className={`bar__phase bar__phase--${phase.kind}`}
+					className={phaseClass(phase.kind, landing && phase.kind === "landing" && index === lastPhase)}
 					style={{ left: pct(phase.x0), width: pct(phase.x1 - phase.x0) }}
 				/>
 			))}
 			{bar.marks.map((mark, index) => (
 				<span
 					key={index}
-					className={`bar__mark bar__mark--${mark.kind} bar__mark--${mark.loud ? "loud" : "quiet"}`}
+					className={markClass(
+						mark.kind,
+						mark.loud,
+						timeline,
+						index === lastMark && mark.kind === motion && POPS.includes(motion),
+					)}
 					style={{ left: pct(mark.x) }}
 					title={`${clockTime(mark.at, now)} · ${stepLead({ kind: mark.kind, at: mark.at, ...(mark.by ? { by: mark.by } : {}) }, "")}`}
 				/>
 			))}
 			{bar.end ? (
-				<span className={`bar__end bar__end--${bar.end.kind}`} style={{ left: pct(bar.end.x) }}>
+				<span
+					className={endClass(bar.end.kind, motion === "landed" || motion === "released")}
+					style={{ left: pct(bar.end.x) }}
+				>
 					{bar.end.kind === "landed" ? "✓" : "×"}
 				</span>
 			) : null}
@@ -612,46 +795,73 @@ export function stepLead(step: GoalStep, branch: string): string {
 
 const QUOTED: GoalStep["kind"][] = ["approved", "changes-asked", "asked"];
 
+/** A step's words, red where it was turned back or a person asked, green where it went ahead. */
+const STEP_TONE: Partial<Record<GoalStep["kind"], string>> = {
+	"changes-asked": "text-bad",
+	failed: "text-bad",
+	asked: "text-bad",
+	approved: "text-good",
+	landed: "text-good",
+};
+
 /** Where an opened row's line comes in the cascade of them; past a dozen they come in together. */
 const stagger = (index: number) => ({ "--i": Math.min(index, 12) }) as CSSProperties;
 
+const STEP = "grid grid-cols-[46px_1fr] gap-2 py-0.5";
+
 /** A goal's steps, opened in place: its intent in full, each step with its time, evidence and reasons. */
-function GoalSteps({ repo, branch, goal, now }: { repo: string; branch: string; goal: Goal; now: number }) {
+function GoalSteps({
+	repo,
+	branch,
+	goal,
+	open,
+	now,
+}: {
+	repo: string;
+	branch: string;
+	goal: Goal;
+	/** Open, each line arrives just after the one above it; folding shut, they stay. */
+	open: boolean;
+	now: number;
+}) {
 	const waiting = goal.state === "asking" || (goal.approval?.awaiting?.length ?? 0) > 0;
 	const intent = goal.intent.trim();
+	const arrives = open && "animate-goal-step-in";
 	return (
-		<div className="goal__steps">
+		<div className="mt-0 mr-2.5 mb-2 ml-10 border-l border-border-strong py-0.5 pr-0 pl-3 text-ui">
 			{intent && intent !== goal.title ? (
-				<p className="goal__intent" style={stagger(0)}>
+				<p className={cn("mx-0 mt-1 mb-2 whitespace-pre-wrap text-muted-foreground", arrives)} style={stagger(0)}>
 					{intent}
 				</p>
 			) : null}
-			<ol>
+			<ol className="m-0 list-none p-0">
 				{goal.earlierSteps ? (
-					<li className="goal__step goal__step--earlier">
+					<li className={cn(STEP, arrives)}>
 						<span />
-						<span className="muted">Earlier steps aren't kept here; the change has them all.</span>
+						<span className="text-muted-foreground">Earlier steps aren't kept here; the change has them all.</span>
 					</li>
 				) : null}
 				{goal.steps.map((step, index) => (
-					<li key={index} className={`goal__step goal__step--${step.kind}`} style={stagger(index + 1)}>
-						<time dateTime={step.at}>{clockTime(step.at, now)}</time>
-						<span>
+					<li key={index} className={cn(STEP, arrives)} style={stagger(index + 1)}>
+						<time dateTime={step.at} className="font-mono text-[11px] leading-5 font-normal text-muted-foreground">
+							{clockTime(step.at, now)}
+						</time>
+						<span className={STEP_TONE[step.kind]}>
 							{stepLead(step, branch)}
 							{step.text && step.kind !== "claimed" ? (
 								QUOTED.includes(step.kind) ? (
 									<>
-										: <q className="goal__evidence">{step.text}</q>
+										: <q className="text-muted-foreground italic">{step.text}</q>
 									</>
 								) : (
-									<span className="muted">: {step.text}</span>
+									<span className="text-muted-foreground">: {step.text}</span>
 								)
 							) : null}
 						</span>
 					</li>
 				))}
 			</ol>
-			<p className="goal__links" style={stagger(goal.steps.length + 1)}>
+			<p className={cn("mx-0 mt-1.5 mb-0.5 text-caption", arrives)} style={stagger(goal.steps.length + 1)}>
 				<a href={href.change(repo, goal.change)}>{waiting ? "Answer it on its page →" : "Open the change →"}</a>
 			</p>
 		</div>

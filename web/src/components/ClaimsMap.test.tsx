@@ -36,8 +36,8 @@ const tree = {
 describe("the Claims map", () => {
 	it("shows a legend of open changes with their agent, color and conflicts", () => {
 		const html = renderToStaticMarkup(<ClaimsMap branch="master" holders={holders} tree={tree} />);
-		expect(html).toMatch(/claims__swatch claim-c0.*Stats page.*agent-a/);
-		expect(html).toMatch(/claim-c1.*README.*agent-b/);
+		expect(html).toMatch(/--claim:var\(--claim-0\).*Stats page.*agent-a/);
+		expect(html).toMatch(/--claim:var\(--claim-1\).*README.*agent-b/);
 		expect(html).toContain("conflicts in 1 file");
 		expect(html).toContain("Files on master");
 	});
@@ -46,17 +46,18 @@ describe("the Claims map", () => {
 		const html = renderToStaticMarkup(<ClaimsMap branch="master" holders={holders} tree={tree} />);
 		expect(html).toMatch(
 			new RegExp(
-				'<a href="#/repos/acme/my-app/changes/readme" class="claims__item claims__item--held claim-c1"[^>]*>' +
+				'<a href="#/repos/acme/my-app/changes/readme" class="[^"]*--claim:var\\(--claim-1\\)[^"]*"[^>]*>' +
 					'.*README\\.md.*aria-label="conflict"',
 			),
 		);
-		expect(html).toMatch(/<summary class="claims__item claims__dir claims__item--held claim-c0"[^>]*>.*stats/);
+		expect(html).toMatch(/<summary class="[^"]*--claim:var\(--claim-0\)[^"]*"[^>]*>.*stats/);
 		expect(html).toMatch(
-			/<a href="#\/repos\/acme\/my-app\/changes\/stats" class="claims__item claims__item--held claim-c0"[^>]*>.*page\.tsx/,
+			/<a href="#\/repos\/acme\/my-app\/changes\/stats" class="[^"]*--claim:var\(--claim-0\)[^"]*"[^>]*>.*page\.tsx/,
 		);
-		expect(html).toMatch(/<span class="claims__item">.*index\.ts/);
+		// Unclaimed: a plain row, not a link.
+		expect(html).toMatch(/<li><span class="[^"]*"><svg[^>]*>(?:(?!<\/svg>).)*<\/svg><span[^>]*>index\.ts<\/span>/);
 		// A folder with claims inside opens; one without stays folded unless it is small at the top.
-		expect(html).toMatch(/<details open="">.*src/);
+		expect(html).toMatch(/<details open="" class="disclosure">.*src/);
 	});
 
 	it("lists claimed paths that aren't on the branch yet, and says when the listing is cut short", () => {

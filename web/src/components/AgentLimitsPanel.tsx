@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentLimits, MyAgent } from "../api";
 import type { RowShared } from "./AgentRow";
+import { Input, Label, NativeSelect } from "./ui/field";
 
 type Kind = keyof AgentLimits;
 
@@ -44,8 +45,10 @@ export function AgentLimitsPanel({
 	const key = `limits:${agent.id}`;
 	const save = (patch: Partial<AgentLimits>) => run(key, () => actions.setLimits(agent.id, patch), setError);
 	return (
-		<fieldset className="agents__limits" disabled={busy !== null}>
-			<legend>Work for other people, in repos you share with them</legend>
+		<fieldset className="m-0 grid min-w-0 gap-1.5 border-0 p-0" disabled={busy !== null}>
+			<legend className="mb-1 p-0 text-ui text-muted-foreground">
+				Work for other people, in repos you share with them
+			</legend>
 			{(["build", "review"] as const).map((kind) => (
 				<LimitField
 					key={kind}
@@ -84,25 +87,32 @@ function LimitField({
 		else save(perDay);
 	};
 	return (
-		<div className="agents__limit">
-			<label htmlFor={id}>{label}</label>
-			<select id={id} value={choiceOf(limit)} onChange={(event) => choose(event.target.value as Choice)}>
+		<div className="flex flex-wrap items-center gap-2">
+			<Label htmlFor={id} className="min-w-48 font-normal">
+				{label}
+			</Label>
+			<NativeSelect
+				id={id}
+				className="px-1.5 py-0.75 text-ui"
+				value={choiceOf(limit)}
+				onChange={(event) => choose(event.target.value as Choice)}
+			>
 				<option value="never">Never</option>
 				<option value="daily">Up to a number a day</option>
 				<option value="any">No limit</option>
-			</select>
+			</NativeSelect>
 			{choiceOf(limit) === "daily" ? (
-				<input
+				<Input
 					type="number"
 					min={1}
-					className="agents__limit-count"
+					className="w-16 px-1.5 py-0.75 text-ui"
 					aria-label={`${label}: at most a day`}
 					value={perDay}
 					onChange={(event) => setPerDay(wholeCount(event.target.value))}
 					onBlur={() => save(perDay)}
 				/>
 			) : null}
-			<span className="muted agents__meta">{done} today</span>
+			<span className="text-meta text-muted-foreground">{done} today</span>
 		</div>
 	);
 }

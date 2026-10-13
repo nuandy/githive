@@ -1,9 +1,14 @@
 import { type FormEvent, useState } from "react";
 import type { HostedUser } from "../api";
 import { timeAgo } from "../lib/relativeTime";
+import { cn } from "../lib/utils";
 import type { AdminSectionProps } from "./AdminPage";
 import { AdminRow, AdminRows } from "./AdminRows";
 import { ConfirmButton } from "./Confirm";
+import { Box, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { FieldHint, Input } from "./ui/field";
+import { INLINE, INLINE_INPUT, NOTE, STACK, TITLE } from "./ui/manage";
 
 /** Who may start GitHive's hosted agents, with a form to allow another and a way to remove each. */
 export function AdminHosted({
@@ -27,44 +32,48 @@ export function AdminHosted({
 	};
 
 	return (
-		<section className="box" aria-labelledby="admin-hosted">
-			<div className="box__header">
-				<h2 id="admin-hosted">Hosted agents</h2>
-			</div>
-			<form className="box__body manage__form" onSubmit={allowPerson}>
-				<p className="manage__hint">
+		<Box aria-labelledby="admin-hosted">
+			<BoxHeader>
+				<h2 id="admin-hosted" className={TITLE}>
+					Hosted agents
+				</h2>
+			</BoxHeader>
+			<form className={cn("px-0.5 py-4", STACK)} onSubmit={allowPerson}>
+				<FieldHint>
 					GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed here
 					can start them.
-				</p>
-				<div className="manage__inline">
+				</FieldHint>
+				<div className={INLINE}>
 					<label htmlFor="admin-hosted-handle" className="sr-only">
 						Handle to allow
 					</label>
-					<input
+					<Input
 						id="admin-hosted-handle"
 						type="text"
 						value={handle}
 						onChange={(event) => setHandle(event.target.value)}
 						placeholder="handle"
+						className={INLINE_INPUT}
 						autoComplete="off"
 						spellCheck={false}
 					/>
-					<button type="submit" className="accent" disabled={!handle.trim() || busy === "allow-hosted"}>
+					<Button type="submit" variant="primary" disabled={!handle.trim() || busy === "allow-hosted"}>
 						{busy === "allow-hosted" ? "Allowing…" : "Allow a person"}
-					</button>
+					</Button>
 				</div>
-				<p className="manage__hint">By their handle; they need to have signed in once.</p>
+				<FieldHint>By their handle; they need to have signed in once.</FieldHint>
 				{handleError ? (
-					<p className="error manage__note" role="alert">
+					<p className={cn(NOTE, "animate-appear text-bad")} role="alert">
 						{handleError}
 					</p>
 				) : null}
 			</form>
-			<AdminRows items={hosted} empty="Nobody may start hosted agents yet.">
-				{(person) => {
+			<AdminRows items={hosted} keyOf={(person) => person.handle} empty="Nobody may start hosted agents yet.">
+				{(person, arrived) => {
 					const key = `hosted:${person.handle}`;
 					return (
 						<AdminRow
+							arrived={arrived}
 							key={person.handle}
 							name={person.handle}
 							detail={
@@ -87,6 +96,6 @@ export function AdminHosted({
 					);
 				}}
 			</AdminRows>
-		</section>
+		</Box>
 	);
 }

@@ -3,8 +3,11 @@ import type { RepoSnapshot, VoteInput } from "../api";
 import { messageOf } from "../lib/errors";
 import { shortSha } from "../lib/model";
 import type { Claim } from "../lib/claimStatus";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import "./ReviewForm.css";
+import { Button } from "./ui/button";
+import { Fold } from "./ui/collapse";
+import { Label, NativeSelect, Textarea } from "./ui/field";
 
 export interface VoteApi {
 	vote(repo: string, change: string, vote: VoteInput): Promise<unknown>;
@@ -25,11 +28,13 @@ export function VoteForm({
 	claim,
 	policy,
 	api,
+	className,
 }: {
 	repo: string;
 	claim: Claim;
 	policy: RepoSnapshot["policy"];
 	api: VoteApi;
+	className?: string;
 }) {
 	const roles = voteRoles(policy);
 	const [role, setRole] = useState(roles[0] ?? "review");
@@ -38,6 +43,11 @@ export function VoteForm({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 	const [done, setDone] = useState<string>();
+	// While a message folds away, it still says what it said.
+	const [lastError, setLastError] = useState(error);
+	if (error && error !== lastError) setLastError(error);
+	const [lastDone, setLastDone] = useState(done);
+	if (done && done !== lastDone) setLastDone(done);
 	if (!claim.head) return null;
 	const head = claim.head;
 
@@ -59,23 +69,29 @@ export function VoteForm({
 	};
 
 	return (
-		<form className="review-form" aria-labelledby="vote-title" onSubmit={submit}>
-			<div className="review-form__header">
-				<h2 id="vote-title">Review changes</h2>
-				<span className="muted">
+		<form
+			className={cn("min-w-0 rounded-md border border-border bg-card", className)}
+			aria-labelledby="vote-title"
+			onSubmit={submit}
+		>
+			<div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5 rounded-t-md border-b border-border bg-surface-2 px-4 py-2.5">
+				<h2 id="vote-title" className="text-body-sm">
+					Review changes
+				</h2>
+				<span className="text-muted-foreground">
 					on <code>{shortSha(head)}</code>
 				</span>
 			</div>
-			<div className="review-form__body">
-				<div className="review-form__row">
-					<label htmlFor="vote-role">Vote as</label>
-					<select id="vote-role" value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
+			<div className="grid gap-2 px-4 pt-3.5 pb-4">
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+					<Label htmlFor="vote-role">Vote as</Label>
+					<NativeSelect id="vote-role" value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
 						{roles.map((option) => (
 							<option key={option} value={option}>
 								{option} reviewer
 							</option>
 						))}
-					</select>
+					</NativeSelect>
 				</div>
 				<VerdictChoice
 					verdict={verdict}
@@ -83,8 +99,8 @@ export function VoteForm({
 					blocks={policy.vetoes.includes(role)}
 					disabled={busy}
 				/>
-				<label htmlFor="vote-evidence">What you checked</label>
-				<textarea
+				<Label htmlFor="vote-evidence">What you checked</Label>
+				<Textarea
 					id="vote-evidence"
 					rows={3}
 					required
@@ -93,30 +109,30 @@ export function VoteForm({
 					placeholder="What you looked at, and what you found"
 					disabled={busy}
 				/>
-				{error ? (
-					<p className="tone-bad review-form__feedback" role="alert">
-						{error}
+				{/* A message unfolds under the field, and folds away as the next try starts; the fold takes the grid's gap
+				    above it in with it. */}
+				<Fold open={!!error} className="-mt-2">
+					<p className={cn(FEEDBACK, "text-bad")} role="alert">
+						{error ?? lastError}
 					</p>
-				) : null}
-				{done ? (
-					<p className="tone-good review-form__feedback" role="status">
-						{done}
+				</Fold>
+				<Fold open={!!done} className="-mt-2">
+					<p className={cn(FEEDBACK, "text-good")} role="status">
+						{done ?? lastDone}
 					</p>
-				) : null}
-				<div className="review-form__actions">
-					<button
-						type="submit"
-						className={verdict === "approve" ? "primary" : "danger"}
-						disabled={busy || !evidence.trim()}
-					>
+				</Fold>
+				<div className="flex justify-end">
+					<Button type="submit" variant={verdict === "approve" ? "go" : "danger"} disabled={busy || !evidence.trim()}>
 						<Icon name={verdict === "approve" ? "check" : "x"} />
 						{busy ? "Submitting…" : "Submit vote"}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</form>
 	);
 }
+
+const FEEDBACK = "m-0 pt-2 text-ui wrap-anywhere";
 
 type Verdict = "approve" | "reject";
 
@@ -137,20 +153,28 @@ function VerdictChoice(props: {
 		},
 	];
 	return (
-		<fieldset className="review-form__verdict" disabled={disabled}>
+		<fieldset className="mx-0 my-1 grid gap-1.5 border-0 p-0" disabled={disabled}>
 			<legend className="sr-only">Verdict</legend>
 			{options.map((option) => (
-				<label key={option.value} className={`review-form__choice${verdict === option.value ? " is-selected" : ""}`}>
+				<label
+					key={option.value}
+					className={cn(
+						"flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2 font-normal",
+						"transition-[border-color,background-color] duration-fast ease-out",
+						verdict === option.value ? "border-link bg-link-soft" : "border-border",
+					)}
+				>
 					<input
+						className="mt-0.75 mr-0.75 mb-0 ml-1.25"
 						type="radio"
 						name="verdict"
 						value={option.value}
 						checked={verdict === option.value}
 						onChange={() => setVerdict(option.value)}
 					/>
-					<span>
+					<span className="grid gap-px">
 						<strong>{option.title}</strong>
-						<span className="muted">{option.detail}</span>
+						<span className="text-meta text-muted-foreground">{option.detail}</span>
 					</span>
 				</label>
 			))}

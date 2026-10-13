@@ -5,11 +5,18 @@ import { canLeave, canManage } from "../lib/orgs";
 import { LEVELS, type Level } from "../lib/permissions";
 import { href } from "../lib/routes";
 import { useRowActions } from "../hooks/useRowActions";
+import { cn } from "../lib/utils";
 import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
 import { MembersSection } from "./OrgMembers";
 import { TeamsSection } from "./OrgTeams";
-import "./Manage.css";
+import { Page } from "./Page";
+import { Badge } from "./ui/badge";
+import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { Empty } from "./ui/empty";
+import { Field, FieldHint, Input, Label, NativeSelect } from "./ui/field";
+import { LINE, ManageHeader, ManagePage, NOTE, ROW, ROW_MAIN, ROWS, RULED, STACK, TITLE } from "./ui/manage";
 
 /** What the org page can do; the page refreshes after each. */
 export type OrgActions = Pick<
@@ -56,32 +63,34 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 	const confirm = { confirming, setConfirming };
 
 	return (
-		<main className="page manage" id="main">
-			<header className="manage__header">
-				<div>
-					<h1>{mine ? "Your repositories" : org.name || org.slug}</h1>
-					<p className="muted manage__lede">
-						<OrgLede org={org} mine={mine} />
-					</p>
-				</div>
-				<div className="manage__header-actions">
-					{org.canCreateRepos ? (
-						<a className="button" href={href.newRepo(org.slug)}>
-							<Icon name="plus" size={15} /> New repository
-						</a>
-					) : null}
-					{canLeave(org) ? (
-						<ConfirmButton
-							id="leave"
-							{...confirm}
-							label="Leave"
-							question={`Leave ${org.slug}?`}
-							busy={busy === "leave"}
-							onConfirm={leave}
-						/>
-					) : null}
-				</div>
-			</header>
+		<ManagePage>
+			<ManageHeader
+				title={mine ? "Your repositories" : org.name || org.slug}
+				lede={<OrgLede org={org} mine={mine} />}
+				actions={
+					org.canCreateRepos || canLeave(org) ? (
+						<>
+							{org.canCreateRepos ? (
+								<Button asChild>
+									<a href={href.newRepo(org.slug)}>
+										<Icon name="plus" size={15} /> New repository
+									</a>
+								</Button>
+							) : null}
+							{canLeave(org) ? (
+								<ConfirmButton
+									id="leave"
+									{...confirm}
+									label="Leave"
+									question={`Leave ${org.slug}?`}
+									busy={busy === "leave"}
+									onConfirm={leave}
+								/>
+							) : null}
+						</>
+					) : null
+				}
+			/>
 			{errorFor("leave")}
 
 			<OrgRepos org={org} />
@@ -110,7 +119,7 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 					{manager ? <SettingsSection org={org} actions={actions} run={run} busy={busy} errorFor={errorFor} /> : null}
 				</>
 			) : null}
-		</main>
+		</ManagePage>
 	);
 }
 
@@ -139,31 +148,33 @@ function OrgLede({ org, mine }: { org: OrgDetail; mine: boolean }) {
 
 function OrgRepos({ org }: { org: OrgDetail }) {
 	return (
-		<section className="box" aria-labelledby="org-repos">
-			<div className="box__header">
-				<h2 id="org-repos">Repositories</h2>
-			</div>
+		<Box aria-labelledby="org-repos">
+			<BoxHeader>
+				<h2 id="org-repos" className={TITLE}>
+					Repositories
+				</h2>
+			</BoxHeader>
 			{org.repos.length === 0 ? (
-				<p className="box__row muted">{org.canCreateRepos ? "None yet." : "None that you can see."}</p>
+				<p className={cn(LINE, "text-muted-foreground")}>
+					{org.canCreateRepos ? "None yet." : "None that you can see."}
+				</p>
 			) : (
-				<ul className="manage__rows">
+				<ul className={ROWS}>
 					{org.repos.map((repo) => {
 						const isPublic = repo.visibility === "public";
 						return (
-							<li key={repo.id} className="box__row manage__row">
-								<div className="manage__row-main">
-									<Icon name="repo" className="muted" />
+							<li key={repo.id} className={cn(RULED, ROW)}>
+								<div className={ROW_MAIN}>
+									<Icon name="repo" className="text-muted-foreground" />
 									<a href={href.repo(repo.fullName)}>{repo.fullName}</a>
 								</div>
-								<span className={`pill ${isPublic ? "pill--accent" : "pill--neutral"}`}>
-									{isPublic ? "Public" : "Private"}
-								</span>
+								<Badge tone={isPublic ? "accent" : "neutral"}>{isPublic ? "Public" : "Private"}</Badge>
 							</li>
 						);
 					})}
 				</ul>
 			)}
-		</section>
+		</Box>
 	);
 }
 
@@ -191,53 +202,73 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 	};
 
 	return (
-		<form className="box" onSubmit={save} aria-labelledby="org-settings">
-			<div className="box__header">
-				<h2 id="org-settings">Settings</h2>
-			</div>
-			<div className="box__body manage__form">
-				<div className="manage__field">
-					<label htmlFor="org-name">Display name</label>
-					<input
-						id="org-name"
-						type="text"
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-						placeholder={org.slug}
-						autoComplete="off"
-					/>
-				</div>
-				<div className="manage__field">
-					<label htmlFor="org-default">What members can do in its repositories</label>
-					<select id="org-default" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
-						{LEVELS.map((option) => (
-							<option key={option} value={option}>
-								{capitalized(option)}
-							</option>
-						))}
-					</select>
-					<p className="manage__hint">
-						Owners and admins can always do everything. Collaborators added to one repository get what they're given
-						there.
-					</p>
-				</div>
-				<label className="manage__choice">
-					<input type="checkbox" checked={membersCreate} onChange={(event) => setMembersCreate(event.target.checked)} />
-					<span>Members can make repositories</span>
-				</label>
-				{errorFor("settings")}
-				{saved && !changed ? (
-					<p className="manage__note" role="status">
-						Saved.
-					</p>
-				) : null}
-				<div className="manage__actions">
-					<button type="submit" className="accent" disabled={!changed || busy === "settings"}>
-						{busy === "settings" ? "Saving…" : "Save"}
-					</button>
-				</div>
-			</div>
-		</form>
+		<Box asChild>
+			<form onSubmit={save} aria-labelledby="org-settings">
+				<BoxHeader>
+					<h2 id="org-settings" className={TITLE}>
+						Settings
+					</h2>
+				</BoxHeader>
+				<BoxBody className={STACK}>
+					<Field>
+						<Label htmlFor="org-name" className="text-body-sm">
+							Display name
+						</Label>
+						<Input
+							id="org-name"
+							type="text"
+							className="w-full max-w-120"
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+							placeholder={org.slug}
+							autoComplete="off"
+						/>
+					</Field>
+					<Field>
+						<Label htmlFor="org-default" className="text-body-sm">
+							What members can do in its repositories
+						</Label>
+						<NativeSelect
+							id="org-default"
+							className="w-full max-w-120"
+							value={level}
+							onChange={(event) => setLevel(event.target.value as Level)}
+						>
+							{LEVELS.map((option) => (
+								<option key={option} value={option}>
+									{capitalized(option)}
+								</option>
+							))}
+						</NativeSelect>
+						<FieldHint>
+							Owners and admins can always do everything. Collaborators added to one repository get what they're given
+							there.
+						</FieldHint>
+					</Field>
+					<Label className="flex cursor-pointer items-start gap-2 font-normal">
+						{/* The browser's own margins about a checkbox. */}
+						<input
+							type="checkbox"
+							className="mt-0.75 mr-0.75 mb-0.75 ml-1"
+							checked={membersCreate}
+							onChange={(event) => setMembersCreate(event.target.checked)}
+						/>
+						<span>Members can make repositories</span>
+					</Label>
+					{errorFor("settings")}
+					{saved && !changed ? (
+						<p className={cn(NOTE, "animate-appear")} role="status">
+							Saved.
+						</p>
+					) : null}
+					<div className="flex flex-wrap gap-2">
+						<Button type="submit" variant="primary" disabled={!changed || busy === "settings"}>
+							{busy === "settings" ? "Saving…" : "Save"}
+						</Button>
+					</div>
+				</BoxBody>
+			</form>
+		</Box>
 	);
 }
 
@@ -245,17 +276,19 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 function OrgUnavailable({ slug, error }: { slug: string; error: string | undefined }) {
 	if (!error)
 		return (
-			<p className="muted page__loading" role="status">
+			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
 				Loading {slug}…
 			</p>
 		);
 	return (
-		<div className="box empty">
-			<h2>Can't show {slug}</h2>
-			<p>
-				{error} <a href={href.orgs()}>Your organizations</a>.
-			</p>
-		</div>
+		<Box asChild>
+			<Empty className="animate-fade">
+				<h2>Can't show {slug}</h2>
+				<p>
+					{error} <a href={href.orgs()}>Your organizations</a>.
+				</p>
+			</Empty>
+		</Box>
 	);
 }
 
@@ -282,9 +315,9 @@ export function OrgPage({ slug, me, manage }: { slug: string; me: { handle: stri
 	};
 	if (!org.data)
 		return (
-			<main className="page" id="main">
+			<Page id="main">
 				<OrgUnavailable slug={slug} error={org.error} />
-			</main>
+			</Page>
 		);
 	return (
 		<OrgView

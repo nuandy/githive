@@ -13,9 +13,14 @@ import type { RunAction } from "../hooks/useRowActions";
 import type { AgentActions } from "./AgentsPage";
 import { Steps } from "./AgentsConnect";
 import { ConfirmButton } from "./Confirm";
+import { cn } from "../lib/utils";
 import { CopyBlock } from "./CopyBlock";
 import { AgentLimitsPanel } from "./AgentLimitsPanel";
 import { Icon } from "./Icon";
+import { Badge } from "./ui/badge";
+import { Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Label, NativeSelect } from "./ui/field";
 
 type Token = MyAgent["tokens"][number];
 
@@ -45,45 +50,52 @@ interface AgentRowProps extends RowShared {
 	signsInFrom: string[];
 	client: McpClient;
 	origin: string;
+	/** Made since the list was first read: it fades in. */
+	arrived?: boolean;
 }
+
+// A token's or an agent's line about when it was made and used.
+const META = "text-meta text-muted-foreground";
 
 /** One of your agents: its tokens, making a new one, and revoking it. */
 export function AgentRow(props: AgentRowProps) {
-	const { agent, fullName, error, issued, setIssued, client, origin, now } = props;
+	const { agent, fullName, error, issued, setIssued, client, origin, now, arrived } = props;
 	const active = !agent.revokedAt;
 	return (
-		<li className={`agents__agent${active ? "" : " agents__agent--revoked"}`}>
-			<div className="agents__agent-head">
-				<div className="agents__agent-name">
+		<li
+			className={cn(
+				"grid gap-2.5 border-t border-border px-4 py-3.5 transition-opacity duration-base first:border-t-0",
+				!active && "opacity-70",
+				arrived && "animate-appear",
+			)}
+		>
+			<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+				<div className="flex min-w-0 flex-wrap items-center gap-2">
 					<Icon name="bot" size={16} />
-					<code>{fullName}</code>
-					{active ? (
-						<span className="pill pill--good">Active</span>
-					) : (
-						<span className="pill pill--neutral">Revoked</span>
-					)}
-					<span className="muted agents__meta">made {timeAgo(agent.createdAt, now)}</span>
+					<code className="bg-link-soft text-ui font-semibold text-link">{fullName}</code>
+					{active ? <Badge tone="good">Active</Badge> : <Badge tone="neutral">Revoked</Badge>}
+					<span className={META}>made {timeAgo(agent.createdAt, now)}</span>
 				</div>
 				{active ? <AgentControls {...props} /> : null}
 			</div>
 			{error !== null ? (
-				<p className="error agents__row-error" role="alert">
+				<p className="m-0 animate-appear text-bad" role="alert">
 					{error}
 				</p>
 			) : null}
 			{issued ? (
-				<div className="callout callout--good agents__issued" role="status">
-					<div className="agents__issued-body">
+				<Callout tone="good" className="animate-appear" role="status">
+					<div className="grid w-full min-w-0 gap-2">
 						<p>
 							<strong>New token for {fullName}.</strong> Copy it now: you won't see it again.
 						</p>
 						<CopyBlock text={issued} label="Copy token" />
 						<Steps steps={tokenSteps(client, origin, issued)} />
-						<button type="button" className="agents__small" onClick={() => setIssued(null)}>
+						<Button size="sm" className="justify-self-start" onClick={() => setIssued(null)}>
 							Done
-						</button>
+						</Button>
 					</div>
-				</div>
+				</Callout>
 			) : null}
 			{active ? <AgentLimitsPanel {...props} /> : null}
 			<AgentTokens {...props} active={active} />
@@ -117,11 +129,12 @@ function AgentControls({
 			setError,
 		);
 	return (
-		<div className="agents__agent-actions">
-			<label className="agents__expiry">
+		<div className="flex flex-wrap items-center gap-2">
+			<Label>
 				<span className="sr-only">New token for {fullName} lasts</span>
-				<select
+				<NativeSelect
 					id={`expiry-${agent.id}`}
+					className="px-1.5 py-0.75 text-ui"
 					value={expiryValue(days)}
 					onChange={(event) => chooseDays(expiryFromValue(event.target.value))}
 				>
@@ -130,13 +143,12 @@ function AgentControls({
 							{choice.days === null ? "Never expires" : `Expires in ${choice.label}`}
 						</option>
 					))}
-				</select>
-			</label>
-			<button type="button" className="accent agents__small" disabled={busy !== null} onClick={makeToken}>
+				</NativeSelect>
+			</Label>
+			<Button variant="primary" size="sm" disabled={busy !== null} onClick={makeToken}>
 				{busy === tokenKey ? "Making…" : "New token"}
-			</button>
+			</Button>
 			<ConfirmButton
-				block="agents"
 				id={agentKey}
 				confirming={confirming}
 				setConfirming={setConfirming}
@@ -154,7 +166,7 @@ function AgentTokens(props: AgentRowProps & { active: boolean }) {
 	const { agent, active, signsInFrom } = props;
 	if (agent.tokens.length > 0)
 		return (
-			<ul className="agents__tokens">
+			<ul className="m-0 grid list-none gap-0.5 p-0 pl-6">
 				{agent.tokens.map((token) => (
 					<TokenRow key={token.id} {...props} token={token} />
 				))}
@@ -162,7 +174,7 @@ function AgentTokens(props: AgentRowProps & { active: boolean }) {
 		);
 	if (!active) return null;
 	return (
-		<p className="muted agents__none">
+		<p className="m-0 pl-6 text-ui text-muted-foreground">
 			{signsInFrom.length ? `Signs in from ${signsInFrom.join(" and ")}, so it needs no token.` : "No tokens yet."}
 		</p>
 	);
@@ -171,9 +183,9 @@ function AgentTokens(props: AgentRowProps & { active: boolean }) {
 function TokenRow(props: AgentRowProps & { active: boolean; token: Token }) {
 	const { token, now } = props;
 	return (
-		<li className={`agents__token${token.revokedAt ? " agents__token--revoked" : ""}`}>
-			<code>{tokenLabel(token.prefix)}</code>
-			<span className="muted agents__meta">
+		<li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 py-1">
+			<code className={cn(token.revokedAt && "text-muted-foreground line-through")}>{tokenLabel(token.prefix)}</code>
+			<span className={META}>
 				made {timeAgo(token.createdAt, now)} ·{" "}
 				{token.expiresAt ? `expires ${expiryDate(token.expiresAt)}` : "never expires"} ·{" "}
 				{token.lastUsedAt ? `used ${timeAgo(token.lastUsedAt, now)}` : "never used"}
@@ -195,13 +207,12 @@ function TokenStatus({
 	setConfirming,
 	setError,
 }: AgentRowProps & { active: boolean; token: Token }) {
-	if (token.revokedAt) return <span className="pill pill--neutral">Revoked</span>;
-	if (token.expiresAt && Date.parse(token.expiresAt) <= now) return <span className="pill pill--neutral">Expired</span>;
+	if (token.revokedAt) return <Badge tone="neutral">Revoked</Badge>;
+	if (token.expiresAt && Date.parse(token.expiresAt) <= now) return <Badge tone="neutral">Expired</Badge>;
 	if (!active) return null;
 	const key = `token:${token.id}`;
 	return (
 		<ConfirmButton
-			block="agents"
 			id={key}
 			confirming={confirming}
 			setConfirming={setConfirming}

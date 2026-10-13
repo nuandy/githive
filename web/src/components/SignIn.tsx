@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { useChanged } from "../hooks/useChanged";
 import { PROVIDER_NAMES, type Provider, signInHref } from "../lib/session";
+import { cn } from "../lib/utils";
 import { HiveMark } from "./HiveMark";
-import "./SignIn.css";
+import { Button } from "./ui/button";
+import { Input, Label } from "./ui/field";
 
 /** GitHub's and Google's marks, single-colour, for the sign-in buttons. */
 function ProviderMark({ provider }: { provider: Provider }) {
@@ -43,28 +46,47 @@ function ProviderButtons({
 	hash: string;
 	invite: string;
 }) {
+	// What takes the place of "Loading…" fades in.
+	const appear = useChanged(providers === undefined) && "animate-fade";
 	if (providers === undefined)
 		return (
-			<p className="muted" role="status">
+			<p className="my-3.75 text-muted-foreground" role="status">
 				Loading…
 			</p>
 		);
-	if (providers.length === 0) return <p className="signin__none">Sign-in isn't set up on this address.</p>;
+	if (providers.length === 0)
+		return <p className={cn("mt-1 mb-0 text-muted-foreground", appear)}>Sign-in isn't set up on this address.</p>;
 	return (
-		<div className="signin__buttons">
-			{providers.map((provider) => (
-				<a
+		<div className={cn("mt-1.5 grid w-full gap-2.5", appear)}>
+			{providers.map((provider, index) => (
+				// The first is in ink. Keyboard focus outlines them, as it does links, rather than ringing them.
+				<Button
 					key={provider}
-					className={`signin__button signin__button--${provider}`}
-					href={signInHref(provider, hash, invite)}
+					asChild
+					variant={index === 0 ? "primary" : "default"}
+					className={cn(
+						"gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal",
+						"focus-visible:shadow-none focus-visible:outline-2 focus-visible:outline-offset-2",
+						"focus-visible:outline-solid focus-visible:outline-link",
+						index === 0 ? "focus-visible:border-primary" : "focus-visible:border-border-strong",
+					)}
 				>
-					<ProviderMark provider={provider} />
-					Continue with {PROVIDER_NAMES[provider]}
-				</a>
+					<a href={signInHref(provider, hash, invite)}>
+						<ProviderMark provider={provider} />
+						Continue with {PROVIDER_NAMES[provider]}
+					</a>
+				</Button>
 			))}
 		</div>
 	);
 }
+
+// The ground the card sits on: a glow of ink from the top over a faint honeycomb. The comb is an image, so it keeps its
+// own honey in both themes.
+const GROUND = [
+	"radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 60%)",
+	`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 66 0 50V18L28 2l28 16v32L28 66Zm0 32L0 82V66' fill='none' stroke='%23f2a516' stroke-opacity='0.16' stroke-width='1'/%3E%3C/svg%3E")`,
+].join(", ");
 
 const SOURCE = "https://github.com/nuandy/githive";
 
@@ -76,17 +98,24 @@ function SignInFooter() {
 		["Ask for an invite", `${SOURCE}#try-it`],
 		["Your data", `${SOURCE}/blob/main/docs/operating.md#data-and-security`],
 	];
+	// A dot between each and the next.
+	const item = "not-first:before:mx-2 not-first:before:content-['·']";
 	return (
-		<footer className="signin__footer">
-			<ul>
+		<footer className="animate-fade">
+			<ul className="m-0 flex list-none flex-wrap justify-center gap-x-0 gap-y-1 p-0 text-meta text-muted-foreground">
 				{links.map(([label, url]) => (
-					<li key={label}>
-						<a href={url} target="_blank" rel="noreferrer">
+					<li key={label} className={item}>
+						<a
+							className="text-muted-foreground transition-colors duration-fast hover:text-foreground"
+							href={url}
+							target="_blank"
+							rel="noreferrer"
+						>
 							{label}
 						</a>
 					</li>
 				))}
-				<li>MIT license</li>
+				<li className={item}>MIT license</li>
 			</ul>
 		</footer>
 	);
@@ -114,34 +143,45 @@ export function SignIn({
 }) {
 	const [invite, setInvite] = useState(linkedInvite);
 	return (
-		<main className="signin" id="main">
-			<div className="signin__card">
-				<div className="signin__mark">
+		// The card in the middle, the footer at the bottom; both fade in, the ground under them already there.
+		<main
+			id="main"
+			className="grid min-h-dvh grid-rows-[1fr_auto] place-items-center gap-6 bg-background px-4 pt-10 pb-5"
+			style={{ backgroundImage: GROUND }}
+		>
+			<div
+				className={cn(
+					"grid w-full max-w-100 animate-fade justify-items-center gap-3.5 px-7 pt-9 pb-7 text-center",
+					"rounded-3xl border border-border bg-card shadow-raised",
+				)}
+			>
+				<div className="mb-1 grid place-items-center">
 					<HiveMark size={56} />
 				</div>
-				<h1>Sign in to GitHive</h1>
-				<p className="signin__lede">
+				<h1 className="text-title-lg tracking-[-0.01em] text-balance">Sign in to GitHive</h1>
+				<p className="m-0 max-w-[32ch] text-muted-foreground">
 					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
 					recorded in Git.
 				</p>
 				{error ? (
-					<p className="signin__error" role="alert">
+					<p className="mt-1 mb-0 w-full rounded-md bg-warn-soft px-3 py-2.5 text-left text-warn" role="alert">
 						{error}
 					</p>
 				) : null}
 				{takesInviteCode ? (
-					<label className="signin__invite">
+					<Label className="grid w-full gap-1 text-left text-ui text-muted-foreground">
 						<span>Invite code, if you have one</span>
-						<input
+						<Input
+							className="w-full [font-family:monospace]"
 							value={invite}
 							onChange={(event) => setInvite(event.target.value)}
 							autoComplete="off"
 							spellCheck={false}
 						/>
-					</label>
+					</Label>
 				) : null}
 				<ProviderButtons providers={providers} hash={hash} invite={invite} />
-				<p className="signin__note">
+				<p className="mt-2 mb-0 max-w-[34ch] text-meta text-muted-foreground">
 					{takesInviteCode
 						? "GitHive is invite-only for now. Have an invite code? Enter it, then continue."
 						: "GitHive is invite-only for now. If you aren't invited yet, signing in asks an admin to let you in."}

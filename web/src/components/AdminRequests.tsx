@@ -3,6 +3,10 @@ import { timeAgo } from "../lib/relativeTime";
 import type { AdminSectionProps } from "./AdminPage";
 import { AdminRow, AdminRows } from "./AdminRows";
 import { ConfirmButton } from "./Confirm";
+import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { FieldHint } from "./ui/field";
+import { TITLE } from "./ui/manage";
 
 const PROVIDERS: Record<string, string> = { github: "GitHub", google: "Google" };
 
@@ -19,23 +23,26 @@ export function AdminRequests({
 	now,
 }: AdminSectionProps & { requests: InviteRequest[] | undefined }) {
 	return (
-		<section className="box" aria-labelledby="admin-requests">
-			<div className="box__header">
-				<h2 id="admin-requests">Requests</h2>
-			</div>
-			<div className="box__body">
-				<p className="manage__hint">
+		<Box aria-labelledby="admin-requests">
+			<BoxHeader>
+				<h2 id="admin-requests" className={TITLE}>
+					Requests
+				</h2>
+			</BoxHeader>
+			<BoxBody>
+				<FieldHint>
 					People who can't sign in until you approve them: those an organization invited, who join it when they first
 					sign in, and those who tried to sign in uninvited.
-				</p>
-			</div>
-			<AdminRows items={requests} empty="No requests waiting.">
-				{(request) => {
+				</FieldHint>
+			</BoxBody>
+			<AdminRows items={requests} keyOf={(request) => request.email} empty="No requests waiting.">
+				{(request, arrived) => {
 					const key = `request:${request.email}`;
 					const declineKey = `decline:${request.email}`;
 					return (
 						<AdminRow
 							key={request.email}
+							arrived={arrived}
 							name={request.email}
 							detail={
 								<>
@@ -44,14 +51,14 @@ export function AdminRequests({
 							}
 							error={errorFor(key)}
 						>
-							<button
-								type="button"
-								className="accent manage__small"
+							<Button
+								variant="primary"
+								size="sm"
 								disabled={busy !== null}
 								onClick={() => run(key, () => actions.approve(request.email))}
 							>
 								{busy === key ? "Approving…" : "Approve"}
-							</button>
+							</Button>
 							<ConfirmButton
 								id={declineKey}
 								confirming={confirming}
@@ -65,7 +72,7 @@ export function AdminRequests({
 					);
 				}}
 			</AdminRows>
-		</section>
+		</Box>
 	);
 }
 

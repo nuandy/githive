@@ -1,11 +1,89 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type ComponentProps, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { counted } from "../lib/plural";
 import type { RepoSnapshot, SavedMergeSettings, SettingsInput } from "../api";
+import { useArrivals } from "../hooks/useArrivals";
 import { blockingRolesOf, draftFrom, type MergeDraft, settingsFrom } from "../lib/mergeSettings";
 import { messageOf } from "../lib/errors";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { MergeChecks } from "./MergeChecks";
-import "./RepoSettings.css";
+import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Button } from "./ui/button";
+import { Collapse, Fold } from "./ui/collapse";
+import { Field, FieldHint, Input, Label, Textarea } from "./ui/field";
+
+// The Settings tab's forms (this one, MergeChecks, BranchRules, GitHubSettings) share their parts: a ruled section
+// per topic, its fields a little apart, and a bar at the foot with the form's buttons, staying in view as it scrolls.
+
+/** A settings form: its sections, then its save bar. */
+export const SETTINGS_FORM = "grid gap-4";
+/** A section's fields. */
+export const SETTINGS_FIELDS = "grid gap-3.5";
+/**
+ * A command, a path or a repo's name, typed in a field, at the field's own line height (a font size drops the one
+ * before it); a long text field adds its own after this.
+ */
+export const COMMAND = "font-mono text-meta leading-[inherit]";
+/** A group of fields in a ruled frame, its legend on the frame (a path rule, a branch rule). */
+export const RULE = "m-0 grid min-w-0 gap-2 rounded-md border border-border p-3";
+/** A link-like button that takes a rule away. */
+export const REMOVE = "justify-self-start text-bad";
+
+/** A section of a settings form, under its title. */
+export function SettingsSection({
+	id,
+	title,
+	children,
+	...props
+}: ComponentProps<"section"> & { id: string; title: ReactNode }) {
+	return (
+		<Box aria-labelledby={id} {...props}>
+			<BoxHeader>
+				<h2 id={id} className="text-body-sm font-semibold">
+					{title}
+				</h2>
+			</BoxHeader>
+			{children}
+		</Box>
+	);
+}
+
+/** A field in a settings form: its label, control and hint, close together. */
+export function SettingField({ className, ...props }: ComponentProps<"div">) {
+	return <Field className={cn("gap-1", className)} {...props} />;
+}
+
+export function SettingHint({ className, ...props }: ComponentProps<"p">) {
+	return <FieldHint className={cn("text-meta", className)} {...props} />;
+}
+
+/** The foot of a settings form: what the save said, and its buttons, kept in view at the window's foot. */
+export function SaveBar({ className, ...props }: ComponentProps<"div">) {
+	return (
+		<div
+			className={cn(
+				"sticky bottom-0 grid gap-2 bg-[linear-gradient(to_bottom,transparent,var(--background)_30%)] py-3",
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+/** What's wrong with the form, as the save found it. */
+export function SaveErrors({ errors }: { errors: string[] }) {
+	if (!errors.length) return null;
+	return (
+		<ul
+			className="m-0 animate-appear list-disc rounded-md bg-bad-soft py-2.5 pr-3.5 pl-7.5 text-ui wrap-anywhere text-bad"
+			role="alert"
+		>
+			{errors.map((error) => (
+				<li key={error}>{error}</li>
+			))}
+		</ul>
+	);
+}
 
 export interface MergeSettingsProps {
 	snapshot: Pick<RepoSnapshot, "policy" | "verify" | "branch" | "skipChecks">;
@@ -83,52 +161,50 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 	};
 
 	return (
-		<form className="repo-settings__form" onSubmit={submit}>
+		<form className={SETTINGS_FORM} onSubmit={submit}>
 			<ReviewPolicy draft={draft} update={update} busy={busy} />
 			<PathRules draft={draft} update={update} busy={busy} />
 			<MergeChecks draft={draft} update={update} busy={busy} branch={branch} />
-			<div className="repo-settings__save">
+			<SaveBar>
 				<SaveErrors errors={errors} />
 				{saved ? <SavedNotice saved={saved} /> : null}
-				<div className="repo-settings__buttons">
-					<button type="button" disabled={busy || !dirty} onClick={discard}>
+				<div className="flex justify-end gap-2">
+					<Button disabled={busy || !dirty} onClick={discard}>
 						Discard edits
-					</button>
-					<button type="submit" className="primary" disabled={busy || !dirty}>
+					</Button>
+					<Button type="submit" variant="go" disabled={busy || !dirty}>
 						{busy ? "Saving…" : "Save settings"}
-					</button>
+					</Button>
 				</div>
-			</div>
+			</SaveBar>
 		</form>
 	);
 }
 
 function ReviewPolicy({ draft, update, busy }: DraftSectionProps) {
 	return (
-		<section className="box" aria-labelledby="settings-review">
-			<div className="box__header">
-				<h2 id="settings-review">Review policy</h2>
-			</div>
-			<div className="box__body repo-settings__fields">
-				<div className="repo-settings__field">
-					<label htmlFor="settings-required">Required approvals</label>
-					<input
+		<SettingsSection id="settings-review" title="Review policy">
+			<BoxBody className={SETTINGS_FIELDS}>
+				<SettingField>
+					<Label htmlFor="settings-required">Required approvals</Label>
+					<Input
 						id="settings-required"
 						type="number"
+						className="max-w-35"
 						min={0}
 						inputMode="numeric"
 						value={draft.required}
 						onChange={(event) => update({ required: event.target.value })}
 						disabled={busy}
 					/>
-					<p className="muted">
+					<SettingHint>
 						From reviewers other than the change's author. 0 merges a change on its checks alone (a role that can block
 						must still approve).
-					</p>
-				</div>
-				<div className="repo-settings__field">
-					<label htmlFor="settings-vetoes">Roles that can block any change</label>
-					<input
+					</SettingHint>
+				</SettingField>
+				<SettingField>
+					<Label htmlFor="settings-vetoes">Roles that can block any change</Label>
+					<Input
 						id="settings-vetoes"
 						value={draft.vetoes}
 						onChange={(event) => update({ vetoes: event.target.value })}
@@ -137,43 +213,47 @@ function ReviewPolicy({ draft, update, busy }: DraftSectionProps) {
 						spellCheck={false}
 						disabled={busy}
 					/>
-					<p className="muted">
+					<SettingHint>
 						Comma-separated, like security or api-design. Each must approve, and one rejection blocks the merge.
-					</p>
-				</div>
+					</SettingHint>
+				</SettingField>
 				<RoleGrants draft={draft} update={update} busy={busy} />
-			</div>
-		</section>
+			</BoxBody>
+		</SettingsSection>
 	);
 }
 
-/** Who may vote as each role that can block, shown once there is such a role. */
+/** Who may vote as each role that can block: it unfolds once there is such a role, and folds away with the last. */
 function RoleGrants({ draft, update, busy }: DraftSectionProps) {
 	const blocking = blockingRolesOf(draft);
-	if (!blocking.length) return null;
+	// While it folds away, it still shows the roles it last had.
+	const [shown, setShown] = useState(blocking);
+	if (blocking.length && blocking.join() !== shown.join()) setShown(blocking);
 	return (
-		<fieldset className="repo-settings__roles" disabled={busy}>
-			<legend>Who may vote as each role that can block</legend>
-			<p className="muted">
-				Agent names, person:* for people, @org/team, or githive for GitHive's reviewers. Blank: people and GitHive's
-				reviewers.
-			</p>
-			{blocking.map((role) => (
-				<div key={role} className="repo-settings__field">
-					<label htmlFor={`grant-${role}`}>
-						<code>{role}</code>
-					</label>
-					<input
-						id={`grant-${role}`}
-						value={draft.grants[role] ?? ""}
-						onChange={(event) => update({ grants: { ...draft.grants, [role]: event.target.value } })}
-						placeholder="person:*, githive"
-						autoComplete="off"
-						spellCheck={false}
-					/>
-				</div>
-			))}
-		</fieldset>
+		<Fold open={blocking.length > 0} className="-mx-1 -mb-1">
+			<fieldset className="m-0 min-w-0 border-0 px-1 pt-0 pb-1" disabled={busy}>
+				<legend className="mb-1.5 p-0 font-semibold">Who may vote as each role that can block</legend>
+				<p className="mt-0 mb-2 text-muted-foreground">
+					Agent names, person:* for people, @org/team, or githive for GitHive's reviewers. Blank: people and GitHive's
+					reviewers.
+				</p>
+				{shown.map((role) => (
+					<SettingField key={role}>
+						<Label htmlFor={`grant-${role}`}>
+							<code>{role}</code>
+						</Label>
+						<Input
+							id={`grant-${role}`}
+							value={draft.grants[role] ?? ""}
+							onChange={(event) => update({ grants: { ...draft.grants, [role]: event.target.value } })}
+							placeholder="person:*, githive"
+							autoComplete="off"
+							spellCheck={false}
+						/>
+					</SettingField>
+				))}
+			</fieldset>
+		</Fold>
 	);
 }
 
@@ -185,34 +265,36 @@ function PathRules({ draft, update, busy }: DraftSectionProps) {
 	const removeRule = (index: number) =>
 		update({ escalate: draft.escalate.filter((_, ruleIndex) => ruleIndex !== index) });
 	const addRule = () => update({ escalate: [...draft.escalate, { paths: "", required: "", vetoes: "" }] });
+	// A rule added after the page showed unfolds into place.
+	const added = useArrivals(draft.escalate.map((_, index) => String(index)));
 
 	return (
-		<section className="box" aria-labelledby="settings-escalate">
-			<div className="box__header">
-				<h2 id="settings-escalate">Stricter rules for paths</h2>
-			</div>
-			<div className="box__body repo-settings__fields">
-				<p className="muted">
+		<SettingsSection id="settings-escalate" title="Stricter rules for paths">
+			<BoxBody className={SETTINGS_FIELDS}>
+				<p className="m-0 text-muted-foreground">
 					A change touching any of these paths needs at least this many approvals, and these roles can block it.
 				</p>
 				{draft.escalate.map((rule, index) => (
-					<PathRule
-						key={index}
-						rule={rule}
-						index={index}
-						busy={busy}
-						change={(patch) => changeRule(index, patch)}
-						remove={() => removeRule(index)}
-					/>
+					<Collapse key={index} open appear={added(String(index))} className="-m-1">
+						<div className="p-1">
+							<PathRule
+								rule={rule}
+								index={index}
+								busy={busy}
+								change={(patch) => changeRule(index, patch)}
+								remove={() => removeRule(index)}
+							/>
+						</div>
+					</Collapse>
 				))}
 				<div>
-					<button type="button" onClick={addRule} disabled={busy}>
+					<Button onClick={addRule} disabled={busy}>
 						<Icon name="plus" />
 						Add a rule
-					</button>
+					</Button>
 				</div>
-			</div>
-		</section>
+			</BoxBody>
+		</SettingsSection>
 	);
 }
 
@@ -226,11 +308,11 @@ interface PathRuleProps {
 
 function PathRule({ rule, index, busy, change, remove }: PathRuleProps) {
 	return (
-		<fieldset className="repo-settings__rule" disabled={busy}>
-			<legend>Rule {index + 1}</legend>
-			<div className="repo-settings__field">
-				<label htmlFor={`rule-${index}-paths`}>Paths</label>
-				<textarea
+		<fieldset className={RULE} disabled={busy}>
+			<legend className="px-1 text-ui font-semibold">Rule {index + 1}</legend>
+			<SettingField>
+				<Label htmlFor={`rule-${index}-paths`}>Paths</Label>
+				<Textarea
 					id={`rule-${index}-paths`}
 					rows={3}
 					value={rule.paths}
@@ -238,23 +320,24 @@ function PathRule({ rule, index, busy, change, remove }: PathRuleProps) {
 					placeholder={"package.json\n.github/"}
 					spellCheck={false}
 				/>
-			</div>
-			<div className="repo-settings__rule-grid">
-				<div className="repo-settings__field">
-					<label htmlFor={`rule-${index}-required`}>Approvals</label>
-					<input
+			</SettingField>
+			<div className="grid grid-cols-[1fr_110px_1fr] gap-2 to-560:grid-cols-1">
+				<SettingField>
+					<Label htmlFor={`rule-${index}-required`}>Approvals</Label>
+					<Input
 						id={`rule-${index}-required`}
 						type="number"
+						className="max-w-35"
 						min={0}
 						inputMode="numeric"
 						value={rule.required}
 						onChange={(event) => change({ required: event.target.value })}
 						placeholder="same"
 					/>
-				</div>
-				<div className="repo-settings__field">
-					<label htmlFor={`rule-${index}-vetoes`}>Can block</label>
-					<input
+				</SettingField>
+				<SettingField>
+					<Label htmlFor={`rule-${index}-vetoes`}>Can block</Label>
+					<Input
 						id={`rule-${index}-vetoes`}
 						value={rule.vetoes}
 						onChange={(event) => change({ vetoes: event.target.value })}
@@ -262,37 +345,28 @@ function PathRule({ rule, index, busy, change, remove }: PathRuleProps) {
 						autoComplete="off"
 						spellCheck={false}
 					/>
-				</div>
+				</SettingField>
 			</div>
-			<button type="button" className="link repo-settings__remove" onClick={remove}>
+			<Button variant="link" className={REMOVE} onClick={remove}>
 				Remove rule {index + 1}
-			</button>
+			</Button>
 		</fieldset>
 	);
 }
 
-function SaveErrors({ errors }: { errors: string[] }) {
-	if (!errors.length) return null;
-	return (
-		<ul className="repo-settings__errors" role="alert">
-			{errors.map((error) => (
-				<li key={error}>{error}</li>
-			))}
-		</ul>
-	);
-}
+const SAVED = "mt-0 mb-2 flex items-start gap-1.5 text-ui wrap-anywhere text-good";
 
 /** What the last save set, and any warnings the server gave with it. */
 function SavedNotice({ saved }: { saved: SavedMergeSettings }) {
 	const checks = saved.verify.length ? ` and pass ${counted(saved.verify.length, "check")}` : ", with no checks";
 	return (
-		<div role="status">
-			<p className="tone-good repo-settings__saved">
+		<div role="status" className="animate-appear">
+			<p className={SAVED}>
 				<Icon name="check" /> Saved. Merges from now on need {counted(saved.policy.required, "approval")}
 				{checks}.
 			</p>
 			{(saved.warnings ?? []).map((warning) => (
-				<p key={warning} className="repo-settings__saved muted">
+				<p key={warning} className={cn(SAVED, "text-muted-foreground")}>
 					<Icon name="alert" /> {warning}
 				</p>
 			))}

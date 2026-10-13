@@ -1,12 +1,14 @@
-import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useState } from "react";
+import { useFresh } from "../hooks/useFresh";
+import { useLeaving } from "../hooks/useLeaving";
 import { hexGrid, hexPoints } from "../lib/hexGeometry";
 import { agentChip, type Cell, type CellState, type HiveCells, LANDED_LATELY_MS } from "../lib/hiveCells";
-import type { GoalMotion } from "../lib/hiveMotion";
+import type { GoalMotion, Motion } from "../lib/hiveMotion";
 import { timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
 import type { HiveFilter } from "./HiveTab";
-import "./HiveMap.css";
 
 /** A cell's corner-to-center size, in px. */
 const RADIUS = 34;
@@ -59,6 +61,62 @@ const SUB_WORDS: Record<CellState, string> = {
 	free: "",
 };
 
+/**
+ * A cell in each state: its outline and tint, its name's color and its state's. Free cells are dim; the rest take
+ * their stage's color. Tints are fill opacities, not mixed colors: Chrome animates a color-mix() through garbage
+ * colors. A cell landed lately fades as the landing gets older (--fade from 1 to 0).
+ */
+const LOOK: Record<CellState, { shape: string; name: string; sub: string }> = {
+	free: { shape: "", name: "", sub: "" },
+	next: { shape: "stroke-border-strong [stroke-dasharray:4_3]", name: "", sub: "" },
+	building: {
+		shape: "fill-stage-building [fill-opacity:0.24] stroke-stage-building",
+		name: "fill-foreground",
+		sub: "fill-stage-building",
+	},
+	review: {
+		shape: "fill-stage-review [fill-opacity:0.09] stroke-stage-review [stroke-dasharray:5_3]",
+		name: "fill-foreground",
+		sub: "fill-stage-review",
+	},
+	approved: { shape: "fill-good [fill-opacity:0.1] stroke-good", name: "fill-foreground", sub: "fill-good" },
+	landing: {
+		shape: "fill-stage-landing [fill-opacity:0.18] stroke-stage-landing",
+		name: "fill-foreground",
+		sub: "fill-stage-landing",
+	},
+	revising: {
+		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
+		name: "fill-foreground",
+		sub: "fill-stage-asking",
+	},
+	asking: {
+		shape: "fill-stage-asking [fill-opacity:0.14] stroke-stage-asking",
+		name: "fill-foreground",
+		sub: "fill-stage-asking",
+	},
+	landed: {
+		shape:
+			"fill-stage-landed [fill-opacity:calc(0.06+0.18*var(--fade,1))] stroke-stage-landed [stroke-opacity:calc(0.3+0.45*var(--fade,1))]",
+		name: "",
+		sub: "fill-stage-landed",
+	},
+};
+
+/** What just happened in a cell, on its outline: a red or green flash, or a pulse. */
+const SHAPE_MOTION: Partial<Record<Motion, string>> = {
+	"changes-asked": "animate-hive-cell-flash-bad",
+	failed: "animate-hive-cell-flash-bad",
+	asking: "animate-hive-cell-flash-bad",
+	landed: "animate-hive-cell-flash-good",
+	checking: "animate-hive-cell-pulse",
+	approved: "animate-hive-cell-pulse",
+};
+
+// The SVG's words: in the map's mono face, or its sans one for states and chips, centered under their point.
+const NAME = "pointer-events-none font-mono text-[9px] font-normal";
+const SMALL = "pointer-events-none text-[7.5px]";
+
 export interface HiveMapProps {
 	repo: string;
 	branch: string;
@@ -100,7 +158,8 @@ export function HiveMap({
 	const pickedCell = picked
 		? cells?.clusters.flatMap((cluster) => cluster.cells).find((cell) => cell.key === picked)
 		: undefined;
-	const fresh = useFresh(!!cells);
+	// Whether a cell, chip or cluster has only just appeared: the map opens settled, and only what comes later arrives.
+	const fresh = useFresh(!!cells, FRESH_MS);
 	const laid = (cells?.clusters ?? []).map((cluster) => {
 		const grid = hexGrid(cluster.cells.length, columns, RADIUS, TOP);
 		const placed = cluster.cells.flatMap((cell, index) => {
@@ -109,31 +168,38 @@ export function HiveMap({
 		});
 		return { cluster, grid, placed };
 	});
-	const leaving = useLeaving(laid.flatMap((each) => each.placed));
+	// Cells drawn last time and gone now stay a moment where they were, to shrink away instead of vanishing.
+	const leaving = useLeaving(
+		laid.flatMap((each) => each.placed),
+		(each) => each.cell.key,
+		LEAVING_MS,
+	);
 	return (
-		<section className="hive-map" aria-labelledby="hive-map-title">
-			<div className="hive-map__head">
-				<h2 id="hive-map-title">The hive</h2>
-				<span className="muted">{branch}, opened up where agents work</span>
+		<section className="min-w-0" aria-labelledby="hive-map-title">
+			<div className="mb-1.5 flex items-baseline gap-2.5">
+				<h2 id="hive-map-title" className="m-0 text-lead">
+					The hive
+				</h2>
+				<span className="text-ui text-muted-foreground">{branch}, opened up where agents work</span>
 			</div>
-			{!cells ? <p className="muted">{status}</p> : null}
-			{cells && !cells.clusters.length ? <p className="muted">{branch} has no files yet.</p> : null}
-			<div className="hive-map__board" ref={boxRef}>
+			{!cells ? <p className="my-[1em] text-muted-foreground">{status}</p> : null}
+			{cells && !cells.clusters.length ? (
+				<p className="my-[1em] text-muted-foreground">{branch} has no files yet.</p>
+			) : null}
+			<div ref={boxRef}>
 				{laid.map(({ cluster, grid, placed }) => (
+					// A cluster that opens later (a folder agents start on) eases in.
 					<div
 						key={cluster.key || "~rest"}
-						className={[
-							"hive-map__cluster",
-							cluster.busy ? "hive-map__cluster--busy" : "",
-							fresh(`cluster:${cluster.key}`) ? "hive-map__cluster--fresh" : "",
-						]
-							.filter(Boolean)
-							.join(" ")}
+						className={cn(fresh(`cluster:${cluster.key}`) && "animate-hive-cluster-in")}
 					>
-						<h3>{cluster.label}</h3>
+						<h3 className="mx-0 mt-2.5 mb-0.5 text-[11px] font-bold tracking-[0.06em] text-muted-foreground uppercase">
+							{cluster.label}
+						</h3>
 						{/* The comb's height eases as cells come and go, so what's below doesn't jump. */}
-						<div className="hive-map__comb" style={{ height: grid.height }}>
+						<div className="[transition:height_0.45s_ease]" style={{ height: grid.height }}>
 							<svg
+								className="block overflow-visible"
 								viewBox={`0 0 ${grid.width} ${grid.height}`}
 								width={grid.width}
 								height={grid.height}
@@ -167,12 +233,14 @@ export function HiveMap({
 					</div>
 				))}
 			</div>
-			{cells?.more ? <p className="muted hive-map__note">and {counted(cells.more, "more cell")}</p> : null}
+			{cells?.more ? <p className={cn(NOTE, "text-muted-foreground")}>and {counted(cells.more, "more cell")}</p> : null}
 			{truncated ? (
-				<p className="muted hive-map__note">This repo is large: the map shows the first part of its tree.</p>
+				<p className={cn(NOTE, "text-muted-foreground")}>
+					This repo is large: the map shows the first part of its tree.
+				</p>
 			) : null}
 			{pickedCell && pickedCell.kind !== "files" && !pickedCell.planned ? (
-				<p className="hive-map__note">
+				<p className={NOTE}>
 					<code>{pickedCell.path}</code> · <a href={href.code(repo, pickedCell.path, branch)}>Open in Code</a>
 				</p>
 			) : null}
@@ -180,61 +248,14 @@ export function HiveMap({
 	);
 }
 
-/** How long something new keeps its arriving class, so a redraw mid-way doesn't cut its animation short. */
+// A line under the map.
+const NOTE = "mx-0 mt-1.5 mb-0 text-ui";
+
+/** How long something new keeps its arriving animation, so a redraw midway doesn't cut it short. */
 const FRESH_MS = 800;
 
-/**
- * Whether a cell, chip or cluster has only just appeared. What's there on the first draw with cells isn't: the map
- * opens settled, and only what comes later arrives.
- */
-function useFresh(ready: boolean): (key: string) => boolean {
-	const seen = useRef<Map<string, number> | null>(null);
-	const first = ready && seen.current === null;
-	if (first) seen.current = new Map();
-	const at = Date.now();
-	return (key) => {
-		const map = seen.current;
-		if (!map) return false;
-		const when = map.get(key);
-		if (when === undefined) {
-			map.set(key, first ? 0 : at);
-			return !first;
-		}
-		return at - when < FRESH_MS;
-	};
-}
-
-interface Placed {
-	cell: Cell;
-	cluster: string;
-	x: number;
-	y: number;
-}
-
-/** How long a cell that has gone stays to fade out where it was. */
+/** How long a cell that has gone stays to shrink away where it was. */
 const LEAVING_MS = 450;
-
-/** Cells drawn last time and gone now, kept a moment where they were so they fade instead of vanishing. */
-function useLeaving(placed: Placed[]): Placed[] {
-	const last = useRef(new Map<string, Placed>());
-	const [leaving, setLeaving] = useState<Placed[]>([]);
-	const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
-	useEffect(() => {
-		const now = new Map(placed.map((each) => [each.cell.key, each]));
-		const gone = [...last.current.values()].filter((each) => !now.has(each.cell.key));
-		last.current = now;
-		if (!gone.length) return;
-		setLeaving((current) => [...current.filter((each) => !now.has(each.cell.key)), ...gone]);
-		const timer = setTimeout(() => {
-			timers.current.delete(timer);
-			setLeaving((current) => current.filter((each) => !gone.includes(each)));
-		}, LEAVING_MS);
-		timers.current.add(timer);
-	});
-	useEffect(() => () => timers.current.forEach(clearTimeout), []);
-	const now = new Set(placed.map((each) => each.cell.key));
-	return leaving.filter((each) => !now.has(each.cell.key));
-}
 
 /** Whether the filter leaves a cell out: another agent's, or not the cell picked. */
 function dims(cell: Cell, filter: HiveFilter | null): boolean {
@@ -289,18 +310,9 @@ function HexCell({
 	onPick?(cell: Cell): void;
 	now: number;
 }) {
-	const className = [
-		"hive-cell",
-		`hive-cell--${cell.state}`,
-		cell.planned ? "hive-cell--planned" : "",
-		lit ? "hive-cell--lit" : "",
-		picked ? "hive-cell--picked" : "",
-		dim ? "hive-cell--dim" : "",
-		motion ? `hive-cell--m-${motion.motion}` : "",
-		leaving ? "hive-cell--leaving" : fresh(`cell:${cell.key}`) ? "hive-cell--fresh" : "",
-	]
-		.filter(Boolean)
-		.join(" ");
+	// A cell that appears grows in; one that goes shrinks away where it was.
+	const arriving = leaving ? "animate-hive-cell-out" : fresh(`cell:${cell.key}`) ? "animate-hive-cell-in" : "";
+	const look = LOOK[cell.state];
 	const age = cell.landed ? (now - (timeOf(cell.landed.at) ?? now)) / LANDED_LATELY_MS : 0;
 	// Drawn around its own center and moved into place, so a cell glides when the comb rearranges.
 	const style = {
@@ -317,10 +329,20 @@ function HexCell({
 	const extra = cell.agents.length - chips.length;
 	const chipY = -RADIUS + 3;
 	const chipX = (index: number, count: number) => (index - (count - 1) / 2) * 15;
-	const chipClass = (agent: string, more = "") =>
-		["hive-cell__chip", more, fresh(`chip:${cell.key}:${agent}`) ? "hive-cell__chip--fresh" : ""]
-			.filter(Boolean)
-			.join(" ");
+	// A chip that appears pops on; on a goal that has just arrived, in its turn in the burst.
+	const chipClass = (agent: string) => {
+		const isFresh = fresh(`chip:${cell.key}:${agent}`);
+		const pops = motion?.motion === "arrived" ? "animate-hive-chip-arrive" : isFresh ? "animate-hive-chip-in" : "";
+		return cn("origin-center [transform-box:fill-box]", pops);
+	};
+	const chip = (landed = false, more = false) => ({
+		circle: cn(
+			"stroke-1",
+			landed ? "fill-background stroke-stage-landed" : "fill-surface-3 stroke-foreground",
+			more && "[stroke-dasharray:2_2]",
+		),
+		text: cn(SMALL, "font-sans font-bold", landed ? "fill-stage-landed" : "fill-foreground"),
+	});
 	const keys = (event: KeyboardEvent) => {
 		if (event.key === "Enter" || event.key === " ") {
 			event.preventDefault();
@@ -342,44 +364,91 @@ function HexCell({
 				onKeyDown: keys,
 			};
 	return (
-		<g className={className} style={style} {...interactive}>
+		<g
+			data-state={cell.state}
+			className={cn(
+				// Each cell is moved into place by its transform, so it glides when the comb rearranges.
+				"group cursor-pointer outline-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]",
+				dim && "opacity-30",
+				leaving && "pointer-events-none",
+			)}
+			style={style}
+			{...interactive}
+		>
 			{leaving ? null : <title>{label}</title>}
-			<g className="hive-cell__in">
-				<polygon className="hive-cell__shape" points={hexPoints(0, 0, RADIUS - GAP)} />
-				{cell.state === "landing" ? <circle className="hive-cell__lamp" cx={0} cy={20} r={3.5} /> : null}
+			<g className={cn("origin-center [transform-box:fill-box]", arriving)}>
+				<polygon
+					className={cn(
+						"fill-card stroke-border stroke-[1.5]",
+						"[transition:fill_0.4s_ease,fill-opacity_0.4s_ease,stroke_0.4s_ease,stroke-opacity_0.4s_ease,stroke-width_0.2s_ease]",
+						look.shape,
+						"group-hover:stroke-3 group-focus-visible:stroke-3",
+						lit && "stroke-3",
+						picked && "stroke-foreground stroke-3",
+						motion && SHAPE_MOTION[motion.motion],
+					)}
+					points={hexPoints(0, 0, RADIUS - GAP)}
+				/>
+				{cell.state === "landing" ? (
+					<circle className="animate-hive-cell-blink fill-stage-landing" cx={0} cy={20} r={3.5} />
+				) : null}
 				{cell.parent ? (
-					<text className="hive-cell__parent" x={0} y={-10}>
+					<text
+						className="pointer-events-none fill-muted-foreground font-mono text-[7.5px] opacity-80"
+						textAnchor="middle"
+						x={0}
+						y={-10}
+					>
 						{fitParent(cell.parent)}
 					</text>
 				) : null}
-				<text className="hive-cell__name" x={0} y={sub ? 2 : 4}>
+				<text className={cn(NAME, look.name || "fill-muted-foreground")} textAnchor="middle" x={0} y={sub ? 2 : 4}>
 					{fitName(cell.name)}
 				</text>
 				{sub ? (
-					<text className="hive-cell__sub" x={0} y={13}>
+					<text
+						className={cn(
+							SMALL,
+							"font-sans font-semibold tracking-[0.04em] uppercase",
+							look.sub || "fill-muted-foreground",
+						)}
+						textAnchor="middle"
+						x={0}
+						y={13}
+					>
 						{sub}
 					</text>
 				) : null}
 				{chips.map((agent, index) => (
 					<g key={agent} className={chipClass(agent)}>
-						<circle cx={chipX(index, chips.length + (extra ? 1 : 0))} cy={chipY} r={7.5} />
-						<text x={chipX(index, chips.length + (extra ? 1 : 0))} y={chipY + 3}>
+						<circle className={chip().circle} cx={chipX(index, chips.length + (extra ? 1 : 0))} cy={chipY} r={7.5} />
+						<text
+							className={chip().text}
+							textAnchor="middle"
+							x={chipX(index, chips.length + (extra ? 1 : 0))}
+							y={chipY + 3}
+						>
 							{agentChip(agent)}
 						</text>
 					</g>
 				))}
 				{extra ? (
-					<g className={chipClass("+more", "hive-cell__chip--more")}>
-						<circle cx={chipX(chips.length, chips.length + 1)} cy={chipY} r={7.5} />
-						<text x={chipX(chips.length, chips.length + 1)} y={chipY + 3}>
+					<g className={chipClass("+more")}>
+						<circle
+							className={chip(false, true).circle}
+							cx={chipX(chips.length, chips.length + 1)}
+							cy={chipY}
+							r={7.5}
+						/>
+						<text className={chip().text} textAnchor="middle" x={chipX(chips.length, chips.length + 1)} y={chipY + 3}>
 							+{extra}
 						</text>
 					</g>
 				) : null}
 				{!chips.length && cell.landed ? (
-					<g className={chipClass(`landed:${cell.landed.agent}`, "hive-cell__chip--landed")}>
-						<circle cx={0} cy={chipY} r={7.5} />
-						<text x={0} y={chipY + 3}>
+					<g className={chipClass(`landed:${cell.landed.agent}`)}>
+						<circle className={chip(true).circle} cx={0} cy={chipY} r={7.5} />
+						<text className={chip(true).text} textAnchor="middle" x={0} y={chipY + 3}>
 							{agentChip(cell.landed.agent)}
 						</text>
 					</g>

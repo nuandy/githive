@@ -41,7 +41,7 @@ describe("the Inbox", () => {
 		const { groups } = buildInbox(summaries);
 		const html = renderToStaticMarkup(<InboxPage groups={groups} loaded />);
 		expect(html).toContain('<a href="#/repos/acme/my-app">acme/my-app</a>');
-		expect(html).toContain('<a href="#/repos/acme/my-app/changes/fix-login" class="inbox__title">Fix login</a>');
+		expect(html).toMatch(/<a href="#\/repos\/acme\/my-app\/changes\/fix-login" class="[^"]*">Fix login<\/a>/);
 		expect(html).toContain("Reviewers disagree after 3 revisions");
 	});
 
@@ -50,8 +50,8 @@ describe("the Inbox", () => {
 		const bar = renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={3} />);
 		expect(bar).toContain('href="#/inbox"');
 		expect(bar).toContain('aria-label="Inbox, 3 waiting on you"');
-		expect(bar).toMatch(/topbar__inbox-count">3</);
-		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toContain("topbar__inbox-count");
+		expect(bar).toMatch(/Inbox<\/span><span[^>]*>3<\/span>/);
+		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toMatch(/Inbox<\/span><span/);
 	});
 });
 
@@ -66,7 +66,7 @@ describe("Agents", () => {
 
 describe("the repo header", () => {
 	it("shows a live dot while connected or reconnecting, and the repo's tabs", () => {
-		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/live-dot--live.*Live/);
+		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/title="Connected: [^"]*".*Live/);
 		expect(renderToStaticMarkup(<LiveDot status="reconnecting" />)).toContain("Reconnecting");
 		expect(renderToStaticMarkup(<LiveDot status="off" />)).toBe("");
 		const page = renderToStaticMarkup(
@@ -78,7 +78,7 @@ describe("the repo header", () => {
 				api={stubApi()}
 			/>,
 		);
-		expect(page).toContain("live-dot--live");
+		expect(page).toMatch(/title="Connected: [^"]*".*>Live</);
 		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"])
 			expect(page).toContain(`<span>${tab}</span>`);
 		expect(page).not.toMatch(/elected|Insights|Activity/);

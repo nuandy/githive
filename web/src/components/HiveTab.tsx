@@ -9,7 +9,6 @@ import { DemoBanner } from "./DemoRun";
 import { GoalsPanel } from "./GoalsPanel";
 import { HiveMap } from "./HiveMap";
 import { HiveStrip } from "./HiveStrip";
-import "./HiveTab.css";
 
 export interface HiveApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
@@ -136,7 +135,7 @@ export function Hive(props: HiveProps) {
 		: undefined;
 	const litGoals = new Set(hoveredCell?.goals ?? []);
 	return (
-		<div className="hive-tab">
+		<div className="grid gap-4">
 			<HiveStrip
 				repo={repo}
 				goals={goals}
@@ -148,8 +147,10 @@ export function Hive(props: HiveProps) {
 				since={since}
 				now={now}
 			/>
-			<div className="hive-tab__body">
-				<div className="hive-tab__map">
+			{/* The hive beside the goals; on narrow screens, under them. */}
+			<div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start gap-5 to-1100:grid-cols-[minmax(0,1fr)]">
+				{/* The map stays in view while the goals scroll past it. */}
+				<div className="sticky top-[calc(var(--topbar-height)+12px)] to-1100:static to-1100:order-2">
 					<HiveMap
 						repo={repo}
 						branch={branch}

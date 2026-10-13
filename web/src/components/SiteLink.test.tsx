@@ -26,9 +26,9 @@ describe("a repo's site", () => {
 					access={access(visibility)}
 				/>,
 			);
-		expect(page("public")).toMatch(/<a class="site-link" href="\/site\/acme\/docs-site\/" target="_blank"[^>]*>/);
+		expect(page("public")).toMatch(/<a class="[^"]*" href="\/site\/acme\/docs-site\/" target="_blank"[^>]*>/);
 		expect(page("public")).toContain("View site");
-		expect(page("private")).not.toContain("site-link");
+		expect(page("private")).not.toContain('href="/site/');
 	});
 
 	it("is previewed as a change has it, once something's pushed, only where the repo's is served", () => {
@@ -45,6 +45,6 @@ describe("a repo's site", () => {
 				/>,
 			);
 		expect(page(true)).toMatch(/href="\/site\/acme\/docs-site\/@c-1\/"[^>]*>.*Preview/);
-		expect(page(false)).not.toContain("site-link");
+		expect(page(false)).not.toContain('href="/site/');
 	});
 });

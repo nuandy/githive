@@ -55,19 +55,20 @@ describe("the hive map", () => {
 		const html = render();
 		expect(visibleText(html)).toContain("test/ · 2 agents at work");
 		expect(html).toMatch(
-			/class="hive-cell hive-cell--building"[^>]*role="button" tabindex="0" aria-label="test\/res.links.js: building, agent-19 at work"/,
+			/data-state="building"[^>]*role="button" tabindex="0" aria-label="test\/res.links.js: building, agent-19 at work"/,
 		);
-		expect(html).toMatch(/hive-cell--landing[^>]*aria-label="test\/res.type.js: landing, agent-16 at work"/);
-		expect(html).toContain('class="hive-cell__lamp"');
-		expect(html).toMatch(/hive-cell--landed[^>]*aria-label="test\/req.is.js: agent-7 landed a change here lately"/);
+		expect(html).toMatch(/data-state="landing"[^>]*aria-label="test\/res.type.js: landing, agent-16 at work"/);
+		// Its blinking lamp.
+		expect(html).toMatch(/<circle class="[^"]*animate-hive-cell-blink[^"]*"/);
+		expect(html).toMatch(/data-state="landed"[^>]*aria-label="test\/req.is.js: agent-7 landed a change here lately"/);
 		// The agents' chips: their numbers.
-		expect(html).toMatch(/hive-cell__chip"><circle[^>]*><\/circle><text[^>]*>19<\/text>/);
+		expect(html).toMatch(/<circle [^>]*r="7.5"><\/circle><text[^>]*>19<\/text>/);
 	});
 
 	it("dims what an agent filter leaves out", () => {
 		const html = render({ filter: { kind: "agent", agent: "agent-16" } });
-		expect(html).toMatch(/hive-cell--building hive-cell--dim[^>]*aria-label="test\/res.links.js/);
-		expect(html).not.toMatch(/hive-cell--landing hive-cell--dim/);
+		expect(html).toMatch(/data-state="building" class="[^"]*\bopacity-30\b[^>]*aria-label="test\/res.links.js/);
+		expect(html).not.toMatch(/data-state="landing" class="[^"]*\bopacity-30\b/);
 	});
 
 	it("says while the tree loads, when it can't be read, and when the branch is empty", () => {

@@ -29,7 +29,11 @@ export default defineConfig({
 	plugins: [compiledWasm, browserCheckText],
 	resolve: {
 		// Durable Object classes import cloudflare:workers; tests run them in Node with a stand-in.
-		alias: { "cloudflare:workers": fileURLToPath(new URL("./test/fakes/cloudflare-workers.ts", import.meta.url)) },
+		alias: {
+			"cloudflare:workers": fileURLToPath(new URL("./test/fakes/cloudflare-workers.ts", import.meta.url)),
+			// The dashboard's own alias (web/vite.config.ts), which components the shadcn CLI adds import through.
+			"@": fileURLToPath(new URL("./web/src", import.meta.url)),
+		},
 	},
 	// node:sqlite stands in for D1 in tests; Node 22 still keeps it behind a flag.
 	test: {

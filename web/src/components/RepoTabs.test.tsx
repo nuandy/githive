@@ -63,10 +63,12 @@ describe("a repo", () => {
 				/>,
 			);
 		const flat = page("on demand");
-		expect(flat).toMatch(/class="pill pill--outline mode-badge"[^>]*>One claims record/);
+		// One record is a quiet outline; sharded stands out in the link's blue.
+		expect(flat).toMatch(/class="[^"]*\btext-muted-foreground\b[^"]*"[^>]*>One claims record/);
+		expect(flat).not.toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>One claims record/);
 		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
 		const sharded = page({ since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" });
-		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
+		expect(sharded).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
 		const votes = renderToStaticMarkup(
 			<RepoPage
@@ -80,7 +82,7 @@ describe("a repo", () => {
 				api={stubApi()}
 			/>,
 		);
-		expect(votes).toMatch(/mode-badge--sharded"[^>]*>Sharded votes/);
+		expect(votes).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded votes/);
 		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
 		// Older servers don't say: no badge, no line.
 		const older = page(undefined);
@@ -99,15 +101,19 @@ describe("a repo", () => {
 		const html = renderToStaticMarkup(
 			<ChangeList snapshot={{ ...snapshot, claims }} repo="acme/docs-site" now={now} />,
 		);
-		const rows = html.split('<li class="change-row">').slice(1);
-		expect(rows.map((row) => row.match(/change-row__id">([^<]+)/)?.[1])).toEqual(["c-3", "c-2", "c-1"]);
+		const rows = html.split("<li ").slice(1);
+		expect(rows.map((row) => row.match(/<span class="font-mono text-caption">([^<]+)<\/span>/)?.[1])).toEqual([
+			"c-3",
+			"c-2",
+			"c-1",
+		]);
 		expect(rows[2]).toMatch(
-			/class="change-row__lease" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
+			/class="(?![^"]*\btext-warn\b)[^"]*" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
 		);
 		// Past its time, anyone may take it: said in the warning tone.
-		expect(rows[1]).toMatch(/class="change-row__lease tone-warn"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
+		expect(rows[1]).toMatch(/class="[^"]*\btext-warn\b[^"]*"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
 		// Waiting on review, it never frees: the list says nothing, the change's page says why.
-		expect(rows[0]).not.toContain("change-row__lease");
+		expect(rows[0]).not.toMatch(/[Ff]ree (after|since)/);
 	});
 
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
@@ -127,7 +133,7 @@ describe("a repo", () => {
 		expect(html).toContain("1 of 2 approvals");
 		expect(html).toMatch(/Builder working \(revision 1\)/);
 		expect(html).toMatch(/security.*reject/);
-		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
+		expect(html).toMatch(/Commits<\/span><span data-slot="counter"[^>]*>2<\/span>/);
 		// An agent's question for a person, and a person's vote form.
 		const asked = {
 			...snapshot.claims[0]!,

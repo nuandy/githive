@@ -3,23 +3,27 @@ import { type ReactNode, useState } from "react";
 import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
 import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { identityName } from "../lib/agent";
-import type { ChangeStatus } from "../lib/changeStatus";
+import type { ChangeStatus, Tone } from "../lib/changeStatus";
 import { claimApprovalLabel, claimStatus, votesForClaim, type Claim } from "../lib/claimStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { buildTimeline, changeEnding, historyStatus } from "../lib/changeTimeline";
+import { cn } from "../lib/utils";
 import { Awareness } from "./Awareness";
 import { ChangeCommits } from "./Commits";
 import { ConflictPanel } from "./ConflictPanel";
 import { Icon, type IconName } from "./Icon";
 import { Tabs } from "./Tabs";
-import { Timeline } from "./Timeline";
+import { Timeline, TimelineEntry, TimelineList } from "./Timeline";
 import { ChangeSidebar, type ChangeRecord } from "./ChangeSidebar";
 import { StatusPill } from "./StatusPill";
-import "./ChangePage.css";
-import "./ChangeActions.css";
+import { Badge } from "./ui/badge";
+import { Box, Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Empty } from "./ui/empty";
 
 export interface ChangePageProps {
 	snapshot: RepoSnapshot;
@@ -87,17 +91,29 @@ function GiveUpButton({
 		}
 	};
 	return (
-		<div className="change-merge">
-			<button
-				type="button"
+		<HeaderAction outcome={outcome}>
+			<Button
 				onClick={giveUpChange}
 				disabled={busy}
 				title="Releases its claim, so its paths are free; GitHive brings GitHub's changes back when GitHub's branch moves"
 			>
 				{busy ? "Giving up…" : "Give up GitHub's changes"}
-			</button>
+			</Button>
+		</HeaderAction>
+	);
+}
+
+/** A person's action beside the change's status, and what came of it, which fades in. */
+function HeaderAction({ outcome, children }: { outcome: { ok: boolean; text: string } | null; children: ReactNode }) {
+	return (
+		<div className="inline-flex flex-wrap items-center gap-x-3 gap-y-2">
+			{children}
 			{outcome ? (
-				<p className={outcome.ok ? "tone-good" : "error"} role="status">
+				<p
+					key={outcome.text}
+					className={cn("m-0 animate-appear text-ui-lg", outcome.ok ? "text-good" : "text-bad")}
+					role="status"
+				>
 					{outcome.text}
 				</p>
 			) : null}
@@ -142,16 +158,11 @@ function MergeButton({
 		}
 	};
 	return (
-		<div className="change-merge">
-			<button type="button" className="primary" onClick={mergeChange} disabled={busy}>
+		<HeaderAction outcome={outcome}>
+			<Button variant="go" onClick={mergeChange} disabled={busy}>
 				{busy ? "Merging… (its checks run first)" : "Merge"}
-			</button>
-			{outcome ? (
-				<p className={outcome.ok ? "tone-good" : "error"} role="status">
-					{outcome.text}
-				</p>
-			) : null}
-		</div>
+			</Button>
+		</HeaderAction>
 	);
 }
 
@@ -186,46 +197,46 @@ function ChangeHeadline({
 	return (
 		<>
 			<strong>{agent}</strong> wants to merge {branchCode} into {into}
-			{record?.since ? <span className="muted"> · opened {timeAgo(record.since)}</span> : null}
+			{record?.since ? <span className="text-muted-foreground"> · opened {timeAgo(record.since)}</span> : null}
 		</>
 	);
 }
 
+/** Beside the conversation's column, indented past its avatars; flush with it on a narrow window. */
+const INDENT = "ml-11 to-720:ml-0";
+
 /** A question the change's agent put to people, answered by voting. */
 function AttentionCallout({ attention }: { attention: NonNullable<Claim["attention"]> }) {
 	return (
-		<div className="callout callout--needs" role="status">
-			<Icon name="alert" className="tone-needs" />
+		<Callout tone="needs" role="status" className={INDENT}>
+			<Icon name="alert" className="text-needs" />
 			<div>
 				<strong>{attention.agent} asks you</strong>
 				<p>{attention.reason}</p>
-				<p className="muted">Decide with your vote below: it counts like a reviewer's and answers the question.</p>
+				<p className="text-muted-foreground">
+					Decide with your vote below: it counts like a reviewer's and answers the question.
+				</p>
 			</div>
-		</div>
+		</Callout>
 	);
 }
 
 /** Before the history is in: the latest push only. */
 function LatestPush({ head }: { head: string | null | undefined }) {
 	return (
-		<ol className="timeline">
-			<li className="timeline__item">
-				<span className="timeline__badge" aria-hidden="true">
-					<Icon name="commit" size={14} />
-				</span>
-				<div className="timeline__content">
-					<p className="timeline__line">
-						{head ? (
-							<>
-								latest push <code className="timeline__sha">{shortSha(head)}</code>
-							</>
-						) : (
-							"nothing pushed yet"
-						)}
-					</p>
-				</div>
-			</li>
-		</ol>
+		<TimelineList>
+			<TimelineEntry icon="commit">
+				<p className="m-0 wrap-anywhere">
+					{head ? (
+						<>
+							latest push <code className="text-caption">{shortSha(head)}</code>
+						</>
+					) : (
+						"nothing pushed yet"
+					)}
+				</p>
+			</TimelineEntry>
+		</TimelineList>
 	);
 }
 
@@ -235,36 +246,77 @@ function approvalIcon(approval: Claim["approval"]): IconName {
 	return "eye";
 }
 
+/** The merge box's lamp, by how the change stands; neutral, or the link's tone, is grey. */
+const MERGE_ICON: Partial<Record<Tone, string>> = {
+	good: "bg-good text-white",
+	bad: "bg-bad text-white",
+	warn: "bg-warn-soft text-warn",
+	needs: "bg-needs text-white",
+};
+
+/** The box under the conversation saying where the change stands: its lamp, a line in bold, and a muted line. */
+function MergeBox({
+	tone,
+	icon,
+	merged = false,
+	title,
+	children,
+}: {
+	tone: Tone;
+	icon: IconName;
+	merged?: boolean;
+	title: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<section
+			className={cn("relative rounded-md border border-border bg-card", INDENT, merged && "border-good/45")}
+			aria-label="Merge status"
+		>
+			<div className="flex items-start gap-3 px-4 py-3">
+				<span
+					className={cn(
+						"inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-soft text-neutral",
+						"transition-colors duration-base",
+						MERGE_ICON[tone],
+					)}
+					aria-hidden="true"
+				>
+					<Icon name={icon} />
+				</span>
+				<div className="min-w-0 pt-0.75 wrap-anywhere">
+					<strong>{title}</strong>
+					<div className="mt-px text-ui text-muted-foreground">{children}</div>
+				</div>
+			</div>
+		</section>
+	);
+}
+
 /** Where a change in force stands: its approvals, and what it waits on. */
 function ClaimMergeBox({ claim }: { claim: Claim }) {
 	const { approval } = claim;
 	const approvalLabel = claimApprovalLabel(claim);
 	const waitingNote = !approval.approved && approvalLabel.startsWith("Waiting") ? ` · ${approvalLabel}` : "";
 	return (
-		<section className="merge-box" aria-label="Merge status">
-			<div className="merge-box__row">
-				<span className={`merge-box__icon merge-box__icon--${claimStatus(claim).tone}`} aria-hidden="true">
-					<Icon name={approvalIcon(approval)} />
-				</span>
-				<div className="merge-box__text">
-					<strong>
-						{claim.trusted ? (
-							approvalLabel
-						) : (
-							<>
-								{approval.approvals} of {approval.required} approvals
-								{waitingNote}
-							</>
-						)}
-					</strong>
-					<div className="muted">
-						{claim.attention
-							? `Waiting on your decision: ${claim.attention.agent}'s question is above.`
-							: claimStatus(claim).description}
-					</div>
-				</div>
-			</div>
-		</section>
+		<MergeBox
+			tone={claimStatus(claim).tone}
+			icon={approvalIcon(approval)}
+			title={
+				claim.trusted ? (
+					approvalLabel
+				) : (
+					<>
+						{approval.approvals} of {approval.required} approvals
+						{waitingNote}
+					</>
+				)
+			}
+		>
+			{claim.attention
+				? `Waiting on your decision: ${claim.attention.agent}'s question is above.`
+				: claimStatus(claim).description}
+		</MergeBox>
 	);
 }
 
@@ -272,29 +324,24 @@ function ClaimMergeBox({ claim }: { claim: Claim }) {
 function EndingMergeBox({ ending, branch, repo }: { ending: ChangeEnding; branch: string; repo: string }) {
 	const merged = ending.kind === "merged";
 	return (
-		<section className={`merge-box${merged ? " merge-box--merged" : ""}`} aria-label="Merge status">
-			<div className="merge-box__row">
-				<span className={`merge-box__icon merge-box__icon--${merged ? "good" : "neutral"}`} aria-hidden="true">
-					<Icon name={merged ? "merge" : "ban"} />
-				</span>
-				<div className="merge-box__text">
-					<strong>{merged ? `Merged into ${branch}` : "Claim released"}</strong>
-					<div className="muted">
-						{merged ? (
-							<>
-								As{" "}
-								<a href={href.code(repo, "", ending.release.mergedAs)}>
-									<code>{shortSha(ending.release.mergedAs)}</code>
-								</a>
-								.
-							</>
-						) : (
-							ending.release.reason || "Its paths are free again."
-						)}
-					</div>
-				</div>
-			</div>
-		</section>
+		<MergeBox
+			tone={merged ? "good" : "neutral"}
+			icon={merged ? "merge" : "ban"}
+			merged={merged}
+			title={merged ? `Merged into ${branch}` : "Claim released"}
+		>
+			{merged ? (
+				<>
+					As{" "}
+					<a href={href.code(repo, "", ending.release.mergedAs)}>
+						<code>{shortSha(ending.release.mergedAs)}</code>
+					</a>
+					.
+				</>
+			) : (
+				ending.release.reason || "Its paths are free again."
+			)}
+		</MergeBox>
 	);
 }
 
@@ -315,39 +362,64 @@ function MergeStatus({
 }
 
 /** While a change loads, or when the repo has no change by that name. */
-function ChangeMissing({ changeId, repo, loading }: { changeId: string; repo: string; loading: boolean }) {
+function ChangeMissing({
+	changeId,
+	repo,
+	loading,
+	fades,
+}: {
+	changeId: string;
+	repo: string;
+	loading: boolean;
+	/** Whether it comes once the change was looked for, rather than with the page. */
+	fades: boolean;
+}) {
 	if (loading)
 		return (
-			<p className="muted" role="status">
+			<p className="my-[1em] text-muted-foreground" role="status">
 				Loading {changeId}…
 			</p>
 		);
 	return (
-		<div className="box empty">
-			<Icon name="alert" size={28} className="muted" />
-			<h2>Change not found</h2>
-			<p>
-				{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo, "changes")}>See open changes</a>.
-			</p>
-		</div>
+		<Box asChild>
+			<Empty className={cn(fades && "animate-fade")}>
+				<Icon name="alert" size={28} />
+				<h2>Change not found</h2>
+				<p>
+					{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo, "changes")}>See open changes</a>.
+				</p>
+			</Empty>
+		</Box>
 	);
 }
 
 /** The agent's opening of the change: when, which paths it claims, and its intent. */
 function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord | undefined }) {
 	return (
-		<article className="comment comment--outside">
-			<div className="comment__header">
+		<article className={cn("relative min-w-0 rounded-md border border-border bg-card", INDENT)}>
+			{/* Its author's avatar, out in the margin the column is indented by. */}
+			<span
+				className="absolute top-3 -left-11 inline-flex size-8 items-center justify-center rounded-full bg-link-soft text-[#b86e00] to-720:hidden"
+				aria-hidden="true"
+			>
+				<Icon name="user" />
+			</span>
+			<div className="rounded-t-md border-b border-border bg-link-soft px-3.5 py-2.25 wrap-anywhere">
 				<strong>{agent}</strong>{" "}
-				<span className="muted">
+				<span className="text-muted-foreground">
 					opened this change{record?.since ? ` ${timeAgo(record.since)}` : ""}
 					{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
 				</span>
 			</div>
-			<div className="comment__body">{record?.intent || <span className="muted">No description provided.</span>}</div>
+			<div className="p-3.5 whitespace-pre-wrap wrap-anywhere">
+				{record?.intent || <span className="text-muted-foreground">No description provided.</span>}
+			</div>
 		</article>
 	);
 }
+
+/** A branch named in the header, in the link's blue. */
+const BRANCH = "bg-link-soft text-caption text-link";
 
 /** A change, shown like a pull request: in force, merged or released. */
 export function ChangePage({
@@ -372,33 +444,53 @@ export function ChangePage({
 	const title = (record?.intent ?? "").split("\n")[0]?.trim() || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	// A change merging a whole branch shows that branch; any other, its own.
-	const branchCode = <code className="change-header__branch">{claim?.source ?? `changes/${changeId}`}</code>;
-	const into = <code className="change-header__branch">{branch}</code>;
+	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
+	const into = <code className={BRANCH}>{branch}</code>;
 	const timeline = history ? buildTimeline(history, repo).filter((item) => item.kind !== "opened") : [];
 	const mergeable = claim && merge && claim.approval.approved && !claim.waitsOn?.length;
+	// What comes once it's read fades in: the change in place of "Loading…", its history in place of the latest push,
+	// and the other tab's content; what's there from the start comes with the page's own fade.
+	const missing = !record && !ending;
+	const pageFades = useChanged(missing);
+	const historyFades = useChanged(history === undefined);
+	const tabFades = useChanged(tab);
 
-	if (!record && !ending) return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} />;
+	if (missing)
+		return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} fades={historyFades} />;
+	const loaded = historyFades && "animate-fade";
 
 	// What its agent hears about it while its claim is in force: a conflict with its branch, and other changes' code.
 	const heard =
 		claim && history ? (
 			<>
-				{history.merge ? <ConflictPanel merge={history.merge} head={claim.head} repo={repo} /> : null}
+				{history.merge ? (
+					<ConflictPanel merge={history.merge} head={claim.head} repo={repo} className={cn(INDENT, loaded)} />
+				) : null}
 				{history.awareness ? (
-					<Awareness awareness={history.awareness} claims={snapshot.claims} head={claim.head} repo={repo} />
+					<Awareness
+						awareness={history.awareness}
+						claims={snapshot.claims}
+						head={claim.head}
+						repo={repo}
+						className={cn(INDENT, loaded)}
+					/>
 				) : null}
 			</>
 		) : null;
 
 	const conversation = (
-		<div className="change-layout">
-			<div className="change-layout__main">
+		<div className="grid grid-cols-[minmax(0,1fr)_260px] items-start gap-8 to-900:grid-cols-[minmax(0,1fr)] to-900:gap-6">
+			<div className="grid min-w-0 gap-3.5">
 				{claim?.attention ? <AttentionCallout attention={claim.attention} /> : null}
 				<OpeningComment agent={agent} record={record} />
-				{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
-				{history ? <Timeline items={timeline} /> : <LatestPush head={claim?.head} />}
+				{history === undefined ? (
+					<p className="m-0 ml-11 text-ui text-muted-foreground to-720:ml-0">Loading history…</p>
+				) : null}
+				{history ? <Timeline items={timeline} className={cn(loaded)} /> : <LatestPush head={claim?.head} />}
 				{heard}
-				{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
+				{claim && api && canVote ? (
+					<VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} className={INDENT} />
+				) : null}
 				<MergeStatus claim={claim} ending={ending} branch={branch} repo={repo} />
 			</div>
 			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
@@ -406,23 +498,23 @@ export function ChangePage({
 	);
 	const commits =
 		history === null ? (
-			<p className="muted">This change's commits couldn't be read.</p>
+			<p className="my-[1em] text-muted-foreground">This change's commits couldn't be read.</p>
 		) : (
 			<ChangeCommits history={history} repo={repo} />
 		);
 
 	return (
-		<div className="change-page">
-			<div className="change-header">
-				<h1 className="change-header__title">
-					{title} <span className="change-header__id">{changeId}</span>
+		<div className={cn(pageFades && "animate-fade")}>
+			<div className="pb-3.5">
+				<h1 className="text-display leading-[1.25] font-medium tracking-[-0.01em] wrap-anywhere to-720:text-[21px]">
+					{title} <span className="font-mono text-[0.72em] font-light text-muted-foreground">{changeId}</span>
 				</h1>
-				<div className="change-header__meta">
+				<div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-muted-foreground wrap-anywhere [&_strong]:text-foreground">
 					{status ? <StatusPill status={status} size="lg" solid /> : null}
 					<span>
 						<ChangeHeadline agent={agent} ending={ending} record={record} branchCode={branchCode} into={into} />
 					</span>
-					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
+					{claim?.waitsOn?.length ? <Badge tone="warn">waits on {claim.waitsOn.join(", ")}</Badge> : null}
 					{mergeable ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
 					{previewable && claim?.head ? <SiteLink repo={repo} change={changeId} /> : null}
 					{claim && giveUp && isGitHubClaim(claim) ? (
@@ -444,7 +536,9 @@ export function ChangePage({
 					},
 				]}
 			/>
-			<div className="change-page__body">{tab === "commits" ? commits : conversation}</div>
+			<div key={tab} className={cn("pt-5", tabFades && "animate-fade")}>
+				{tab === "commits" ? commits : conversation}
+			</div>
 		</div>
 	);
 }

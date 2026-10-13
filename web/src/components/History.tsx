@@ -1,11 +1,15 @@
 import type { BranchHistory, LandedChange } from "../api";
+import { useArrivals } from "../hooks/useArrivals";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
-import { shortSha } from "../lib/model";
+import { useStagger } from "../hooks/useStagger";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
+import { COMMIT_LIST, COMMIT_META, COMMIT_SUBJECT, CommitRow, CommitsBox } from "./Commits";
 import { Icon } from "./Icon";
-import "./Commits.css";
-import "./History.css";
+import { Box } from "./ui/box";
+import { Empty } from "./ui/empty";
 
 export interface HistoryApi {
 	history?: (repo: string, branch: string) => Promise<BranchHistory>;
@@ -26,82 +30,106 @@ export interface HistoryProps {
 }
 
 export function History({ repo, history, error }: HistoryProps) {
+	// What loads fades in where "Loading" was: the changes, that there are none, or that they couldn't be read.
+	const phase = history ? (history.changes.length ? "list" : "empty") : error ? "error" : "loading";
+	const fades = useChanged(phase) && "animate-fade";
 	if (!history) {
 		const status = error ? "The history couldn't be loaded." : "Loading history…";
 		return (
-			<p className="muted" role="status">
+			<p key={phase} className={cn("my-3.75 text-muted-foreground", fades)} role="status">
 				{status}
 			</p>
 		);
 	}
 	if (!history.changes.length) {
 		return (
-			<div className="box empty">
-				<Icon name="commit" size={28} className="muted" />
-				<h2>Nothing has landed on {history.branch} yet</h2>
-				<p>Each change that lands shows here, with why it was made and who reviewed it.</p>
-			</div>
+			<Box asChild className={cn(fades)}>
+				<Empty>
+					<Icon name="commit" size={28} />
+					<h2>Nothing has landed on {history.branch} yet</h2>
+					<p>Each change that lands shows here, with why it was made and who reviewed it.</p>
+				</Empty>
+			</Box>
 		);
 	}
 	const shown = history.changes.length;
 	const more = history.total - shown;
 	return (
-		<section className="box commits history" aria-labelledby="history-title">
-			<div className="box__header">
-				<h2 id="history-title">
+		<CommitsBox
+			id="history-title"
+			heading={
+				<>
 					{history.total} {history.total === 1 ? "change" : "changes"} landed on {history.branch}
-				</h2>
-			</div>
-			<ol className="commits__list">
-				{history.changes.map((landed) => (
-					<HistoryRow key={landed.commit} repo={repo} landed={landed} />
-				))}
-			</ol>
-			{more > 0 ? <p className="muted history__more">And {more} earlier, in the branch's own history.</p> : null}
-		</section>
+				</>
+			}
+			className={cn(fades)}
+		>
+			<HistoryRows repo={repo} changes={history.changes} />
+			{more > 0 ? (
+				<p className="mt-1.5 mb-0 border-t border-border px-4 py-2.5 text-ui text-muted-foreground">
+					And {more} earlier, in the branch's own history.
+				</p>
+			) : null}
+		</CommitsBox>
 	);
 }
 
-function HistoryRow({ repo, landed }: { repo: string; landed: LandedChange }) {
+/** The changes, newest first; one landed since they first showed fades in. */
+function HistoryRows({ repo, changes }: { repo: string; changes: LandedChange[] }) {
+	const arrived = useArrivals(changes.map((landed) => landed.commit));
+	const staggers = useStagger(changes.length > 0);
 	return (
-		<li className="commits__row">
-			<Icon name="merge" className="muted commits__icon" />
-			<div className="commits__main">
-				<p className="commits__subject">
-					<a href={href.change(repo, landed.change)}>{landed.title}</a>
-				</p>
-				<p className="muted commits__meta">
-					<strong>{landed.agent}</strong> landed <code>{landed.change}</code>
-					{landed.at ? (
-						<>
-							{" "}
-							<time dateTime={landed.at} title={new Date(landed.at).toLocaleString()}>
-								{timeAgo(landed.at)}
-							</time>
-						</>
-					) : null}
-					{landed.files.length ? <span> · {fileCount(landed.files.length)}</span> : null}
-				</p>
-				{landed.reviews.length ? (
-					<Reviews reviews={landed.reviews} />
-				) : (
-					<p className="muted history__none">Landed without review.</p>
-				)}
-			</div>
-			<a className="commits__sha" href={href.code(repo, "", landed.commit)}>
-				<code>{shortSha(landed.commit)}</code>
-			</a>
-		</li>
+		<ol className={cn(COMMIT_LIST, staggers && "stagger")}>
+			{changes.map((landed) => (
+				<HistoryRow key={landed.commit} repo={repo} landed={landed} arrived={arrived(landed.commit)} />
+			))}
+		</ol>
+	);
+}
+
+function HistoryRow({ repo, landed, arrived }: { repo: string; landed: LandedChange; arrived: boolean }) {
+	return (
+		<CommitRow icon="merge" repo={repo} commit={landed.commit} arrived={arrived}>
+			<p className={COMMIT_SUBJECT}>
+				<a href={href.change(repo, landed.change)}>{landed.title}</a>
+			</p>
+			<p className={COMMIT_META}>
+				<strong>{landed.agent}</strong> landed <code>{landed.change}</code>
+				{landed.at ? (
+					<>
+						{" "}
+						<time dateTime={landed.at} title={new Date(landed.at).toLocaleString()}>
+							{timeAgo(landed.at)}
+						</time>
+					</>
+				) : null}
+				{landed.files.length ? <span> · {fileCount(landed.files.length)}</span> : null}
+			</p>
+			{landed.reviews.length ? (
+				<Reviews reviews={landed.reviews} />
+			) : (
+				<p className="mt-1.5 mb-0 text-ui text-muted-foreground">Landed without review.</p>
+			)}
+		</CommitRow>
 	);
 }
 
 function Reviews({ reviews }: { reviews: LandedChange["reviews"] }) {
 	return (
-		<ul className="history__reviews">
+		<ul className="mt-1.5 mb-0 grid list-none gap-1 p-0 text-ui">
 			{reviews.map((review) => (
-				<li key={`${review.reviewer}:${review.role}:${review.verdict}`}>
-					<Icon name={review.verdict === "approve" ? "check-circle" : "x-circle"} size={14} label={review.verdict} />
-					<strong>{review.reviewer}</strong> <span className="muted">({review.role})</span> {review.evidence}
+				<li
+					key={`${review.reviewer}:${review.role}:${review.verdict}`}
+					className="flex items-baseline gap-1.5 wrap-anywhere"
+				>
+					<Icon
+						name={review.verdict === "approve" ? "check-circle" : "x-circle"}
+						size={14}
+						label={review.verdict}
+						className="shrink-0 self-center"
+					/>
+					<strong>{review.reviewer}</strong> <span className="text-muted-foreground">({review.role})</span>{" "}
+					{review.evidence}
 				</li>
 			))}
 		</ul>

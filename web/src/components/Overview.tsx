@@ -1,12 +1,16 @@
 import { messageOf } from "../lib/errors";
-import "./Overview.css";
 import { useState } from "react";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { Territory } from "./Territory";
 import { LAMP_WORDS, lampColor, lampCounts, LAMPS } from "../lib/overview";
-import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
+import { Lamp } from "./ui/badge";
+import { Callout } from "./ui/box";
+import { Button } from "./ui/button";
+import { Input, Label, NativeSelect } from "./ui/field";
 
 /**
  * What the overview reads: the repo's files and, when the server reports it, what's landing. People who can
@@ -58,26 +62,33 @@ function BranchBar({
 			.sort(),
 	];
 	const [making, setMaking] = useState(false);
+	// The form and the button take each other's place, fading in; the button is there at once the first time.
+	const swapped = useChanged(making);
 	const showBranch = (to: string) => {
 		window.location.hash = href.repo(repo, "changes", to === branch ? undefined : to);
 	};
 	return (
-		<div className="branch-bar">
-			<label className="branch-bar__pick">
+		<div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
+			<Label className="inline-flex items-center gap-2">
 				<span>Branch</span>
-				<select id="overview-branch" value={shown} onChange={(event) => showBranch(event.target.value)}>
+				<NativeSelect
+					id="overview-branch"
+					className="font-mono text-ui-lg"
+					value={shown}
+					onChange={(event) => showBranch(event.target.value)}
+				>
 					{names.map((branchName) => (
 						<option key={branchName} value={branchName}>
 							{branchName}
 							{branchName === branch ? " (project)" : ""}
 						</option>
 					))}
-				</select>
-			</label>
+				</NativeSelect>
+			</Label>
 			{canWrite && api.makeBranch && !making ? (
-				<button type="button" onClick={() => setMaking(true)}>
+				<Button className={cn(swapped && "animate-fade")} onClick={() => setMaking(true)}>
 					New branch
-				</button>
+				</Button>
 			) : null}
 			{making && api.makeBranch ? (
 				<NewBranchForm
@@ -126,34 +137,42 @@ function NewBranchForm(props: {
 	};
 	return (
 		<>
-			<form className="branch-bar__new" onSubmit={submit}>
+			<form className="flex animate-fade flex-wrap items-center gap-2" onSubmit={submit}>
 				<label className="sr-only" htmlFor="new-branch-name">
 					Name of the new branch
 				</label>
-				<input
+				<Input
 					id="new-branch-name"
+					className="min-w-[12ch] font-mono text-ui-lg"
 					placeholder="feature/checkout"
 					value={name}
 					onChange={(event) => setName(event.target.value)}
 					autoFocus
 				/>
-				<label htmlFor="new-branch-from">from</label>
-				<select id="new-branch-from" value={from} onChange={(event) => setFrom(event.target.value)}>
+				<label className="font-normal text-muted-foreground" htmlFor="new-branch-from">
+					from
+				</label>
+				<NativeSelect
+					id="new-branch-from"
+					className="font-mono text-ui-lg"
+					value={from}
+					onChange={(event) => setFrom(event.target.value)}
+				>
 					{names.map((branchName) => (
 						<option key={branchName} value={branchName}>
 							{branchName}
 						</option>
 					))}
-				</select>
-				<button type="submit" className="accent" disabled={busy || !name.trim()}>
+				</NativeSelect>
+				<Button type="submit" variant="primary" disabled={busy || !name.trim()}>
 					{busy ? "Making…" : "Make branch"}
-				</button>
-				<button type="button" onClick={onCancel} disabled={busy}>
+				</Button>
+				<Button onClick={onCancel} disabled={busy}>
 					Cancel
-				</button>
+				</Button>
 			</form>
 			{error ? (
-				<p className="error branch-bar__error" role="alert">
+				<p key={error} className="m-0 basis-full animate-appear text-bad" role="alert">
 					{error}
 				</p>
 			) : null}
@@ -161,26 +180,23 @@ function NewBranchForm(props: {
 	);
 }
 
-/** How each outcome lights. */
+// A summary in a line: a bold count, then lamp-marked counts beside it.
+const SUMMARY = "m-0 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-lead";
 
 /** The claims in force, in a sentence: how many, and where their changes are. */
 function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: RepoLanding }) {
 	const total = snapshot.claims.length;
 	if (!total)
-		return (
-			<p className="overview__summary">
-				No claims in force. When an agent claims part of the tree, it lights up below.
-			</p>
-		);
+		return <p className={SUMMARY}>No claims in force. When an agent claims part of the tree, it lights up below.</p>;
 	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes });
 	const parts = LAMPS.filter((lamp) => counts[lamp]).map((lamp) => (
-		<span key={lamp} className={`overview__count lamp--${lampColor(lamp)}`}>
-			<span className="lamp" aria-hidden="true" />
+		<span key={lamp} className="inline-flex items-center gap-1.75 text-muted-foreground">
+			<Lamp color={lampColor(lamp)} />
 			{counts[lamp]} {lamp === "attention" && counts[lamp] > 1 ? "need a person" : LAMP_WORDS[lamp]}
 		</span>
 	));
 	return (
-		<p className="overview__summary">
+		<p className={SUMMARY}>
 			<strong>
 				{total} {total === 1 ? "claim" : "claims"} in force
 			</strong>
@@ -204,7 +220,7 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === shown) };
 	const manyBranches = (snapshot.branches ?? []).length > 0 || canWrite;
 	return (
-		<div className="overview">
+		<div className="mb-11 grid gap-9">
 			{manyBranches ? (
 				<BranchBar
 					repo={repo}
@@ -216,10 +232,11 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 					onBranchMade={onBranchMade}
 				/>
 			) : null}
+			{/* Set apart by a paragraph's margins, as the browser gives one. */}
 			{!known ? (
-				<p className="callout callout--warn">
+				<Callout tone="warn" className="my-3.75">
 					There's no branch {asked} taking changes here: showing {branch}.
-				</p>
+				</Callout>
 			) : null}
 			<Summary snapshot={onBranch} landing={landing.data} />
 			<Territory

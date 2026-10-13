@@ -39,7 +39,7 @@ export function useRowActions() {
 		const text = errorText(key);
 		if (text === null) return null;
 		return (
-			<p className="error manage__note" role="alert">
+			<p className="m-0 animate-appear text-ui text-bad" role="alert">
 				{text}
 			</p>
 		);

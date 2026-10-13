@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import type { DemoRunStatus } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { messageOf } from "../lib/errors";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
-import "./DemoRun.css";
+import { cn } from "../lib/utils";
+import { Box, calloutVariants } from "./ui/box";
+import { Button } from "./ui/button";
 
 // Honeycomb demo runs on the dashboard: the card that starts one, and the banner on the demo repo's Hive tab that says
 // how it's going. A run is GitHive's own agents building a small word game again, in GitHive's one public demo repo.
@@ -22,6 +25,8 @@ export function DemoCard({ api }: { api: DemoApi }) {
 	const [error, setError] = useState<string | null>(null);
 	const running = runs.data?.running;
 	const newest = runs.data?.newest;
+	// Once the runs are read, what they change (a run going, a game to play) fades in.
+	const appear = useChanged(runs.loaded) && "animate-fade";
 	const start = async () => {
 		setBusy(true);
 		setError(null);
@@ -41,33 +46,38 @@ export function DemoCard({ api }: { api: DemoApi }) {
 		}
 	};
 	return (
-		<section className="box demo-card" aria-labelledby="demo-card-title">
-			<div className="demo-card__body">
-				<h2 id="demo-card-title">Watch a hive build Honeycomb (Demo Game)</h2>
-				<p className="muted">
+		<Box
+			className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-l-3 border-l-link px-5 py-4"
+			aria-labelledby="demo-card-title"
+		>
+			<div className="min-w-0 flex-[1_1_360px]">
+				<h2 id="demo-card-title" className="mb-1.5 text-lead">
+					Watch a hive build Honeycomb (Demo Game)
+				</h2>
+				<p className="m-0 text-muted-foreground">
 					Thirteen of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
 					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
 					it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game when it's done.
 				</p>
 				{error ? (
-					<p className="error" role="alert">
+					<p className="m-0 animate-appear text-bad" role="alert">
 						{error}
 					</p>
 				) : null}
 			</div>
-			<div className="demo-card__action">
+			<div className="flex flex-none flex-col items-end gap-2">
 				{running ? (
-					<a className="button" href={href.repo(running.fullName)}>
-						Watch the run going now
-					</a>
+					<Button asChild className={cn(appear)}>
+						<a href={href.repo(running.fullName)}>Watch the run going now</a>
+					</Button>
 				) : (
-					<button type="button" className="accent" onClick={start} disabled={busy}>
+					<Button variant="primary" onClick={start} disabled={busy}>
 						{busy ? "Setting up the repo…" : "Start a demo run"}
-					</button>
+					</Button>
 				)}
-				{newest && gameLanded(newest) ? <PlayLink repo={newest.fullName} /> : null}
+				{newest && gameLanded(newest) ? <PlayLink repo={newest.fullName} className={cn(appear)} /> : null}
 			</div>
-		</section>
+		</Box>
 	);
 }
 
@@ -146,7 +156,7 @@ export function DemoBanner({
 	}, [missing]);
 	if (!run.data) return null;
 	return (
-		<p className={`callout demo-banner demo-banner--${run.data.status}`} role="status">
+		<p className={cn(calloutVariants(), "m-0 animate-appear")} role="status">
 			{runWords(run.data)} Thirteen of GitHive's agents, each named for a job in a hive, work on their own: they review
 			one another's changes and take pieces of the backlog, and nothing assigns the work.{" "}
 			{gameLanded(run.data) ? <PlayLink repo={repo} /> : null}
@@ -155,9 +165,9 @@ export function DemoBanner({
 }
 
 /** The game the last run built, served from the demo repo's files (see src/routes/site.ts). */
-function PlayLink({ repo }: { repo: string }) {
+function PlayLink({ repo, className }: { repo: string; className?: string }) {
 	return (
-		<a className="demo-play" href={href.site(repo)} target="_blank" rel="noopener noreferrer">
+		<a className={cn("whitespace-nowrap", className)} href={href.site(repo)} target="_blank" rel="noopener noreferrer">
 			Play the game
 		</a>
 	);

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import "./CopyBlock.css";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 function buttonText(copied: "copied" | "selected" | null, label: string): string {
 	if (copied === "copied") return "Copied";
@@ -8,7 +9,7 @@ function buttonText(copied: "copied" | "selected" | null, label: string): string
 }
 
 /** A command or secret to copy: shown in full, with a Copy button that falls back to selecting the text. */
-export function CopyBlock({ text, label = "Copy" }: { text: string; label?: string }) {
+export function CopyBlock({ text, label = "Copy", className }: { text: string; label?: string; className?: string }) {
 	const codeRef = useRef<HTMLElement>(null);
 	const [copied, setCopied] = useState<"copied" | "selected" | null>(null);
 	const selectText = () => {
@@ -31,13 +32,13 @@ export function CopyBlock({ text, label = "Copy" }: { text: string; label?: stri
 	};
 	const shortText = text.length > 40 ? `${text.slice(0, 40)}…` : text;
 	return (
-		<div className="copy-block">
-			<pre>
+		<div className={cn("flex min-w-0 items-start gap-2 to-560:flex-col to-560:items-stretch", className)}>
+			<pre className="min-w-0 flex-1 border border-border px-3 py-2.25">
 				<code ref={codeRef}>{text}</code>
 			</pre>
-			<button type="button" className="copy-block__button" onClick={copy} aria-label={`${label}: ${shortText}`}>
+			<Button className="min-w-18 shrink-0" onClick={copy} aria-label={`${label}: ${shortText}`}>
 				{buttonText(copied, label)}
-			</button>
+			</Button>
 		</div>
 	);
 }

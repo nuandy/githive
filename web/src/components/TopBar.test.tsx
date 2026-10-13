@@ -33,7 +33,9 @@ describe("the top bar, signed in", () => {
 
 	it("links to the person's agents in plain sight, outside their menu", () => {
 		const html = renderToStaticMarkup(<TopBar crumbs={[]} me={me} onSignOut={() => undefined} />);
-		const outsideMenu = html.slice(0, html.indexOf('class="usermenu"'));
+		const menuAt = html.indexOf('aria-label="Signed in as ada"');
+		expect(menuAt).toBeGreaterThan(0);
+		const outsideMenu = html.slice(0, menuAt);
 		expect(outsideMenu).toContain('aria-label="Your agents"');
 		expect(visibleText(outsideMenu)).toContain("Agents");
 	});
@@ -47,6 +49,9 @@ describe("the top bar, signed in", () => {
 		const access = { kind: "access" as const, label: "admin", by: "access:admin" };
 		const markup = renderToStaticMarkup(<TopBar crumbs={[]} me={access} />);
 		// Only the Inbox takes the free space; the links after it don't take a share of it.
-		expect(markup).toMatch(/class="topbar__inbox topbar__admin"/);
+		const tag = (label: string) => markup.match(new RegExp(`<a [^>]*aria-label="${label}"[^>]*>`))?.[0] ?? "";
+		expect(tag("Inbox")).toMatch(/\bml-auto\b/);
+		expect(tag("Admin")).not.toBe("");
+		expect(tag("Admin")).not.toMatch(/\bml-auto\b/);
 	});
 });

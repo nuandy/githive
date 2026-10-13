@@ -1,8 +1,10 @@
-import "./Overview.css";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, LAMPS, type Region, territory } from "../lib/overview";
 import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
+import { cn } from "../lib/utils";
+import { Lamp as LampMark } from "./ui/badge";
 
 /** A region with no more entries than this lists them by name; a bigger one is a grid of lamps. */
 const NAMED_CELLS = 16;
@@ -16,8 +18,32 @@ function cellLabel(cell: Cell, region: Region): string {
 	return `${what}: ${holder.title} by ${holder.agent}, ${LAMP_WORDS[holder.lamp]}${others}`;
 }
 
-function CellMark({ lamp }: { lamp: Lamp | undefined }) {
-	return <span className={lamp ? `cell cell--${lamp} lamp--${lampColor(lamp)}` : "cell"} aria-hidden="true" />;
+/**
+ * How a held cell lights, in its lamp's color: lit, hatched while nothing's pushed yet, an unlit ring once its agent
+ * has gone, and ringed in ink while it's checked to land, like the lamps on the track.
+ */
+const LIT: Record<Lamp, string> = {
+	attention: "border-bad bg-bad",
+	abandoned: "border-2 border-amber bg-transparent",
+	checking: "border-2 border-foreground bg-amber",
+	approved: "border-good bg-good",
+	review: "border-amber bg-amber",
+	building: "border-amber bg-transparent bg-[repeating-linear-gradient(135deg,var(--amber)_0_2px,transparent_2px_5px)]",
+};
+
+/** A cell: a dark slot when nobody holds it, its lamp's color when someone does, changing color smoothly. */
+function CellMark({ lamp, className }: { lamp: Lamp | undefined; className?: string }) {
+	return (
+		<span
+			className={cn(
+				"block size-3.5 flex-none rounded-xs border border-surface-3 bg-surface-3",
+				"transition-[background-color,border-color] duration-slow",
+				lamp && LIT[lamp],
+				className,
+			)}
+			aria-hidden="true"
+		/>
+	);
 }
 
 /** One top-level folder: its entries named, or as a grid of lamps when there are many. */
@@ -32,49 +58,61 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 	};
 	return (
 		<section
-			className={`region${named ? " region--named" : " region--grid"}`}
+			className={named ? "min-w-0 flex-[1_1_220px]" : "max-w-full min-w-45 flex-initial"}
 			// Keep the grid about square, with about twice as many columns as rows. Each cell is 18px with its gap.
 			style={named ? undefined : { width: `${Math.ceil(Math.sqrt(shown.length * 2)) * 18}px` }}
 		>
-			<h3 className="region__name">
-				<code>{region.name ? `${region.name}/` : "top level"}</code>
-				<span className="muted">
+			<h3 className="mb-2.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 border-b border-border pb-1.5 text-body-sm font-semibold">
+				<code className="bg-transparent p-0 font-semibold">{region.name ? `${region.name}/` : "top level"}</code>
+				<span className="text-ui font-normal text-muted-foreground">
 					{region.files ? counted(region.files, "file") : "new"}
 					{held ? `, ${held} held` : ""}
 				</span>
 			</h3>
 			{wholeHolder ? (
-				<p className={`region__whole lamp--${lampColor(wholeHolder.lamp)}`}>
-					<span className="lamp" aria-hidden="true" />
+				<p className="mt-0 mb-2.5 text-ui-lg">
+					<LampMark color={lampColor(wholeHolder.lamp)} className="mr-1.75 align-[0.05em]" />
 					<a href={href.change(repo, wholeHolder.change)}>{wholeHolder.title}</a> holds all of it,{" "}
 					{LAMP_WORDS[wholeHolder.lamp]}
 				</p>
 			) : null}
 			{named ? (
-				<ul className="region__list">
+				<ul className="m-0 grid list-none gap-1.25 p-0">
 					{shown.map((cell) => {
 						const holder = cell.holders[0] ?? region.whole[0];
+						const lamp = cellLamp(cell, region);
 						return (
-							<li key={cell.path}>
-								<CellMark lamp={cellLamp(cell, region)} />
+							<li key={cell.path} className="flex min-w-0 items-center gap-2.25">
+								{/* Named entries nobody holds show no lamp at all: only what's lit draws the eye. */}
+								<CellMark lamp={lamp} className={lamp ? undefined : "invisible"} />
 								<a
 									href={linkOf(cell)}
-									className={`region__entry${cellLamp(cell, region) ? " region__entry--held" : ""}`}
+									className={cn(
+										"truncate font-mono text-ui text-muted-foreground",
+										lamp && "font-semibold text-foreground",
+									)}
 									title={cellLabel(cell, region)}
 								>
 									{cell.name}
 									{cell.folder ? "/" : ""}
 								</a>
-								{holder && cell.holders.length ? <span className="region__holder muted">{holder.agent}</span> : null}
+								{holder && cell.holders.length ? (
+									<span className="ml-auto text-meta whitespace-nowrap text-muted-foreground">{holder.agent}</span>
+								) : null}
 							</li>
 						);
 					})}
 				</ul>
 			) : (
-				<ul className="region__grid">
+				<ul className="m-0 flex list-none flex-wrap gap-1 p-0">
 					{shown.map((cell) => (
 						<li key={cell.path}>
-							<a href={linkOf(cell)} aria-label={cellLabel(cell, region)} title={cellLabel(cell, region)}>
+							<a
+								className="block rounded-xs leading-0"
+								href={linkOf(cell)}
+								aria-label={cellLabel(cell, region)}
+								title={cellLabel(cell, region)}
+							>
 								<CellMark lamp={cellLamp(cell, region)} />
 							</a>
 						</li>
@@ -82,13 +120,13 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 				</ul>
 			)}
 			{region.cells.length > shown.length ? (
-				<p className="muted region__more">and {region.cells.length - shown.length} more</p>
+				<p className="mt-2 mb-0 text-ui text-muted-foreground">and {region.cells.length - shown.length} more</p>
 			) : null}
 		</section>
 	);
 }
 
-/** What agents hold of the tree, by top-level folder. */
+/** What agents hold of the tree, by top-level folder. Once the tree is read, its regions fade in. */
 export function Territory({
 	repo,
 	branch,
@@ -106,32 +144,43 @@ export function Territory({
 }) {
 	const regions = tree ? territory(tree.files, snapshot.claims, { landing, votes: snapshot.votes }) : [];
 	const treeStatus = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
+	// What comes once the tree is read (or goes to read another branch's) fades in; what's there at once comes with the
+	// page.
+	const read = useChanged(Boolean(tree));
+	const fades = read && "animate-fade";
 	return (
-		<section className="territory" aria-labelledby="territory-title">
-			<div className="overview__head">
-				<h2 id="territory-title">Territory</h2>
-				<p className="muted">
+		<section aria-labelledby="territory-title">
+			<div className="mb-5 flex flex-wrap items-baseline gap-x-4.5 gap-y-1 border-t-2 border-foreground pt-2.5">
+				<h2 id="territory-title" className="text-[19px]">
+					Territory
+				</h2>
+				<p className="m-0 max-w-[72ch] text-muted-foreground">
 					What agents hold of {branch}, by folder. A lit entry is claimed; its lamp says where the change is.
 				</p>
 			</div>
-			<ul className="territory__legend" aria-label="What the lamps mean">
+			<ul
+				className="m-0 mb-4.5 flex list-none flex-wrap gap-x-4.5 gap-y-1.5 p-0 text-ui text-muted-foreground"
+				aria-label="What the lamps mean"
+			>
 				{LAMPS.map((lamp) => (
-					<li key={lamp}>
+					<li key={lamp} className="inline-flex items-center gap-1.75">
 						<CellMark lamp={lamp} />
 						{LAMP_WORDS[lamp]}
 					</li>
 				))}
-				<li>
+				<li className="inline-flex items-center gap-1.75">
 					<CellMark lamp={undefined} />
 					not claimed
 				</li>
 			</ul>
-			{!tree ? <p className="muted">{treeStatus}</p> : null}
+			{!tree ? <p className={cn("my-3.75 text-muted-foreground", fades)}>{treeStatus}</p> : null}
 			{tree?.truncated ? (
-				<p className="muted">This repo is large: the territory shows the first part of its tree.</p>
+				<p className={cn("my-3.75 text-muted-foreground", fades)}>
+					This repo is large: the territory shows the first part of its tree.
+				</p>
 			) : null}
 			{regions.length ? (
-				<div className="territory__regions">
+				<div className={cn("flex flex-wrap gap-x-7.5 gap-y-5.5", fades)}>
 					{regions.map((region) => (
 						<RegionView key={region.name || "/"} repo={repo} region={region} />
 					))}
