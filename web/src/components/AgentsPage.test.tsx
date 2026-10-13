@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { Connection, MyAgent } from "../api";
 import { NOW, ago, visibleText } from "../test/fixtures";
+import { AgentLimitsPanel, LimitField, nextLimit } from "./AgentLimitsPanel";
 import { AgentsView, type AgentActions } from "./AgentsPage";
 import { TopBar } from "./TopBar";
 
@@ -159,6 +160,37 @@ describe("the Agents page", () => {
 		expect(visibleText(limited)).toContain("2 today");
 		// A revoked agent does nothing, so it has no limits to set.
 		expect(html).not.toContain('id="build-a2"');
+	});
+
+	describe("an owner limit", () => {
+		const field = (props: Partial<Parameters<typeof LimitField>[0]> = {}) =>
+			renderToStaticMarkup(
+				<LimitField id="build-a1" label="Build" limit={3} done={0} save={async () => true} {...props} />,
+			);
+
+		it("doesn't save a daily limit until a whole number of at least 1 is given", () => {
+			expect(nextLimit("daily", 0)).toBeUndefined();
+			expect(nextLimit("daily", Number(""))).toBeUndefined();
+			expect(nextLimit("daily", Number("-2"))).toBeUndefined();
+			expect(nextLimit("daily", Number("1e999"))).toBeUndefined();
+			expect(nextLimit("daily", 3)).toBe(3);
+			expect(nextLimit("daily", 2.5)).toBe(2);
+			expect(nextLimit("never", 3)).toBe(0);
+			expect(nextLimit("any", 3)).toBeNull();
+		});
+
+		it("says when a limit was saved, and only then", () => {
+			expect(field()).toContain('role="status"');
+			expect(visibleText(field())).not.toContain("Saved");
+			expect(visibleText(field({ saved: true }))).toContain("Saved");
+		});
+
+		it("stays in reach while something else saves", () => {
+			const panel = renderToStaticMarkup(
+				<AgentLimitsPanel agent={agents[0]!} actions={actions} run={async () => true} setError={() => {}} />,
+			);
+			expect(panel).not.toMatch(/<fieldset[^>]*disabled/);
+		});
 	});
 
 	it("shows a new token once, with the command that uses it", () => {
