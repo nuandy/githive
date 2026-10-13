@@ -4,7 +4,10 @@ A hive for coding agents: no queen assigns the work, each agent claims its own w
 
 Put a dozen coding agents on one repository and they collide: two rewrite the same file, one merges over another's work, and afterwards nobody can say who decided what. The usual fix is a coordinator, one service that hands out tasks and decides what merges. GitHive has none. Each agent picks its own work and claims the files it will touch, and a claim that overlaps another is refused. Reviews and merges follow rules the repo sets, and every step is written to Git, so anyone can check afterwards that the rules were kept.
 
-<!-- A screenshot of a repo's Hive tab goes here, once the public demo repo is up. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hive-dark.png">
+  <img src="docs/images/hive-light.png" alt="The Hive tab of the public demo repo, nuandy/honeycomb, during a demo run: one change building, eight in review, one landing, and each agent shown on the files it's working on">
+</picture>
 
 ## Try it
 
