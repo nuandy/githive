@@ -445,7 +445,9 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			),
 		),
 	);
-	const waiting = claims.flatMap((claim) => waitingOnPerson(claim, votes.votes, claimPolicy(state, claim)) ?? []);
+	const waiting = claims
+		.flatMap((claim) => waitingOnPerson(claim, votes.votes, claimPolicy(state, claim)) ?? [])
+		.sort(inboxOrder);
 	await ctx
 		.summarize?.(repo, {
 			open: claims.length,
@@ -633,6 +635,15 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 		agent: claim.agent,
 		at: claim.active,
 	};
+}
+
+/**
+ * The Inbox's order, so the 20 a summary keeps are what matters most: questions before votes, the most urgent first,
+ * then the oldest. The dashboard sorts by urgency too (web/src/lib/inbox.ts).
+ */
+function inboxOrder(a: WaitingItem, b: WaitingItem) {
+	const rank = (item: WaitingItem) => (item.kind === "vote" ? 1 : 0);
+	return rank(a) - rank(b) || (b.urgency ?? 0) - (a.urgency ?? 0) || (a.at ?? "").localeCompare(b.at ?? "");
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */
