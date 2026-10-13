@@ -30,8 +30,9 @@ export const buttonVariants = cva(
 			},
 			size: {
 				default: "px-3.5 pt-1.5 pb-1.25",
-				sm: "px-2.5 py-0.75 text-ui",
-				icon: "size-8 p-0",
+				// Small enough to miss with a finger: on a touch screen they take taps 44px about them (theme.css).
+				sm: "touch-target px-2.5 py-0.75 text-ui",
+				icon: "touch-target size-8 p-0",
 			},
 		},
 		// A link-like button has no box to pad.

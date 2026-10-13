@@ -125,6 +125,17 @@ describe("the building blocks", () => {
 		expect(renderToStaticMarkup(<ThemeMenu />)).toContain("border-input");
 	});
 
+	it("gives what's small to tap a 44px target on a touch screen", () => {
+		expect(renderToStaticMarkup(<Button size="sm">Edit</Button>)).toContain("touch-target");
+		expect(renderToStaticMarkup(<Button size="icon">×</Button>)).toContain("touch-target");
+		expect(renderToStaticMarkup(<Button>Save</Button>)).not.toContain("touch-target");
+		const segmented = renderToStaticMarkup(
+			<Segmented label="View" options={[{ value: "a", words: "A" }]} value="a" onPick={() => undefined} />,
+		);
+		expect(segmented).toMatch(/<button[^>]*touch-target/);
+		expect(renderToStaticMarkup(<ThemeMenu />)).toContain("touch-target");
+	});
+
 	it("doesn't clip a focused choice's ring", () => {
 		const html = renderToStaticMarkup(
 			<Segmented

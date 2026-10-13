@@ -519,6 +519,23 @@
 	input[type="checkbox"] {
 		accent-color: var(--link);
 	}
+	/* On a touch screen, what's small to tap (a small button, a segmented control's choice, the top bar's pills, a radio
+	   or checkbox with its label) takes taps 44px about its middle, without growing, so nothing moves: touch-target. A
+	   utility (absolute, say) still wins over the position this sets. */
+	@media (pointer: coarse) {
+		:where(.touch-target, label:has(> input:is([type="radio"], [type="checkbox"]))) {
+			position: relative;
+		}
+		:where(.touch-target, label:has(> input:is([type="radio"], [type="checkbox"])))::after {
+			content: "";
+			position: absolute;
+			top: 50%;
+			left: 50%;
+			width: max(100%, 44px);
+			height: max(100%, 44px);
+			translate: -50% -50%;
+		}
+	}
 }
 
 /* Reduced motion: whatever still moves, moves at once. */

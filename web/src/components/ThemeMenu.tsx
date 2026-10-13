@@ -25,7 +25,7 @@ export function ThemeMenu() {
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				className={[
-					"relative inline-flex size-7.5 flex-none to-560:size-7 cursor-pointer items-center justify-center rounded-full border",
+					"touch-target relative inline-flex size-7.5 flex-none to-560:size-7 cursor-pointer items-center justify-center rounded-full border",
 					"border-input bg-transparent p-0 text-foreground transition-colors duration-fast",
 					"hover:bg-surface-2",
 					"data-[state=open]:bg-surface-2",

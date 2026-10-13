@@ -193,3 +193,14 @@ describe("the type scale", () => {
 		expect(sizes.filter(([, px]) => px < 12).map(([name]) => name)).toEqual(["micro"]);
 	});
 });
+
+// On a touch screen, what's small to tap takes taps 44px about its middle (WCAG 2.5.8 asks 24; 44 is a finger), without
+// growing, so nothing moves on a desktop.
+describe("touch targets", () => {
+	it("reach 44px under a coarse pointer, for touch-target and a radio's or checkbox's label", () => {
+		const coarse = css.slice(css.indexOf("@media (pointer: coarse)"));
+		expect(coarse).toMatch(/\.touch-target/);
+		expect(coarse).toMatch(/label:has\(> input:is\(\[type="radio"\], \[type="checkbox"\]\)\)/);
+		expect(coarse).toMatch(/width: max\(100%, 44px\);\s*height: max\(100%, 44px\);/);
+	});
+});

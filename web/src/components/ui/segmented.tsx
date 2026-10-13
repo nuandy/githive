@@ -32,7 +32,7 @@ export function Segmented<T extends string | number>({
 					type="button"
 					aria-pressed={option.value === value}
 					className={cn(
-						"relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-none border-0 bg-transparent px-2.5 py-0.5",
+						"touch-target relative inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-none border-0 bg-transparent px-2.5 py-0.5",
 						// The end choices round to the box's inside corners, so the box needn't clip them (and their focus ring).
 						"first:rounded-l-[calc(var(--radius)-1px)] last:rounded-r-[calc(var(--radius)-1px)]",
 						"[font-family:inherit] text-caption leading-5 font-semibold whitespace-nowrap text-muted-foreground no-underline",
