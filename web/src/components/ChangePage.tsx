@@ -134,8 +134,9 @@ function statusOf(
 	claim: Claim | undefined,
 	history: ChangeHistory | null | undefined,
 	votes: Vote[],
+	policy: RepoSnapshot["policy"],
 ): ChangeStatus | null {
-	if (claim) return claimStatus(claim, votes);
+	if (claim) return claimStatus(claim, votes, policy);
 	if (history) return historyStatus(history);
 	return null;
 }
@@ -337,9 +338,19 @@ function MergeBox({
 }
 
 /** Where a change in force stands: its approvals, and what it waits on (the reader, if they can answer it here). */
-function ClaimMergeBox({ claim, votes, answerable }: { claim: Claim; votes: Vote[]; answerable: boolean }) {
+function ClaimMergeBox({
+	claim,
+	votes,
+	policy,
+	answerable,
+}: {
+	claim: Claim;
+	votes: Vote[];
+	policy: RepoSnapshot["policy"];
+	answerable: boolean;
+}) {
 	const { approval } = claim;
-	const status = claimStatus(claim, votes);
+	const status = claimStatus(claim, votes, policy);
 	const approvalLabel = claimApprovalLabel(claim);
 	const waitingNote = !approval.approved && approvalLabel.startsWith("Waiting") ? ` · ${approvalLabel}` : "";
 	return (
@@ -392,6 +403,7 @@ function EndingMergeBox({ ending, branch, repo }: { ending: ChangeEnding; branch
 function MergeStatus({
 	claim,
 	votes,
+	policy,
 	answerable,
 	ending,
 	branch,
@@ -399,12 +411,13 @@ function MergeStatus({
 }: {
 	claim: Claim | undefined;
 	votes: Vote[];
+	policy: RepoSnapshot["policy"];
 	answerable: boolean;
 	ending: ChangeEnding | null;
 	branch: string;
 	repo: string;
 }) {
-	if (claim) return <ClaimMergeBox claim={claim} votes={votes} answerable={answerable} />;
+	if (claim) return <ClaimMergeBox claim={claim} votes={votes} policy={policy} answerable={answerable} />;
 	if (ending) return <EndingMergeBox ending={ending} branch={branch} repo={repo} />;
 	return null;
 }
@@ -490,7 +503,7 @@ export function ChangePage({
 	const agent = record?.agent || ending?.release.agent || identityName(record?.by) || "agent";
 	const title = (record?.intent ?? "").split("\n")[0]?.trim() || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
-	const status = statusOf(claim, history, votes);
+	const status = statusOf(claim, history, votes, snapshot.policy);
 	// A change merging a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;
@@ -544,7 +557,15 @@ export function ChangePage({
 				{claim && api && canVote ? (
 					<VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} className={INDENT} />
 				) : null}
-				<MergeStatus claim={claim} votes={votes} answerable={answerable} ending={ending} branch={branch} repo={repo} />
+				<MergeStatus
+					claim={claim}
+					votes={votes}
+					policy={snapshot.policy}
+					answerable={answerable}
+					ending={ending}
+					branch={branch}
+					repo={repo}
+				/>
 			</div>
 			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
 		</div>

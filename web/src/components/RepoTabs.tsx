@@ -36,11 +36,11 @@ export { ChangePage, type ChangePageProps } from "./ChangePage";
 // No central server enforces a repo's rules, so these pages show who holds what, how reviews stand, and
 // what the audit found in Git, including violations a revert has since resolved.
 
-/** How a change's approvals look: blocked, approved, or still waiting. */
+/** How a change's approvals look: blocked, approved, or still in review (see status.ts). */
 function approvalLook(approval: Claim["approval"]): { tone: Tone; icon: IconName } {
 	if (approval.vetoedBy.length) return { tone: "bad", icon: "x" };
 	if (approval.approved) return { tone: "good", icon: "check" };
-	return { tone: "warn", icon: "eye" };
+	return { tone: "accent", icon: "eye" };
 }
 
 function Approvals({ claim }: { claim: Claim }) {
@@ -105,17 +105,19 @@ const INLINE_ICON = "inline -mb-px mr-0.75 align-baseline";
 function ChangeRow({
 	claim,
 	votes,
+	policy,
 	repo,
 	now,
 	arrived,
 }: {
 	claim: Claim;
 	votes: Vote[];
+	policy: RepoSnapshot["policy"];
 	repo: string;
 	now?: number;
 	arrived: boolean;
 }) {
-	const status = claimStatus(claim, votes);
+	const status = claimStatus(claim, votes, policy);
 	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
@@ -189,12 +191,14 @@ function Bumping({ count }: { count: number }) {
 function ChangeRows({
 	claims,
 	votes,
+	policy,
 	repo,
 	now,
 	fades,
 }: {
 	claims: Claim[];
 	votes: Vote[];
+	policy: RepoSnapshot["policy"];
 	repo: string;
 	now?: number;
 	fades: boolean;
@@ -208,6 +212,7 @@ function ChangeRows({
 					key={claim.change}
 					claim={claim}
 					votes={votes}
+					policy={policy}
 					repo={repo}
 					now={now}
 					arrived={arrived(claim.change)}
@@ -267,7 +272,15 @@ export function ChangeList({
 					<p>When an agent claims part of {repo} and starts work, its change appears here.</p>
 				</Empty>
 			) : (
-				<ChangeRows key={shown} claims={claims} votes={snapshot.votes} repo={repo} now={now} fades={fades} />
+				<ChangeRows
+					key={shown}
+					claims={claims}
+					votes={snapshot.votes}
+					policy={snapshot.policy}
+					repo={repo}
+					now={now}
+					fades={fades}
+				/>
 			)}
 		</Box>
 	);

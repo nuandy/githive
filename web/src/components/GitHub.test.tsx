@@ -119,7 +119,11 @@ describe("GitHub's change", () => {
 	it("says it's from GitHub and needs no review while the repo trusts GitHub", () => {
 		expect(text(renderToStaticMarkup(<ChangeLabels claim={change} />))).toBe("from GitHub, trusted");
 		expect(claimApprovalLabel(change)).toBe("No review: trusted");
-		expect(claimStatus(change)).toMatchObject({ label: "Trusted", tone: "good" });
+		expect(claimStatus(change)).toMatchObject({
+			label: "Approved",
+			tone: "good",
+			description: expect.stringContaining("trusted"),
+		});
 		const { trusted: _, ...untrusted } = change;
 		expect(text(renderToStaticMarkup(<ChangeLabels claim={untrusted} />))).toBe("from GitHub");
 	});

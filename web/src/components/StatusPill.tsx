@@ -1,23 +1,13 @@
 import type { ReactNode } from "react";
 import type { ChangeStatus, StatusKind, Tone } from "../lib/changeStatus";
+import { STATES } from "../lib/status";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
 import { Badge } from "./ui/badge";
 
-/** The icon for a change's status: open changes share one shape, colored by how they stand. */
+/** The icon for a change's state, from its one look (see status.ts). */
 export function statusIconName(kind: StatusKind): IconName {
-	switch (kind) {
-		case "merged":
-			return "merge";
-		case "abandoned":
-			return "ban";
-		case "needs-you":
-			return "alert";
-		case "checks-failed":
-			return "x";
-		default:
-			return "pull";
-	}
+	return STATES[kind].icon;
 }
 
 /** A tone as a text color. */
@@ -47,7 +37,7 @@ export function StatusIcon({
 	);
 }
 
-/** A colored status pill, e.g. "● Open", "Merged", "Needs you"; a size smaller beside a change row's title (sm). */
+/** A change's state as a pill, its icon and its noun ("Needs a person", "Landed"); smaller beside a row's title (sm). */
 export function StatusPill({
 	status,
 	size = "md",
