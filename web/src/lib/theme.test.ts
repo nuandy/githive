@@ -112,14 +112,34 @@ describe("the theme", () => {
 	});
 });
 
-// What theme.css says, scheme by scheme: a scheme that doesn't set a value inherits :root's.
+// What theme.css says, scheme by scheme, as the page has it: <html> is :root in either scheme and .dark in dark, so a
+// scheme's custom properties are those of every top-level rule naming :root (or .dark, in dark), the later winning, and
+// a var() is read in the same scheme, as the browser reads it on <html>.
 const block = (selector: string) => {
 	const start = css.indexOf(`\n${selector} {`);
 	return css.slice(start, css.indexOf("}", start));
 };
-const declared = (selector: string, name: string) =>
-	block(selector).match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1];
-const value = (selector: string, name: string) => declared(selector, name) ?? declared(":root", name);
+const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(?:^|\n)([^\s@{}][^{}]*?)\{([^{}]*)\}/g)].map(
+	([, selectors, body]) => ({ selectors: selectors!.split(",").map((each) => each.trim()), body: body! }),
+);
+const propertiesOf = (scheme: string) => {
+	const found = new Map<string, string>();
+	for (const { selectors, body } of rules)
+		if (selectors.includes(":root") || selectors.includes(scheme))
+			for (const [, name, declared] of body.matchAll(/--([\w-]+):\s*([^;]+);/g)) found.set(name!, declared!.trim());
+	return found;
+};
+const properties: Record<string, Map<string, string>> = {
+	":root": propertiesOf(":root"),
+	".dark": propertiesOf(".dark"),
+};
+/** A custom property's color in a scheme, through any var() it names; undefined if it isn't a six-digit hex. */
+const value = (scheme: string, name: string, seen = new Set<string>()): string | undefined => {
+	const declared = properties[scheme]!.get(name);
+	const named = declared && /^var\(--([\w-]+)\)$/.exec(declared)?.[1];
+	if (named) return seen.has(named) ? undefined : value(scheme, named, seen.add(name));
+	return declared && /^#[0-9a-f]{6}$/i.test(declared) ? declared : undefined;
+};
 const luminance = (hex: string) => {
 	const [r, g, b] = [1, 3, 5]
 		.map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
@@ -142,9 +162,9 @@ describe("the browser's bar", () => {
 	});
 });
 
-/** Asserts `fore` reads on each of `backs` at `least`, in every scheme. */
-function reads(fore: string, backs: string[], least: number) {
-	for (const scheme of SCHEMES)
+/** Asserts `fore` reads on each of `backs` at `least`, in every scheme (or those given). */
+function reads(fore: string, backs: string[], least: number, schemes = SCHEMES) {
+	for (const scheme of schemes)
 		for (const back of backs)
 			it(`${fore} on ${back}, ${scheme}: ${least}:1 or more`, () => {
 				const [a, b] = [value(scheme, fore), value(scheme, back)];
@@ -183,6 +203,20 @@ describe("edges and the focus ring", () => {
 	reads("input", ["card", "background"], 3);
 	reads("border-strong", ["card", "background"], 3);
 	reads("ring", ["card", "background", "surface-2", "surface-3", "link-soft"], 3);
+});
+
+// A change's state colors (--stage-*, each a lamp's) fill and edge its square on the Claims map, its swatch in a legend
+// and its cell on the Hive: marks, not words, so 3:1 against the page and the card (WCAG 1.4.11).
+describe("the stages' colors", () => {
+	for (const stage of ["building", "review", "landed", "asking"]) reads(`stage-${stage}`, ["background", "card"], 3);
+	reads("stage-landing", ["background", "card"], 3, [".dark"]);
+	// An accepted exception: landing is the amber lamp, the logo's honey, about 2.2:1 on light paper. Its mark never
+	// says "landing" by color alone: its glyph (●) and its words do, which WCAG 1.4.11 allows where what the color
+	// shows is there without it, and an amber lamp carries a ring of warn. It mustn't get paler than this.
+	reads("stage-landing", ["background", "card"], 2, [":root"]);
+	it("stage-landing on light paper is the one under 3:1", () => {
+		expect(contrast(value(":root", "stage-landing")!, value(":root", "background")!)).toBeLessThan(3);
+	});
 });
 
 // A hovered or highlighted item's surface shows on the muted surfaces too, not only on the card.
