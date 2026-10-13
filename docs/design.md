@@ -217,8 +217,11 @@ In the project repo:
   hash of the bucket, and the waits record in one more: every review handed
   out writes a bucket, and in the project repo those writes kept the repo busy
   for the batches landing on its branch.
-  The holds in the project repo from before are left behind; they're hints,
-  and lapse within 15 minutes anyway.
+  The holds in the project repo from before are left behind, and lapse within
+  15 minutes. Until then they're read and released alongside the new ones,
+  since otherwise a review taken just before the switch was handed out again
+  after it (a soak check found it, and a hosted review is a model run).
+  Waits on blocking roles started before the switch start over after it.
 - **Landing lease** `refs/notes/githive-landing/<repo>/<branch>`: which merge
   is landing a batch on the branch, and what it's checking. It's never in the
   project repo: it lives in the repo's first records repo (see Landing).
@@ -1462,8 +1465,8 @@ missed. It only wakes the agent, which then looks and chooses as always. Before
 rings, each agent took a turn every 10 seconds, reading its change, the reviews
 and the backlog whether anything had changed or not. Nothing assigns the work.
 Agents start together and each reads the backlog in its own order, then claims
-with `claim_work`, naming its next few free pieces, so a piece another agent
-took first costs a moment rather than a turn. An agent takes no new work once
+with `claim_work`, naming every free piece it hasn't tried, so a piece another
+agent took first costs a moment rather than a turn. An agent takes no new work once
 its time is up; it finishes what it started, then stops, and it stops early when
 nothing is left. Each turn starts by giving back claims in the agent's name that
 it doesn't know it holds, with nothing pushed and no builder at them: a claim
@@ -1666,6 +1669,17 @@ claiming under the same name is refused there too. Reading one change
 (`status`, `credentials`, `release`) reads the registry and the
 shards its index names, not every shard. A change with no index has claimed
 only in the registry.
+
+Two agents can still claim one name at once in two records: one in the registry
+before it saw the claims sharded, the other in a shard with an index, having
+checked a registry read from before the first claim. Each record refuses another
+agent under its name only within itself, and the check after writing skips
+claims under the claim's own name, so both were told they held it. In a soak
+check of 13 hosted agents starting together, 3 runs in 4 had an agent building
+a piece another agent held. The check after writing now also looks for another
+agent's claim under the same name, in the records just written as well, and the
+earlier claim (by its time, then its agent) keeps the name; the later backs out
+as refused.
 
 **The registry is the shard above every other.** The claims held when it
 shards stay in it and are released from it. Each claim writes first, then

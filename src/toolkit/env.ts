@@ -18,7 +18,15 @@ import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
-import { holdsRef, holdsRepoOf, type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
+import {
+	holdsRef,
+	holdsRepoOf,
+	REVIEW_HOLD_MS,
+	type ReviewHolds,
+	reviewHolds,
+	reviewsRef,
+	reviewsRepoOf,
+} from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import { conflictLine } from "./landing";
@@ -408,6 +416,7 @@ function hostedParts(env: Env) {
 		reviews: reviewHolds({
 			waits: (repo) => reviewsLog(env, repo),
 			holds: (repo, bucket) => holdsLog(env, repo, bucket),
+			earlier: (repo, bucket) => holdsBeforeSpread(env, repo, bucket),
 		}),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
@@ -418,16 +427,31 @@ function hostedParts(env: Env) {
 // How many records repos a repo's records are spread over, as its claims registry says. A repo spreads its records
 // once and never gathers them again, so a spread seen is kept for the isolate a while: a call reading all 16 review
 // hold buckets read the registry for each.
-const spreads = new SizedCache<{ spread: number; until: number }>("records spreads", 256);
+const spreads = new SizedCache<{ spread: number; at?: string; until: number }>("records spreads", 256);
 const SPREAD_KEPT_MS = 10 * 60_000;
 
-async function recordsSpread(env: Env, repo: string) {
+/** How many records repos the repo's records are spread over, and since when. */
+async function spreadOf(env: Env, repo: string): Promise<{ spread: number; at?: string }> {
 	const kept = spreads.get(repo);
-	if (kept && kept.until > Date.now()) return kept.spread;
+	if (kept && kept.until > Date.now()) return kept;
 	const registry = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state;
 	const spread = registry?.recordsRepos ?? 0;
-	if (spread) spreads.set(repo, { spread, until: Date.now() + SPREAD_KEPT_MS });
-	return spread;
+	const at = registry?.shardedAt;
+	if (spread) spreads.set(repo, { spread, ...(at ? { at } : {}), until: Date.now() + SPREAD_KEPT_MS });
+	return { spread, ...(at ? { at } : {}) };
+}
+
+const recordsSpread = async (env: Env, repo: string) => (await spreadOf(env, repo)).spread;
+
+/**
+ * A bucket of holds where it was kept before the repo spread its records, while a hold placed there may still be
+ * live; after that, nothing there counts, and the project repo isn't read for it.
+ */
+async function holdsBeforeSpread(env: Env, repo: string, bucket: string) {
+	const { spread, at } = await spreadOf(env, repo);
+	if (!spread || !at) return null;
+	if (Date.now() > Date.parse(at) + REVIEW_HOLD_MS) return null;
+	return recordsLog<ReviewHolds>(env, repo, holdsRef(repo, bucket));
 }
 
 async function reviewsLog(env: Env, repo: string) {

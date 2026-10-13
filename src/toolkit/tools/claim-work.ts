@@ -3,14 +3,15 @@ import { type BacklogView, backlogFor } from "../work";
 import { changeList } from "./claim-input";
 import { claimTools } from "./claim-tools";
 import { type Args, openCall, type ToolCall, type ToolHandlers } from "./context";
+import { LISTED_AT_MOST } from "./repo";
 
 // claim_work: the first free piece of the backlog among those the caller names, in its order, claimed in one call.
 // Agents reading the same backlog at once often go for the same piece; the one that loses moves on to its next
 // choice here, rather than waiting a turn to read the backlog again. Each piece is claimed as `claim` would claim
 // it: its paths, its title and intent, and the pieces it lands after.
 
-/** The most pieces one call may name. */
-export const MOST_PIECES_NAMED = 10;
+/** The most pieces one call may name: as many as `backlog` lists. */
+export const MOST_PIECES_NAMED = LISTED_AT_MOST;
 
 type FreePiece = BacklogView["open"][number];
 type PassedOver = { piece: string; reason: string };

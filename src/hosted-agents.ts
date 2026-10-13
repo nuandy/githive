@@ -32,9 +32,8 @@ export const AGENT_TURN_GAP_MS = 5_000;
 
 const TURN_BEGAN = "turn-began";
 const RUNG_AT = "rung-at";
-
-/** How many free pieces an agent names when it claims: enough to get past the few others went for first. */
-const PIECES_NAMED = 5;
+/** When a ring that may offer work last passed the agent by because it was busy (see ring). */
+const PASSED_WHILE_BUSY = "passed-while-busy";
 
 /** Turns in a row an agent's loop may fail before it stops. */
 const FAILING_MOST = 15;
@@ -178,13 +177,16 @@ export class HostedAgent extends DurableObject<Env> {
 	async ring(rung: HiveRing | string) {
 		const state = await this.ctx.storage.get<HostedAgentState>("agent");
 		if (!state || state.done) return false;
-		if (!wakes(typeof rung === "string" ? { reason: rung } : rung, state)) return true;
+		const ring = typeof rung === "string" ? { reason: rung } : rung;
+		if (!wakes(ring, state)) {
+			// A turn under way may yet leave it with room: its end looks at this (see rungSince).
+			if (ring.opens) await this.ctx.storage.put(PASSED_WHILE_BUSY, Date.now());
+			return true;
+		}
 		const now = Date.now();
 		await this.ctx.storage.put(RUNG_AT, now);
 		const began = (await this.ctx.storage.get<number>(TURN_BEGAN)) ?? 0;
-		const turnAt = Math.max(now, began + AGENT_TURN_GAP_MS);
-		const set = await this.ctx.storage.getAlarm();
-		if (set === null || set > turnAt) await this.ctx.storage.setAlarm(turnAt);
+		await this.turnBy(Math.max(now, began + AGENT_TURN_GAP_MS));
 		return true;
 	}
 
@@ -265,15 +267,38 @@ export class HostedAgent extends DurableObject<Env> {
 		const stopped = (await this.ctx.storage.get<HostedAgentState>("agent"))?.done;
 		if (stopped) state.done = true;
 		await this.ctx.storage.put("agent", state);
-		if (!state.done) await this.ctx.storage.setAlarm(await this.nextTurnAt(began));
+		if (state.done) return;
+		await this.ctx.storage.setAlarm(await this.nextTurnAt(began, state));
+		// A ring between reading the ring time and setting the alarm set an earlier alarm, which the line above wrote
+		// over: look once more. A ring after this sets its own.
+		if (await this.rungSince(began, state)) await this.turnBy(this.soonAfter(began));
 	}
 
 	// A ring during the turn may be about something its reads came too early to see, so it brings the next turn
 	// forward; otherwise the agent waits to be rung.
-	private async nextTurnAt(began: number) {
-		const rung = (await this.ctx.storage.get<number>(RUNG_AT)) ?? 0;
-		if (rung >= began) return Math.max(Date.now(), began + AGENT_TURN_GAP_MS);
+	private async nextTurnAt(began: number, state: HostedAgentState) {
+		if (await this.rungSince(began, state)) return this.soonAfter(began);
 		return Date.now() + AGENT_FALLBACK_MS;
+	}
+
+	/**
+	 * Whether something rang for it during the turn begun at `began`: a ring that woke it, or one that may offer
+	 * work and passed it by as busy, if the turn has left it with room.
+	 */
+	private async rungSince(began: number, state: HostedAgentState) {
+		if (((await this.ctx.storage.get<number>(RUNG_AT)) ?? 0) >= began) return true;
+		if (state.change && state.reviewing) return false;
+		return ((await this.ctx.storage.get<number>(PASSED_WHILE_BUSY)) ?? 0) >= began;
+	}
+
+	private soonAfter(began: number) {
+		return Math.max(Date.now(), began + AGENT_TURN_GAP_MS);
+	}
+
+	/** Sets the next turn for `at`, unless one is already set sooner. */
+	private async turnBy(at: number) {
+		const set = await this.ctx.storage.getAlarm();
+		if (set === null || set > at) await this.ctx.storage.setAlarm(at);
 	}
 
 	/** Its own change first, then a review of another's, then the backlog; it stops when nothing's left for it. */
@@ -380,8 +405,9 @@ export class HostedAgent extends DurableObject<Env> {
 	 * it. With none of them free it waits a turn.
 	 */
 	private async takePiece(state: HostedAgentState, backlog: BacklogView, call: Call) {
-		const untried = backlog.open.filter((open) => !state.tried.includes(open.id));
-		const pieces = untried.slice(0, PIECES_NAMED).map((open) => open.id);
+		// Every untried free piece, so it reaches one however many others went for the same ones first; one taken
+		// costs only a refused claim.
+		const pieces = backlog.open.filter((open) => !state.tried.includes(open.id)).map((open) => open.id);
 		if (!pieces.length) return;
 		// A claim that fails partway is given back by the claim itself, or as a stray at the next turn.
 		const claimed = (await call("claim_work", { pieces })) as { ok?: boolean; change?: string };

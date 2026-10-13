@@ -66,7 +66,14 @@ const reviewKey = (change: string, head: string, agent: string) => `${change}@${
 type Vote = Parameters<typeof castHostedVote>[2];
 
 /** GitHive's builder and reviewers, standing in: what they're at, and what they've done. */
-function standIns(tool: Tool, hooks: { notePush: NotePush; vote: (vote: Vote, author: string) => Promise<void> }) {
+/** What the stand-ins do: push and vote through these, and whether some builders give up. */
+interface Crew {
+	notePush: NotePush;
+	vote: (vote: Vote, author: string) => Promise<void>;
+	givingUp: boolean;
+}
+
+function standIns(tool: Tool, hooks: Crew) {
 	const building = new Set<string>();
 	const reviewed = new Set<string>();
 	const tally = { gaveUp: 0, givenBack: 0 };
@@ -83,7 +90,7 @@ function standIns(tool: Tool, hooks: { notePush: NotePush; vote: (vote: Vote, au
 		const first = !triedOnce.has(change);
 		triedOnce.add(change);
 		const pieceNumber = Number(change.replace("piece-", ""));
-		if (first && pieceNumber % GIVE_UP_EVERY === 1) {
+		if (hooks.givingUp && first && pieceNumber % GIVE_UP_EVERY === 1) {
 			tally.gaveUp++;
 			await retried(() => tool("release", { change, agent, reason: "its builder gave up" }, agent));
 			return;
@@ -145,7 +152,7 @@ function standIns(tool: Tool, hooks: { notePush: NotePush; vote: (vote: Vote, au
 }
 
 /** Repo "p"'s hive of hosted agents, their RepoCache, and the stand-ins they start. */
-function soakHive() {
+function soakHive({ givingUp = true } = {}) {
 	const instances = new Map<string, Agent>();
 	const storages = new Map<string, FakeStorage>();
 	const hostedAgents = { getByName: (name: string) => instanceFor(name) };
@@ -158,7 +165,7 @@ function soakHive() {
 	const notePush = (change: string, head: string) =>
 		cache.notePushes([{ change, fork: `p--${change}`, head, at: Date.now() }]);
 	const vote = (cast: Vote, author: string) => castHostedVote(ctx, "p", cast, author);
-	const crew = standIns(tool, { notePush, vote });
+	const crew = standIns(tool, { notePush, vote, givingUp });
 
 	class SoakAgent extends HostedAgent {
 		protected override callTool(name: string, args: Record<string, unknown>, agent: string) {
@@ -256,9 +263,14 @@ it("GitHive's own agents land every piece once and stop, however the store fails
 	});
 });
 
-it("GitHive's own agents starting together on a free backlog each claim a piece on their first turn", async () => {
-	const hive = soakHive();
-	await seedRun(hive.ctx, soakPieces(MOST_HIVE_AGENTS));
+const atOnce = "GitHive's own agents starting together on a free backlog each claim a piece of their own at once";
+it(atOnce, { timeout: 60_000 }, async () => {
+	// No builder gives a piece up, so every claim made is still held when it's checked.
+	const hive = soakHive({ givingUp: false });
+	// As in the demo: equal pieces, and wiring that lands after them all, so it comes last in every agent's order.
+	const equal = soakPieces(MOST_HIVE_AGENTS - 1);
+	const wiring = { id: "wiring", after: [], landsAfter: equal.map((piece) => piece.id) };
+	await seedRun(hive.ctx, [...equal, wiring]);
 	const status = await hive.repoHive.start({ repo: "p", count: MOST_HIVE_AGENTS, minutes: 45, by: "ada" });
 	const agents = status!.names.map((name) => hive.instanceFor(`agent:p:${name}`));
 	// Their first turns at once, as their alarms fire together.
@@ -266,5 +278,11 @@ it("GitHive's own agents starting together on a free backlog each claim a piece 
 	const accounts = await Promise.all(agents.map((agent) => agent.account()));
 	await hive.repoHive.stopAll();
 	await Promise.all([...hive.crew.started]);
-	expect(new Set(accounts.map((account) => account?.change)).size).toBe(MOST_HIVE_AGENTS);
+	const holderOf = async (change: string) =>
+		((await callTool("status", { repo: "p", change }, hive.ctx)) as { claim?: { agent: string } }).claim?.agent;
+	const taken = accounts.flatMap((account) => (account?.change ? [account] : []));
+	// Each agent holds what it was told it claimed: two agents racing for one never both hold it.
+	const held = await Promise.all(taken.map(async (account) => [account.name, await holderOf(account.change!)]));
+	expect(taken).toHaveLength(MOST_HIVE_AGENTS);
+	expect(held.filter(([name, holder]) => holder !== name)).toEqual([]);
 });

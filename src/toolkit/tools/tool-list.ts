@@ -234,7 +234,7 @@ const TOOL_LIST = [
 		name: "claim_work",
 		description:
 			"Claim the first free piece of the backlog among `pieces` (backlog ids, in the order you'd take " +
-			"them; at most 10), each as claim would: its paths, its title and intent, and what it lands " +
+			"them; at most 40), each as claim would: its paths, its title and intent, and what it lands " +
 			"after. Agents reading the backlog at once often go for the same piece: the one that loses moves " +
 			"on to its next choice in the same call. The reply is claim's, with the piece taken as `change` " +
 			"and its `intent`, and `passedOver` saying why each piece named before it wasn't taken. With none " +

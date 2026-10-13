@@ -62,6 +62,31 @@ describe("claims made all at once, across the switch to spreading them out", { t
 	});
 });
 
+describe("claims of the same pieces by several agents at once, as the claims spread out", { timeout: 180_000 }, () => {
+	it("leave each claim told as made read back as its agent's, and a refused one nothing", async () => {
+		const { call } = shardingToolCalls(() => server);
+		await call("settings", { required: 1, vetoes: [] });
+		const pieces = PIECES.slice(0, 7);
+		const agents = Array.from({ length: 13 }, (_, index) => ({ agent: `agent-${index}`, piece: pieces[index % 7]! }));
+		const claimed = await Promise.all(
+			agents.map(({ agent, piece }) =>
+				call("claim", { change: `${piece}-1`, agent, paths: pathsOf(piece), intent: piece }),
+			),
+		);
+		const told = agents.filter((_, index) => claimed[index]?.ok === true);
+		const holders = await Promise.all(
+			pieces.map(async (piece) => {
+				const status = await call("status", { change: `${piece}-1` });
+				return [piece, (status as { claim?: { agent?: string } | null }).claim?.agent ?? null] as const;
+			}),
+		);
+		const holderOf = new Map(holders);
+		const wrong = told.filter(({ agent, piece }) => holderOf.get(piece) !== agent);
+		const unheld = pieces.filter((piece) => holderOf.get(piece) === null);
+		expect({ wrong, unheld, told: told.length }).toEqual({ wrong: [], unheld: [], told: pieces.length });
+	});
+});
+
 describe("a change's claim, read through a kept copy of the registry", { timeout: 60_000 }, () => {
 	it("is found, though the copy is from before the claim, rather than reported missing", async () => {
 		const remote = async () => ({ url: server.url, token: "unused" });

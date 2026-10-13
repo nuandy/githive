@@ -79,7 +79,7 @@ describe("claim_work", () => {
 
 	it("refuses a list of no pieces, or of too many", async () => {
 		await expect(call("claim_work", { agent: "a", pieces: [] }, "a")).rejects.toThrow(/pieces names backlog pieces/);
-		const many = Array.from({ length: 11 }, (_, i) => `p${i}`);
-		await expect(call("claim_work", { agent: "a", pieces: many }, "a")).rejects.toThrow(/at most 10/);
+		const many = Array.from({ length: 41 }, (_, i) => `p${i}`);
+		await expect(call("claim_work", { agent: "a", pieces: many }, "a")).rejects.toThrow(/at most 40/);
 	});
 });

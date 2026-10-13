@@ -130,6 +130,22 @@ export function claimStore(input: StoreInput): ClaimStore {
 // The registry, as the shard above every other.
 const ROOT = "";
 
+/**
+ * The first claim under `change` among `entries`, by its time, then its agent. Two agents can claim one name at once
+ * in two records (one in the registry before it saw the claims sharded, one in a shard), and each record refuses
+ * another agent's claim only within itself. Every agent that sees both agrees which came first; the other backs out.
+ */
+function firstUnderName(change: string, entries: Entry[]) {
+	const named = entries.flatMap((entry) => activeClaims(entry.state)).filter((held) => held.change === change);
+	return named.sort((a, b) => a.since.localeCompare(b.since) || a.agent.localeCompare(b.agent))[0];
+}
+
+// The change's name, held first by another agent, as a conflict on the claim's paths.
+function nameTaken(input: ClaimInput, first: ClaimRecord): Conflict {
+	const path = input.paths[0] ?? "";
+	return { path, held: first.paths[0] ?? path, change: first.change, agent: first.agent, intent: first.intent };
+}
+
 // A claim spanning more shards than this is written once, in the shard that holds them all.
 const MAX_SPREAD = 4;
 
@@ -487,7 +503,8 @@ class Claims implements ClaimStore {
 		placed: Map<string, string[]>,
 		stamper?: Stamper,
 	): Promise<Conflict[]> {
-		const above = new Set<string>();
+		// The records just written too, for this claim's own time against another under its name (see firstUnderName).
+		const above = new Set<string>(placed.keys());
 		const belowOf: string[] = [];
 		for (const [shard, paths] of placed) {
 			if (shard !== ROOT) for (const ancestor of [ROOT, ...ancestorsOf(shard)]) above.add(ancestor);
@@ -521,6 +538,8 @@ class Claims implements ClaimStore {
 				live.push(conflict);
 			}
 		}
+		const first = firstUnderName(input.change, [...root, ...shards]);
+		if (first && first.agent !== input.agent) live.push(nameTaken(input, first));
 		return live;
 	}
 

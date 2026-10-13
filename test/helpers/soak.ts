@@ -79,6 +79,8 @@ export function keepFailing(server: GitServer) {
 export interface SoakPiece {
 	id: string;
 	after: string[];
+	/** Pieces it lands after, though it's handed out at once, as the demo's wiring is. */
+	landsAfter?: string[];
 }
 
 /**
@@ -95,7 +97,14 @@ export function soakPieces(count: number, width = count): SoakPiece[] {
 export async function seedRun(ctx: ToolContext, pieces: SoakPiece[]) {
 	const setup = (name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, ctx);
 	await setup("settings", { required: 1, vetoes: [] });
-	const items = pieces.map(({ id, after }) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`], after }));
+	const items = pieces.map(({ id, after, landsAfter }) => ({
+		id,
+		title: id,
+		intent: `build ${id}`,
+		paths: [`src/${id}/`],
+		after,
+		...(landsAfter ? { lands_after: landsAfter } : {}),
+	}));
 	await setup("add_work", { agent: "planner", items });
 }
 

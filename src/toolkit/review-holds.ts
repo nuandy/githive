@@ -78,10 +78,13 @@ export async function holdReview(
 	agent: string,
 	needed: number,
 	now = () => Date.now(),
+	elsewhere: string[] = [],
 ) {
 	const outcome = await appendRecord<ReviewHolds, "taken">(log, AUTHOR, empty, (state) => {
 		const holds = live(state.holds, now());
-		const others = Object.keys(holds[key] ?? {}).filter((holder) => holder !== agent);
+		// Holders in where the holds were kept before (see ReviewLogs.earlier) count too.
+		const holders = new Set([...Object.keys(holds[key] ?? {}), ...elsewhere]);
+		const others = [...holders].filter((holder) => holder !== agent);
 		if (others.length >= needed) return { refused: "taken" };
 		holds[key] = { ...holds[key], [agent]: new Date(now() + REVIEW_HOLD_MS).toISOString() };
 		return { state: { ...state, holds }, text: `${agent} reviews ${key}` };
@@ -161,21 +164,49 @@ type HoldsLog = CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>;
 export interface ReviewLogs {
 	waits(repo: string): HoldsLog;
 	holds(repo: string, bucket: string): HoldsLog;
+	/**
+	 * Where a bucket's holds were kept before the repo spread its records, while a hold placed there may still be
+	 * live; null otherwise. Holds there are read and released alongside, so a review taken just before the switch
+	 * isn't handed out again after it.
+	 */
+	earlier?(repo: string, bucket: string): Promise<CasLog<ReviewHolds> | null>;
+}
+
+// Holds read from two places, each review's holders from both.
+function joinHeld(now: Record<string, string[]>, before: Record<string, string[]>) {
+	const joined = { ...now };
+	for (const [key, agents] of Object.entries(before)) joined[key] = [...new Set([...(joined[key] ?? []), ...agents])];
+	return joined;
 }
 
 /** Review holds for the review tools (ToolContext.reviews). */
 export function reviewHolds(logs: ReviewLogs): NonNullable<ToolContext["reviews"]> {
 	const holdsFor = (repo: string, key: string) => logs.holds(repo, holdBucketOf(key));
+	const earlierFor = async (repo: string, key: string) => (await logs.earlier?.(repo, holdBucketOf(key))) ?? null;
+	// A bucket's holds, with those still live where they were kept before.
+	const heldIn = async (repo: string, bucket: string) => {
+		const [log, earlier] = await Promise.all([logs.holds(repo, bucket), logs.earlier?.(repo, bucket) ?? null]);
+		const [now, before] = await Promise.all([heldReviews(await log), earlier ? heldReviews(earlier) : {}]);
+		return joinHeld(now, before);
+	};
 	return {
 		// The holds on these heads (every bucket when none are named), read bucket by bucket.
 		held: async (repo, heads) => {
 			const every = Array.from({ length: HOLD_BUCKETS }, (_, bucket) => String(bucket));
 			const buckets = heads ? [...new Set(heads.map((head) => bucketOf(head, HOLD_BUCKETS)))] : every;
-			const read = await Promise.all(buckets.map(async (bucket) => heldReviews(await logs.holds(repo, bucket))));
+			const read = await Promise.all(buckets.map((bucket) => heldIn(repo, bucket)));
 			return Object.assign({}, ...read);
 		},
-		hold: async (repo, key, agent, needed) => holdReview(await holdsFor(repo, key), key, agent, needed),
-		release: async (repo, key, agent, gaveUp) => releaseReview(await holdsFor(repo, key), key, agent, { gaveUp }),
+		hold: async (repo, key, agent, needed) => {
+			const earlier = await earlierFor(repo, key);
+			const elsewhere = earlier ? ((await heldReviews(earlier))[key] ?? []) : [];
+			return holdReview(await holdsFor(repo, key), key, agent, needed, undefined, elsewhere);
+		},
+		release: async (repo, key, agent, gaveUp) => {
+			const earlier = await earlierFor(repo, key);
+			if (earlier) await releaseReview(earlier, key, agent, { gaveUp }).catch(() => undefined);
+			await releaseReview(await holdsFor(repo, key), key, agent, { gaveUp });
+		},
 		waits: async (repo, keys) => roleWaits(await logs.waits(repo), keys),
 		told: async (repo, key) => roleWaitTold(await logs.waits(repo), key),
 	};

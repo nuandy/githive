@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/toolkit/claim-store";
 import { claim, type Registry } from "../src/toolkit/claims";
@@ -141,8 +141,17 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 
 	it("reads every shard in one listing and one fetch, however many there are", async () => {
 		for (const i of [1, 2, 3, 4, 5]) await store().claim(want(`c-${i}`, [`area${i}/x/`]));
+		// Claiming read each shard as it checked, so a reader that hasn't seen them is a fresh copy of the store.
+		vi.resetModules();
+		const { claimStore: freshStore } = await import("../src/toolkit/claim-store");
+		const reader = freshStore({
+			repo: "p",
+			registry: { claims: [], released: [], shardDepth: 2 },
+			root: root(),
+			remote,
+		});
 		const before = server.requests.length;
-		expect((await store().read()).claims).toHaveLength(5);
+		expect((await reader.read()).claims).toHaveLength(5);
 		// The shards' listing and fetch, and the registry's listing (it has nothing to fetch here).
 		expect(server.requests.slice(before).sort()).toEqual([
 			"GET refs?service=git-upload-pack",
@@ -151,7 +160,7 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		]);
 		// Nothing changed since: the listings alone, the states already known.
 		const again = server.requests.length;
-		expect((await store().read()).claims).toHaveLength(5);
+		expect((await reader.read()).claims).toHaveLength(5);
 		expect(server.requests.slice(again)).toEqual([
 			"GET refs?service=git-upload-pack",
 			"GET refs?service=git-upload-pack",
