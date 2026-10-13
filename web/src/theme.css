@@ -464,9 +464,18 @@
 		color: var(--link);
 		text-decoration: none;
 	}
+	/* A link in running text (a paragraph, a callout, a block marked prose) is underlined, faintly, so more than its
+	   color tells it from the words around it (WCAG 1.4.1). Links that stand on their own (navigation, tabs,
+	   breadcrumbs, pills, a row's title) aren't in running text: a paragraph laid out as a row (flex or grid) isn't
+	   either, and a component (a button as a link) or no-underline says otherwise. */
+	:where(p:not(.flex, .inline-flex, .grid), blockquote, figcaption, [data-slot="callout"], .prose) a:not([data-slot]) {
+		text-decoration-line: underline;
+		text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+		text-underline-offset: 2px;
+	}
 	a:hover {
 		text-decoration: underline;
-		text-underline-offset: 0.18em;
+		text-underline-offset: 2px;
 	}
 	/* One focus ring for everything that takes focus: buttons, fields, links, menus' triggers. Only what sits inside a
 	   group draws it inside itself (a segmented control's choice, a tab), and a menu's items light up instead. */

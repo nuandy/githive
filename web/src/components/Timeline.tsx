@@ -142,7 +142,7 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 			{item.body ? (
 				<div
 					className={cn(
-						"mt-1.5 text-foreground whitespace-pre-wrap wrap-anywhere",
+						"prose mt-1.5 text-foreground whitespace-pre-wrap wrap-anywhere",
 						// A commit's message in a box of its own, in the code's face; anything else, set off by a rule.
 						item.kind === "pushed"
 							? "rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-meta"

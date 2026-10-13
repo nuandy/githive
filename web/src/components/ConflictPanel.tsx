@@ -65,7 +65,7 @@ function ConflictedFile({
 			{touchedBy.length ? (
 				<>
 					<p className={LABEL}>Changed on {into} since this change left it, by:</p>
-					<ul className="m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
+					<ul className="prose m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
 						{touchedBy.map((touched) => (
 							<ChangedBy key={touched.commit} touched={touched} repo={repo} />
 						))}

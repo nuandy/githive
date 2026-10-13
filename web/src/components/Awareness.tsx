@@ -85,7 +85,8 @@ function AlteredBy({ overlap, repo }: { overlap: Overlap; repo: string }) {
 
 const NOTE = "m-0 text-meta";
 const HEADING = "mt-1 text-meta font-semibold text-muted-foreground";
-const LINES = "m-0 grid list-disc gap-2 pl-4.5 text-ui-lg";
+/** Sentences, one a bullet: their links are underlined as in a paragraph. */
+const LINES = "prose m-0 grid list-disc gap-2 pl-4.5 text-ui-lg";
 
 /**
  * The awareness section of a change's page, while its claim is in force and its footprint is kept. Beside the

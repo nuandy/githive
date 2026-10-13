@@ -166,3 +166,13 @@ describe("the hover surface", () => {
 		expect(block(".dark")).not.toMatch(/--accent:/);
 	});
 });
+
+// A link in a sentence is told from the words around it by more than its color (WCAG 1.4.1); one standing on its own
+// (navigation, a row's title, a button) keeps the bare look.
+describe("links in running text", () => {
+	it("are underlined in paragraphs, callouts and prose blocks, but not in rows laid out as flex or grid", () => {
+		const rule =
+			/:where\(p:not\(\.flex, \.inline-flex, \.grid\),[^{]*\.prose\) a:not\(\[data-slot\]\) \{([^}]*)\}/.exec(css);
+		expect(rule?.[1]).toMatch(/text-decoration-line: underline;/);
+	});
+});
