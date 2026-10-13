@@ -332,7 +332,8 @@ export interface ChangeHistory {
 	branch: string;
 	/** The claim in force, or null once it merged or was released. */
 	claim: Omit<RepoSnapshot["claims"][number], "head" | "approval" | "hosted"> | null;
-	released: { reason: string; at: string; mergedAs?: string; agent: string; stale?: boolean }[];
+	/** How its claim ended: `agent` held it, `by` released it (its agent, another as stale, or a person). */
+	released: { reason: string; at: string; mergedAs?: string; agent: string; by?: string; stale?: boolean }[];
 	/** The change's own commits, newest first. */
 	commits: { commit: string; message: string; author: string; at: string }[];
 	votes: RepoSnapshot["votes"];
@@ -342,6 +343,54 @@ export interface ChangeHistory {
 	attempts?: string[];
 	/** While its claim is in force: its footprint, and where it meets other open changes (newer servers). */
 	awareness?: ChangeAwareness;
+}
+
+/** One hunk of a file's diff: where it starts on each side and how many lines it spans, and its lines. */
+export interface DiffHunk {
+	oldStart: number;
+	oldLines: number;
+	newStart: number;
+	newLines: number;
+	/** Each line marked " " kept, "-" removed or "+" added; "\\ No newline at end of file" after a side's last. */
+	lines: string[];
+}
+
+/** One file a change changed. Binary and too-big files aren't diffed; a cut one kept its counts, not its lines. */
+export interface FileDiff {
+	path: string;
+	status: "added" | "removed" | "modified";
+	added?: number;
+	removed?: number;
+	/** Outside the change's claim. */
+	outside?: true;
+	binary?: true;
+	tooBig?: true;
+	/** Its lines were left out: the diff's text (about 1 MB) ran out before it. */
+	cut?: true;
+	hunks?: DiffHunk[];
+}
+
+/**
+ * A change's files (GET /repos/:repo/changes/:change/diff): its head against where it left its branch ("head"), or the
+ * commit it landed as against the branch before ("landed"). Base and head are null when nothing is pushed.
+ */
+export interface ChangeDiff {
+	change: string;
+	of: "head" | "landed";
+	base: string | null;
+	head: string | null;
+	/** Sorted by path, at most 300. */
+	files: FileDiff[];
+	/** Every file it changed: more than `files` lists when there were too many. */
+	total: number;
+}
+
+/** What a person's release answers: released, or why not. */
+export interface ReleaseAnswer {
+	ok: boolean;
+	released?: string;
+	note?: string;
+	refused?: string;
 }
 
 /** A commit on the branch that touched a conflicted file since the change left it. */
@@ -517,6 +566,10 @@ export interface RepoAccess {
 	visibility: "private" | "public" | null;
 	/** Its default branch (newer servers), or null for a repo with no commits. */
 	branch?: string | null;
+	/** A person's identity in the records, "person:<hash>" (newer servers): who their votes are counted as. */
+	by?: string;
+	/** A person's teams in the repo's org, "@<org>/<team>" (newer servers): roles granted to a team are theirs. */
+	teams?: string[];
 }
 
 /** A new repository: imported, copied, or empty. */
@@ -612,6 +665,14 @@ export const api = {
 	/** One change: its claim or how it ended, its commits and the votes on them. */
 	change: (repo: string, change: string) =>
 		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
+	/** One change's files, each with its diff. */
+	diff: (repo: string, change: string) =>
+		call<ChangeDiff>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/diff`),
+	/** A person releases a change's claim, whoever's it is, saying why: its paths free, its agent told. */
+	release: (repo: string, change: string, reason: string) =>
+		call<ReleaseAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/release`, {
+			reason,
+		}),
 	/** What the caller may do in a repo, and whether it's private or public. */
 	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
 	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
