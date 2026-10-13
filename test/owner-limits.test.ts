@@ -8,10 +8,11 @@ import { IdentityStore } from "../src/auth/store";
 import { pushChange } from "./helpers/agents";
 import { fakeD1 } from "./fakes/d1";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { soakReviews } from "./helpers/soak";
 import { toolCalls } from "./helpers/tool-calls";
 
-// An agent's owner sets how much of other people's work it does: building their backlog pieces (never, by default)
-// and reviewing their changes (no limit, by default), counted a UTC day at a time. GitHive keeps to it where such
+// An agent's owner sets how much of other people's work it does: building their backlog pieces and reviewing their
+// changes, both never by default, counted a UTC day at a time. GitHive keeps to it where such
 // work starts, and nowhere else.
 
 const DAY = 86_400_000;
@@ -29,14 +30,21 @@ async function ownedAgent() {
 }
 
 describe("an agent's limits", () => {
-	it("default to building nothing of other people's and reviewing without limit", async () => {
+	it("default to building and reviewing nothing of other people's", async () => {
 		const { limits, agent } = await ownedAgent();
-		expect(await limits.limitsOf(agent.id)).toEqual({ build: 0, review: null });
+		expect(await limits.limitsOf(agent.id)).toEqual({ build: 0, review: 0 });
 		const its = limits.ownerLimits(agent.id);
 		expect(await its.take("build")).toMatch(/^Its owner doesn't let this agent build other people's backlog pieces/);
-		expect(await its.take("review")).toBeNull();
-		expect(await its.take("review")).toBeNull();
-		expect(await limits.countsToday([agent.id])).toEqual({ [agent.id]: { build: 0, review: 2 } });
+		expect(await its.take("review")).toMatch(/^Its owner doesn't let this agent review other people's changes/);
+		expect(await limits.countsToday([agent.id])).toEqual({ [agent.id]: { build: 0, review: 0 } });
+	});
+
+	it("keep no limit where an agent made before the default has it, until its owner changes it", async () => {
+		const { limits, agent } = await ownedAgent();
+		await limits.setLimits(agent.id, { build: 0, review: null });
+		expect(await limits.ownerLimits(agent.id).take("review")).toBeNull();
+		await limits.setLimits(agent.id, { build: 0, review: 0 });
+		expect(await limits.ownerLimits(agent.id).take("review")).toMatch(/doesn't let this agent review/);
 	});
 
 	it("allow up to the number a day, then refuse, and start again the next day", async () => {
@@ -98,11 +106,12 @@ afterEach(async () => {
 });
 
 describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () => {
-	/** Alice's agent, without limits, and Bob's, within `limit`: two people sharing the repo. */
-	async function twoOwners(limit: Record<EffortKind, number | null>) {
-		const bobs = limitsOf(limit);
-		const alice = toolCalls(() => server, { identity: "person:alice" });
-		const bob = toolCalls(() => server, { identity: "person:bob", ownerLimits: bobs });
+	/** Alice's agent, without limits, and Bob's, within `bobs`: two people sharing the repo. */
+	async function twoOwners<Limits extends OwnerLimits>(bobs: Limits) {
+		// Review holds kept as the Worker keeps them, since taking a review counts where it places its hold.
+		const reviews = soakReviews(server);
+		const alice = toolCalls(() => server, { identity: "person:alice", reviews });
+		const bob = toolCalls(() => server, { identity: "person:bob", ownerLimits: bobs, reviews });
 		await alice.call("settings", { required: 1 });
 		await alice.register("alice-agent");
 		await bob.register("bob-agent");
@@ -114,9 +123,47 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 		return { alice, bob, bobs, refusal };
 	}
 	const piece = (id: string) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] });
+	const claim = (agent: string, id: string) => ({ change: id, agent, paths: [`src/${id}/`], intent: id });
+	const approve = (commit: string) => ({
+		commit,
+		reviewer: "bob-agent",
+		role: "review",
+		verdict: "approve",
+		evidence: "ran it",
+	});
+
+	it("leave a new agent, at its defaults, building and reviewing none of another person's work", async () => {
+		const { limits, agent } = await ownedAgent();
+		const { alice, bob, refusal } = await twoOwners(limits.ownerLimits(agent.id));
+		await alice.call("add_work", { agent: "alice-agent", items: [piece("a1")] }, "alice-agent");
+		await alice.call("claim", claim("alice-agent", "c1"), "alice-agent");
+		const head = await pushChange(server.url, work, "alice-agent", "c1", { "src/c1/x.js": "1\n" });
+
+		// Never building theirs: Alice's piece waits, and claiming it is refused and given back.
+		const backlog = await bob.call("backlog", { agent: "bob-agent" }, "bob-agent");
+		expect(backlog.waiting).toContainEqual({
+			id: "a1",
+			reason: expect.stringMatching(/^your owner's limit: Its owner doesn't let this agent build/),
+		});
+		expect(await refusal("claim", claim("bob-agent", "a1"))).toMatch(/^403 Its owner doesn't let this agent build/);
+		expect((await alice.call("backlog", { agent: "alice-agent" }, "alice-agent")).open).toContainEqual(
+			expect.objectContaining({ id: "a1" }),
+		);
+		// Its own new work is its own, not another person's.
+		expect(await bob.call("claim", claim("bob-agent", "own-idea"), "bob-agent")).toMatchObject({ ok: true });
+
+		// Never reviewing theirs: none offered, and taking Alice's or voting on it is refused.
+		expect(await bob.call("reviews", { agent: "bob-agent" }, "bob-agent")).toMatchObject({ reviews: [] });
+		const credentials = { change: "c1", agent: "bob-agent" };
+		expect(await refusal("credentials", credentials)).toMatch(/^403 Its owner doesn't let this agent review/);
+		expect(await refusal("vote", approve(head))).toMatch(/^403 Its owner doesn't let this agent review/);
+		const status = await alice.call("status", { change: "c1", agent: "alice-agent" }, "alice-agent");
+		expect(status).toMatchObject({ approval: { approved: false, approvals: 0 } });
+		expect(await limits.countsToday([agent.id])).toEqual({ [agent.id]: { build: 0, review: 0 } });
+	});
 
 	it("lists other people's pieces as waiting, and refuses claiming one, past the building limit", async () => {
-		const { alice, bob, bobs, refusal } = await twoOwners({ build: 1, review: null });
+		const { alice, bob, bobs, refusal } = await twoOwners(limitsOf({ build: 1, review: null }));
 		await alice.call("add_work", { agent: "alice-agent", items: [piece("a1"), piece("a2")] }, "alice-agent");
 		await bob.call("add_work", { agent: "bob-agent", ...piece("b1") }, "bob-agent");
 		const claim = (id: string) => ({ change: id, agent: "bob-agent", paths: [`src/${id}/`], intent: id });
@@ -136,7 +183,7 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 	});
 
 	it("offers no reviews and takes none past the reviewing limit, counting a vote cast without one", async () => {
-		const { alice, bob, bobs, refusal } = await twoOwners({ build: 0, review: 1 });
+		const { alice, bob, bobs, refusal } = await twoOwners(limitsOf({ build: 0, review: 1 }));
 		for (const change of ["c1", "c2"])
 			await alice.call(
 				"claim",

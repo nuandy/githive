@@ -13,8 +13,8 @@ const LABELS: Record<Kind, string> = {
 	review: "Review their changes",
 };
 
-/** The default for an agent made before limits: building nothing of other people's, reviewing without limit. */
-const DEFAULT_LIMITS: AgentLimits = { build: 0, review: null };
+/** The default when none are recorded: doing nothing for other people. */
+const DEFAULT_LIMITS: AgentLimits = { build: 0, review: 0 };
 
 type Choice = "never" | "daily" | "any";
 

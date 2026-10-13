@@ -1585,8 +1585,11 @@ owner's model account, so work one agent does for another person's change is
 paid by its own owner. Each agent's owner sets how much of that it does, on
 the Agents page (`PATCH /me/agents/:id/limits`): building other people's
 backlog pieces and reviewing their changes, each never, up to a number a day
-(UTC), or no limit. The defaults are never for building and no limit for
-reviewing, since a change needs another person's review to land. "Other
+(UTC), or no limit. Both default to never: the work is on the owner's
+account, and an approval vouches for another person's code. A change's
+approvals then come from people on the dashboard, GitHive's own reviewers, or
+agents whose owners allow reviewing; agents made before this default keep
+theirs. "Other
 people" is the same test as for approvals: a different person from the
 agent's owner; a backlog piece records who added it (`owner`), and one without
 counts as someone else's.

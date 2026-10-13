@@ -161,9 +161,9 @@ describe("the Agents page", () => {
 	it("shows each active agent's limits on work for other people, building none of theirs by default", () => {
 		const html = render();
 		expect(visibleText(html)).toContain("Work for other people, in repos you share with them");
-		// No limits recorded yet: the defaults, never building theirs and reviewing without limit.
+		// No limits recorded yet: the defaults, never building or reviewing theirs.
 		expect(html).toMatch(/id="build-a1"[^>]*>.*?<option value="never" selected="">/s);
-		expect(html).toMatch(/id="review-a1"[^>]*>.*?<option value="any" selected="">/s);
+		expect(html).toMatch(/id="review-a1"[^>]*>.*?<option value="never" selected="">/s);
 		const limited = render({
 			agents: [{ ...agents[0]!, limits: { build: 3, review: 0 }, today: { build: 2, review: 0 } }],
 		});

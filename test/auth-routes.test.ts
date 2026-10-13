@@ -185,9 +185,10 @@ describe("a signed-in person", () => {
 		const session = await signedIn();
 		const agent = await json(call("/me/agents", { ...post({ name: "builder" }), cookie: session }));
 		const listed = await json(call("/me/agents", { cookie: session }));
-		expect(listed[0]).toMatchObject({ limits: { build: 0, review: null }, today: { build: 0, review: 0 } });
+		// A new agent does nothing for other people until its owner says so.
+		expect(listed[0]).toMatchObject({ limits: { build: 0, review: 0 }, today: { build: 0, review: 0 } });
 		const patch = (body: unknown) => ({ ...post(body), method: "PATCH", cookie: session });
-		expect(await json(call(`/me/agents/${agent.id}/limits`, patch({ build: 3 })))).toEqual({
+		expect(await json(call(`/me/agents/${agent.id}/limits`, patch({ build: 3, review: null })))).toEqual({
 			agent: agent.id,
 			limits: { build: 3, review: null },
 		});

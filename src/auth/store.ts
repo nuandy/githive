@@ -431,8 +431,12 @@ export class IdentityStore {
 			return { ...toAgent(existing), revokedAt: null };
 		}
 		const agent: Agent = { id: crypto.randomUUID(), ownerId, name: agentName, createdAt: this.iso(), revokedAt: null };
+		// A new agent does nothing for other people until its owner says how much: their work is on the owner's
+		// model account, and its approval vouches for their code. The column's default is older and says no limit.
 		await this.db
-			.prepare("INSERT INTO agents (id, owner_id, name, created_at) VALUES (?, ?, ?, ?)")
+			.prepare(
+				"INSERT INTO agents (id, owner_id, name, created_at, build_limit, review_limit) VALUES (?, ?, ?, ?, 0, 0)",
+			)
 			.bind(agent.id, ownerId, agent.name, agent.createdAt)
 			.run();
 		return agent;
