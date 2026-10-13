@@ -71,7 +71,7 @@ export const RULES: Record<string, RuleWords> = {
 
 /** A rule in words, and what to do; one the dashboard doesn't know yet in words made from its id. */
 export function violationWords(rule: string): RuleWords {
-	const known = RULES[rule];
+	const known = Object.hasOwn(RULES, rule) ? RULES[rule] : undefined;
 	if (known) return known;
 	const plain = rule.replace(/[-_]+/g, " ").trim();
 	return {

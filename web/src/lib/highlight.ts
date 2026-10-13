@@ -54,11 +54,15 @@ const NAMES: Record<string, string> = {
 	markdown: "markdown",
 };
 
+/** A table's own entry for `key`: never one an object inherits ("constructor", "toString"), which a file may name. */
+const own = <T>(table: Record<string, T>, key: string): T | undefined =>
+	Object.hasOwn(table, key) ? table[key] : undefined;
+
 /** The language to color a file in, by its extension, or a fence's name; undefined for one the tab doesn't color. */
 export function languageOf(path: string, name?: string): string | undefined {
-	if (name) return NAMES[name.toLowerCase()];
+	if (name) return own(NAMES, name.toLowerCase());
 	const extension = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
-	return extension ? NAMES[extension] : undefined;
+	return extension ? own(NAMES, extension) : undefined;
 }
 
 /** A run of text and the highlight.js scopes it's in, outermost first. */
@@ -130,7 +134,7 @@ const COLORS: Record<string, string> = {
 export function tokenClass(scopes: string[]): string | undefined {
 	for (const scope of [...scopes].reverse()) {
 		const name = scope.replace(/^hljs-/, "");
-		const color = COLORS[name] ?? COLORS[name.split(" ")[0]!];
+		const color = own(COLORS, name) ?? own(COLORS, name.split(" ")[0]!);
 		if (color) return color;
 	}
 	return undefined;
@@ -140,7 +144,7 @@ let core: Promise<HLJSApi> | undefined;
 
 /** `text` highlighted as `language`, as lines of tokens; null if it can't be (an unknown language, or it failed). */
 export async function highlight(text: string, language: string): Promise<Token[][] | null> {
-	const load = LANGUAGES[language];
+	const load = own(LANGUAGES, language);
 	if (!load) return null;
 	try {
 		core ??= import("highlight.js/lib/core").then((module) => module.default);

@@ -36,6 +36,8 @@ describe("the audit's rules in words", () => {
 			words: "Some new rule",
 			remedy: expect.stringMatching(/revert/),
 		});
+		// Even one named after an object's own key.
+		expect(violationWords("constructor")).toEqual({ words: "Constructor", remedy: expect.stringMatching(/revert/) });
 	});
 });
 
