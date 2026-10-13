@@ -1,7 +1,16 @@
 import type { RepoSnapshot } from "../api";
 import type { ChangeStatus } from "./changeStatus";
-import { identityName } from "./agent";
-import { type ChangeState, changeState, type StateContext, STATES, waitingOn } from "./status";
+import { displayName, identityName } from "./agent";
+import { listed } from "./decision";
+import {
+	type ChangeState,
+	changeState,
+	rejectionsOnHead,
+	type RepoPolicy,
+	type StateContext,
+	STATES,
+	waitingOn,
+} from "./status";
 
 // Repos keep no change records. A change is a claim in force, with its pushed head,
 // the approvals on that head, and any hosted agents on it.
@@ -16,13 +25,13 @@ export type Vote = RepoSnapshot["votes"][number];
 export function claimStatus(claim: Claim, votes: Vote[] = [], context: Omit<StateContext, "votes"> = {}): ChangeStatus {
 	const kind = changeState(claim, { ...context, votes });
 	const { label, tone } = STATES[kind];
-	return { kind, label, tone, description: describeState(kind, claim, votes, context.policy) };
+	return { kind, label, tone, description: describeState(kind, claim, votes, context.settings) };
 }
 
-function describeState(state: ChangeState, claim: Claim, votes: Vote[], policy?: RepoSnapshot["policy"]): string {
+function describeState(state: ChangeState, claim: Claim, votes: Vote[], settings?: RepoPolicy): string {
 	switch (state) {
 		case "needs-person": {
-			const waiting = waitingOn(claim, { votes, policy });
+			const waiting = waitingOn(claim, { votes, settings });
 			if (waiting?.kind === "vote") return `Waiting for a ${waiting.role} vote, which only a person can give.`;
 			if (!waiting || waiting.agent.startsWith("githive-")) return waiting?.reason ?? "It waits on a person.";
 			return `${waiting.agent} asks a person: ${waiting.reason}`;
@@ -37,8 +46,13 @@ function describeState(state: ChangeState, claim: Claim, votes: Vote[], policy?:
 			return claim.trusted
 				? "GitHub's changes, trusted: it lands through the checks without review."
 				: "Approved; it lands once its checks pass.";
-		case "landing":
-			return "Being checked to land, with the next batch.";
+		case "landing": {
+			// The batch being checked lands it all the same: a veto cast meanwhile says so, and stops the next one.
+			const asked = askedForChanges(claim, votes);
+			return asked.length
+				? `Being checked to land; ${listed(asked)} asked for changes meanwhile.`
+				: "Being checked to land, with the next batch.";
+		}
 		case "building":
 			return "Nothing pushed yet.";
 		case "abandoned":
@@ -57,6 +71,18 @@ function describeState(state: ChangeState, claim: Claim, votes: Vote[], policy?:
 }
 
 export { rejectionsOnHead } from "./status";
+
+/**
+ * Who asked for changes on the change's head, by role ("a reviewer" for review): its rejections, or, where the votes
+ * read don't show them, who vetoed it. Failed checks are the batch's to decide again.
+ */
+function askedForChanges(claim: Claim, votes: Vote[]): string[] {
+	const roles = rejectionsOnHead(claim, votes)
+		.map((vote) => vote.role)
+		.filter((role) => role !== "checks");
+	if (!roles.length) return claim.approval.vetoedBy.map((who) => displayName(who) ?? who);
+	return [...new Set(roles)].map((role) => (role === "review" ? "a reviewer" : role));
+}
 
 /** Roles that can block the change and haven't approved yet (older servers don't say). */
 export function awaitingVetoes(claim: Claim): string[] {

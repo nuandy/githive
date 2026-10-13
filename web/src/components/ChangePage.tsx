@@ -315,7 +315,7 @@ export function ChangePage({
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	const reader = access ?? {};
 	const { policy, verify } = branchSettings(snapshot, branch);
-	const status = statusOf(claim, history, { policy, landing }, votes);
+	const status = statusOf(claim, history, { settings: snapshot, landing }, votes);
 	// A change landing a whole branch shows that branch; any other, its own.
 	const branchCode = <code className={BRANCH}>{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className={BRANCH}>{branch}</code>;
@@ -323,7 +323,7 @@ export function ChangePage({
 	// Whether the reader can answer an agent's question here: the vote form shows, on a pushed commit.
 	const answerable = !!(claim?.head && api && canVote);
 	const mine = claim ? readerVote(claim, votes, reader.by) : undefined;
-	const canLand = !!(claim && merge && landable(claim, votes, { merge: history?.merge, landing, policy }));
+	const canLand = !!(claim && merge && landable(claim, votes, { merge: history?.merge, landing, settings: snapshot }));
 	const action = primaryAction({ landable: canLand, voter: answerable, voted: !!mine });
 	const releaseIt = claim && release ? (reason: string) => release(repo, changeId, reason) : undefined;
 	const fileHref = (path: string) => href.change(repo, changeId, "files", { file: path });

@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useFresh } from "../hooks/useFresh";
 import { useLeaving } from "../hooks/useLeaving";
 import { displayName } from "../lib/agent";
@@ -245,8 +245,9 @@ export function HiveMap({
 	// Closed by a click elsewhere, focus stays where that click put it; closed by Escape, it comes back to the cell.
 	const outside = useRef(false);
 	const pick = (cell: Cell) => {
-		setOpened(picked === cell.key ? null : cell.key);
-		onPick(cell);
+		const next = pickCell(opened, picked, cell.key);
+		setOpened(next.opened);
+		if (next.filter) onPick(cell);
 	};
 
 	return (
@@ -349,8 +350,10 @@ export function HiveMap({
 						align={wide(anchor.current) ? "start" : "center"}
 						collisionPadding={12}
 						aria-label={cellPlace(openedCell)}
-						onInteractOutside={() => {
-							outside.current = true;
+						onInteractOutside={(event) => {
+							// A cell's own click moves the details to it, or closes them (see pick).
+							if ((event.target as Element | null)?.closest?.("[data-cell]")) event.preventDefault();
+							else outside.current = true;
 						}}
 						onCloseAutoFocus={(event) => {
 							event.preventDefault();
@@ -364,7 +367,7 @@ export function HiveMap({
 							cell={openedCell}
 							goals={goals ?? []}
 							picked={picked === openedCell.key}
-							onPick={() => pick(openedCell)}
+							onPick={() => onPick(openedCell)}
 							now={now}
 						/>
 					</PopoverContent>
@@ -372,6 +375,20 @@ export function HiveMap({
 			</Popover>
 		</section>
 	);
+}
+
+/**
+ * What a click, a tap or Enter on a cell does: its details open, or close if they're open, and the goals' filter
+ * follows them, on to the cell as they open and off it as they close. With another cell's details open, both move to
+ * this one. `filter` says whether the filter is to be switched (see HiveTab's onPick).
+ */
+export function pickCell(
+	opened: string | null,
+	picked: string | undefined,
+	key: string,
+): { opened: string | null; filter: boolean } {
+	const opening = opened !== key;
+	return { opened: opening ? key : null, filter: opening !== (picked === key) };
 }
 
 /** Whether the window a cell is in has room for its details beside it. */
@@ -433,14 +450,26 @@ export function cellPlace(cell: Cell): string {
 	return cell.planned ? `${where} (new)` : where;
 }
 
-/** What a cell says to someone who can't see it, and in its tooltip. */
-export function cellLabel(cell: Cell): string {
-	const what = cellPlace(cell);
+/** What's happening in a cell, in words that start with those it shows: its state, and who's at work there. */
+function cellNews(cell: Cell): string {
 	const agents = cell.agents.length ? `, ${cell.agents.join(", ")} at work` : "";
-	if (cell.state === "free") return `${what}: ${cell.kind === "file" ? "nobody on it" : counted(cell.files, "file")}`;
-	if (cell.state === "landed") return `${what}: ${cell.landed?.agent ?? "an agent"} landed a change here lately`;
-	if (cell.state === "next") return `${what}: backlog work waiting for an agent`;
-	return `${what}: ${stateWords(cell.state)}${agents}`;
+	if (cell.state === "free") return cell.kind === "file" ? "nobody on it" : counted(cell.files, "file");
+	if (cell.state === "landed") return `landed lately by ${cell.landed?.agent ?? "an agent"}`;
+	if (cell.state === "next") return "up next, backlog work waiting for an agent";
+	return `${stateWords(cell.state)}${agents}`;
+}
+
+/**
+ * What a cell says to someone who can't see it: its name in full and its state, the words it shows cut to fit, then
+ * where it is. A name that starts with what's shown is one speech can click by (WCAG 2.5.3): "OrderSummary.tsx:
+ * approved, ines/claude at work, in src/components/checkout/".
+ */
+export function cellLabel(cell: Cell): string {
+	const name = `${cell.name}${cell.kind === "folder" ? "/" : ""}${cell.planned ? " (new)" : ""}`;
+	// The folder it's in; what a folder's other files fold together is in that folder.
+	const path = cell.kind === "files" ? (cell.path ? `${cell.path}/` : "") : cell.path;
+	const folder = path.slice(0, path.lastIndexOf("/") + 1);
+	return `${name}: ${cellNews(cell)}${folder ? `, in ${folder}` : ""}`;
 }
 
 /** The chips a cell shows: up to three agents, or two and "+n". */
@@ -524,8 +553,9 @@ function HexCell({
 			onPick?.(cell);
 		}
 	};
-	const shape = (
-		<g className={cn("origin-center [transform-box:fill-box]", arriving)}>
+	// Its hexagon, ring and lamp: the button.
+	const outline = (
+		<>
 			<polygon
 				className={cn(
 					"fill-card stroke-border stroke-[1.5]",
@@ -546,6 +576,11 @@ function HexCell({
 			{cell.state === "landing" ? (
 				<circle className="animate-hive-cell-blink fill-stage-landing" cx={0} cy={DRAWN - 9} r={3.5} />
 			) : null}
+		</>
+	);
+	// Its words and chips, drawn over it.
+	const words = (
+		<>
 			<CellName cell={cell} name={name} y={at.name} className={look.name || "fill-muted-foreground"} />
 			{lines.length ? (
 				<text className={cn(WORDS, look.sub || "fill-muted-foreground")} textAnchor="middle" x={0} y={at.words[0]}>
@@ -579,56 +614,62 @@ function HexCell({
 					<ChipText x={chipX(agents.length)} text={`+${more}`} />
 				</g>
 			) : null}
+		</>
+	);
+	// The words sit over the button, not in it, and pointer events pass through them to it. What they show is cut to
+	// fit, so the button's name says it in full instead (cellLabel), and they're hidden from screen readers.
+	const drawn = (button: ReactNode) => (
+		<g className={cn("origin-center [transform-box:fill-box]", arriving)}>
+			{button}
+			<g className="pointer-events-none" aria-hidden="true">
+				{words}
+			</g>
 		</g>
 	);
+	// Each cell is moved into place by its transform, so it glides when the comb rearranges.
+	const MOVES = "[transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]";
 	if (leaving)
 		return (
-			<g
-				data-state={cell.state}
-				className="pointer-events-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]"
-				style={style}
-				aria-hidden="true"
-			>
-				{shape}
+			<g data-state={cell.state} className={cn("pointer-events-none", MOVES)} style={style} aria-hidden="true">
+				{drawn(<g>{outline}</g>)}
 			</g>
 		);
 	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<g
-					data-state={cell.state}
-					data-cell={cell.key}
-					className={cn(
-						// Each cell is moved into place by its transform, so it glides when the comb rearranges.
-						"group cursor-pointer outline-none [transition:transform_0.5s_var(--ease-out),opacity_0.3s_ease]",
-						dim && "opacity-30",
-					)}
-					style={style}
-					role="button"
-					tabIndex={reachable ? 0 : -1}
-					aria-label={label}
-					aria-haspopup="dialog"
-					aria-expanded={popped}
-					ref={element}
-					onMouseEnter={() => onHover?.(cell.key)}
-					onMouseLeave={() => onHover?.(null)}
-					onFocus={() => {
-						onFocused?.(cell.key);
-						onHover?.(cell.key);
-					}}
-					onBlur={() => onHover?.(null)}
-					onClick={() => onPick?.(cell)}
-					onKeyDown={keys}
-				>
-					{shape}
-				</g>
-			</TooltipTrigger>
-			{/* Its place in full, and what's happening there; hidden while its details are open beside it. */}
-			<TooltipContent side="top" className={cn(popped && "hidden")}>
-				<span className="block font-mono wrap-anywhere">{cellPlace(cell)}</span>
-				{label.slice(cellPlace(cell).length + 2)}
-			</TooltipContent>
-		</Tooltip>
+		<g className={cn(MOVES, dim && "opacity-30")} style={style}>
+			{drawn(
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<g
+							data-state={cell.state}
+							data-cell={cell.key}
+							className="group cursor-pointer outline-none"
+							role="button"
+							tabIndex={reachable ? 0 : -1}
+							aria-label={label}
+							aria-haspopup="dialog"
+							aria-expanded={popped}
+							ref={element}
+							onMouseEnter={() => onHover?.(cell.key)}
+							onMouseLeave={() => onHover?.(null)}
+							onFocus={() => {
+								onFocused?.(cell.key);
+								onHover?.(cell.key);
+							}}
+							onBlur={() => onHover?.(null)}
+							onClick={() => onPick?.(cell)}
+							onKeyDown={keys}
+						>
+							{outline}
+						</g>
+					</TooltipTrigger>
+					{/* Its place in full, and what's happening there; hidden while its details are open beside it. */}
+					<TooltipContent side="top" className={cn(popped && "hidden")}>
+						<span className="block font-mono wrap-anywhere">{cellPlace(cell)}</span>
+						{cellNews(cell)}
+					</TooltipContent>
+				</Tooltip>,
+			)}
+		</g>
 	);
 }
 

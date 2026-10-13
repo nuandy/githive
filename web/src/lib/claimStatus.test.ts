@@ -57,7 +57,7 @@ describe("changes", () => {
 		});
 		// A role only people may vote as needs a person.
 		const people = { required: 2, vetoes: ["security"], grants: { security: ["person:*"] } };
-		expect(claimStatus(waiting, [], { policy: people })).toMatchObject({
+		expect(claimStatus(waiting, [], { settings: { policy: people } })).toMatchObject({
 			kind: "needs-person",
 			description: "Waiting for a security vote, which only a person can give.",
 		});
@@ -121,7 +121,30 @@ describe("rejections on the change's head", () => {
 
 	it("says it's landing while its head is checked to land", () => {
 		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
-		expect(claimStatus(approved, [], { landing })).toMatchObject({ kind: "landing", label: "Landing", tone: "warn" });
+		expect(claimStatus(approved, [], { landing })).toMatchObject({
+			kind: "landing",
+			label: "Landing",
+			tone: "warn",
+			description: "Being checked to land, with the next batch.",
+		});
+	});
+
+	it("says who asked for changes while it was being checked to land: the batch lands it all the same", () => {
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
+		const security = vote({ reviewer: "sec-bot", role: "security", evidence: "token in a log line" });
+		const vetoed = { ...approved, approval: { ...approved.approval, approved: false, vetoedBy: ["sec-bot"] } };
+		expect(claimStatus(vetoed, [security], { landing })).toMatchObject({
+			kind: "landing",
+			description: "Being checked to land; security asked for changes meanwhile.",
+		});
+		const reviewer = vote({ reviewer: "ines/claude", role: "review" });
+		expect(claimStatus(approved, [reviewer, security], { landing }).description).toBe(
+			"Being checked to land; a reviewer and security asked for changes meanwhile.",
+		);
+		// A veto the votes read doesn't show still says whose it is.
+		expect(claimStatus(vetoed, [], { landing }).description).toBe(
+			"Being checked to land; sec-bot asked for changes meanwhile.",
+		);
 	});
 });
 

@@ -10,6 +10,7 @@ import type {
 } from "../../src/api.ts";
 import type { Level } from "../../src/lib/permissions.ts";
 import type { RepoSummary, WaitingItem } from "../../src/lib/repos.ts";
+import { settingsForBranch } from "../../../src/toolkit/branch-rules.ts";
 import { ago } from "./clock.ts";
 import type { Hive } from "./stories.ts";
 
@@ -92,8 +93,16 @@ function waitingItem(snapshot: RepoSnapshot, claim: RepoSnapshot["claims"][numbe
 		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
 	);
 	if (sentBack) return null;
-	const people = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder) || holder.startsWith("@");
-	const peopleOnly = (role: string) => (snapshot.policy.grants?.[role] ?? ["githive"]).every(people);
+	// Only people: people, or one person; a team's members' agents may vote as it.
+	const people = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder);
+	// Held to its branch's policy, as the server holds it (claimPolicy): GitHub's trusted change to none.
+	const project = snapshot.branch ?? "main";
+	const repo = { policy: snapshot.policy, verify: [], rules: snapshot.branchRules, project };
+	const policy = claim.trusted ? { required: 0, vetoes: [] } : settingsForBranch(repo, claim.into ?? project).policy;
+	const peopleOnly = (role: string) => {
+		const holders = policy.grants?.[role] ?? ["githive"];
+		return holders.length > 0 && holders.every(people);
+	};
 	const role = (approval.awaiting ?? []).find(peopleOnly);
 	if (!role) return null;
 	return {

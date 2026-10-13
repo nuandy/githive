@@ -29,12 +29,12 @@ export interface ClaimHolder {
  * an abandoned change.
  */
 export function holdersFromSnapshot(
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branch">,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">,
 	repo: string,
 	{ branch, landing, now }: { branch?: string; landing?: Pick<RepoLanding, "checking">; now?: number } = {},
 ): ClaimHolder[] {
 	const claims = branch ? openOn(snapshot, branch) : snapshot.claims;
-	const context = { votes: snapshot.votes, policy: snapshot.policy, landing, now: now ?? Date.now() };
+	const context = { votes: snapshot.votes, settings: snapshot, landing, now: now ?? Date.now() };
 	return claims.map((claim) => ({
 		change: claim.change,
 		title: claimTitle(claim),

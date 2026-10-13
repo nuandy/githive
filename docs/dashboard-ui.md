@@ -75,7 +75,10 @@ lands: "Land", "Landed on main"; "merge" is only git's own (a merge commit, a co
 for counts addressed to the reader: the Inbox's count, "2 changes need you". What needs you is agents' questions,
 changes waiting on a vote only people may give, and the audit's open violations, never failed checks (the agent's own
 work): `waitingOn()` in `status.ts` and `needsYou()` in `needsYou.ts` decide it, and the server's repo summaries count
-the same for the Inbox and Repositories.
+the same for the Inbox and Repositories. A vote is people's alone when every holder of its role is people
+(`person:*`) or one person, never a team, whose members' agents may vote as it; and it's read from the policy the
+change is held to (`claimPolicy`: its branch's, or none for GitHub's trusted change), so pass the repo's `settings`,
+never `snapshot.policy` alone.
 
 **Light and dark.** `:root` is light and `.dark` on `<html>` is dark; `dark:` variants follow it. Under "Same as this
 device" the page follows the system live. Another palette is another block of the same variables.
@@ -179,8 +182,10 @@ lucide icons for `Icon`, and restyle it from the theme.
 - **The Inbox leads the top bar.** It fills `needs-soft` while something waits and keeps its name on a phone, where
   light and dark move into the user menu; its count is the bar's one red number (Admin's is neutral). A repo's crumbs
   are its owner (the org or person's page) and its name, a switcher to the reader's other repos. An Inbox row has its
-  kind's icon, who waits and for how long ("mara/claude asks · 38m"), the question at body size in ink, and a verb
-  (Answer, "Vote as payments", See the audit) that opens the change at its decision.
+  kind's icon, who waits and for how long ("mara/claude asks · 38m", "GitHive says" for its own agents), the question
+  at body size in ink, and a verb (Answer, "Vote as payments", See the audit) that opens the change at its decision.
+  A repo's rows, like the Hive's banner, list questions, then votes, each most urgent and then longest waiting first
+  (`byWaiting`); the banner shows three and counts the rest, other branches' too, for the Inbox.
 - **Moving between places.** A new place starts at the top with its `h1` focused (no ring: it isn't a control), so a
   screen reader starts there; Back and Forward go back to where each history entry was scrolled once the page has
   filled in; a tab of the same place stays where it is. A view that changes the address in place (a search typed)
@@ -265,7 +270,9 @@ fixtures (`web/visual/fixtures/`) with the clock frozen. Capture a baseline befo
   choice, a tab, `-outline-offset-2`), a menu's items light up instead, and a hive cell draws it around its hexagon.
 - **A map of many things is one stop for Tab.** The Hive's map takes focus once (a roving `tabIndex`); the arrow keys go
   to the nearest cell that way (`nearestInDirection`), Enter or Space does what a click does, and a cell's details open
-  in a `Popover` that Escape closes, back to the cell.
+  in a `Popover` that Escape closes, back to the cell. A cell's name starts with what it shows, in full
+  ("OrderSummary.tsx: approved, …" for "Ord…mary.tsx"), so speech can click it (WCAG 2.5.3); the words and chips it
+  shows cut to fit are drawn over its button, not in it.
 - **Links in running text are underlined** (WCAG 1.4.1): a link in a paragraph, a callout, a `<blockquote>` or
   `<figcaption>`, or a block marked `prose` (a list of sentences, a timeline entry's body) is underlined at 40% of the
   link's color, by the base rule. Links that stand on their own (navigation, tabs, breadcrumbs, pills, a row's title, a

@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { LandingStretch, RepoAudit, RepoLanding, RepoSnapshot } from "../api";
 import { useBumps } from "../hooks/useBumps";
-import { displayName } from "../lib/agent";
+import { whoWaits } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
 import { needsYou } from "../lib/needsYou";
 import { counted } from "../lib/plural";
@@ -49,6 +49,7 @@ export function HiveStrip({
 	landing,
 	audit,
 	snapshot,
+	waitingElsewhere = 0,
 	range,
 	since,
 	now,
@@ -61,8 +62,10 @@ export function HiveStrip({
 	upNext?: number;
 	landing?: RepoLanding;
 	audit?: RepoAudit;
-	/** The claims, votes and policy, for what waits on a person (see needsYou.ts). */
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
+	/** The claims, votes and review settings, for what waits on a person (see needsYou.ts). */
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
+	/** How many changes on other branches wait on a person, for what the banner leaves to the Inbox. */
+	waitingElsewhere?: number;
 	/** The goals panel's range: landed counts what landed within it. */
 	range: number;
 	/** Where the goals panel's clock starts (before now - range when quiet stretches fold). */
@@ -81,7 +84,7 @@ export function HiveStrip({
 	const stages = STAGES.filter(({ stage }) => stage !== "next" || upNext !== undefined);
 	return (
 		<header>
-			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} now={now} />
+			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} elsewhere={waitingElsewhere} now={now} />
 			{!goals.length && !justFinished(stretch, now) ? (
 				<EmptyHive repo={repo} stretch={stretch} now={now} writes={writes} origin={origin} />
 			) : (
@@ -156,7 +159,7 @@ export function needsRows(
 	repo: string,
 	goals: Goal[],
 	audit: RepoAudit | undefined,
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">,
 	now: number,
 ): NeedsRow[] {
 	const { changes, violations } = needsYou(snapshot, audit);
@@ -166,7 +169,7 @@ export function needsRows(
 	const decide = (change: string) => href.change(repo, change, "conversation", { decide: true });
 	const rows: NeedsRow[] = changes.map((waiting) => {
 		if (waiting.kind === "question") {
-			const who = waiting.agent.startsWith("githive") ? "GitHive" : (displayName(waiting.agent) ?? waiting.agent);
+			const who = whoWaits(waiting.agent);
 			return {
 				key: `ask:${waiting.change}`,
 				icon: "comment",
@@ -199,23 +202,28 @@ export function needsRows(
 	return rows;
 }
 
-/** What needs a person: up to three rows, then how many more the Inbox has. It slides open and shut. */
+/**
+ * What needs a person: up to three rows, then how many more the Inbox has, this branch's that don't fit and other
+ * branches'. It slides open and shut.
+ */
 function NeedsYou({
 	repo,
 	goals,
 	audit,
 	snapshot,
+	elsewhere,
 	now,
 }: {
 	repo: string;
 	goals: Goal[];
 	audit: RepoAudit | undefined;
-	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy">;
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
+	elsewhere: number;
 	now: number;
 }) {
 	const rows = needsRows(repo, goals, audit, snapshot, now);
 	const shown = rows.slice(0, NEEDS_ROWS);
-	const more = rows.length - shown.length;
+	const more = rows.length - shown.length + elsewhere;
 	const box = rows.length ? (
 		<section
 			className="mb-3 rounded-md border border-bad/45 bg-bad-soft px-3 pt-2 pb-2.5"
@@ -257,7 +265,7 @@ function NeedsYou({
 			</ul>
 			{more ? (
 				<p className="m-0 mt-1.5 pl-6 text-ui">
-					<a href={href.inbox()}>+{more} more in the Inbox</a>
+					{moreWords(more, elsewhere)} <a href={href.inbox()}>See {more === 1 ? "it" : "them"} in the Inbox</a>
 				</p>
 			) : null}
 		</section>
@@ -277,6 +285,13 @@ function NeedsYou({
 			<div>{box ?? last.current}</div>
 		</div>
 	);
+}
+
+/** What the banner leaves to the Inbox: "+2 more.", "+3 more, 2 of them on other branches.". */
+function moreWords(more: number, elsewhere: number): string {
+	if (!elsewhere) return `+${more} more.`;
+	const branches = elsewhere === 1 ? "another branch" : "other branches";
+	return more === elsewhere ? `+${more} more on ${branches}.` : `+${more} more, ${elsewhere} of them on ${branches}.`;
 }
 
 /** The recap once a stretch of work has landed and nothing's in flight. */

@@ -6,6 +6,7 @@ import { freeWork, type Goal, hiveGoals } from "../lib/goals";
 import { hiveCells } from "../lib/hiveCells";
 import { announcement, type GoalMotion, goalMotions, MOTION_MS } from "../lib/hiveMotion";
 import { motionMs } from "../lib/motion";
+import { needsYou } from "../lib/needsYou";
 import { type HiveQuery, hiveQuery, withHiveQuery } from "../lib/routes";
 import { chooseRange, DEFAULT_RANGE, timeAxis } from "../lib/timeAxis";
 import { DemoBanner } from "./DemoRun";
@@ -47,9 +48,10 @@ export function HiveTab({
 	useEffect(() => refreshEvents(), [snapshot.claims, refreshEvents]);
 	// Only the claims landing on this branch: each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === branch) };
-	const elsewhere = new Set(
-		snapshot.claims.filter((claim) => (claim.into ?? branch) !== branch).map((claim) => claim.change),
-	);
+	const others = snapshot.claims.filter((claim) => (claim.into ?? branch) !== branch);
+	const elsewhere = new Set(others.map((claim) => claim.change));
+	// The Inbox counts what waits on a person on every branch; the banner shows this one's.
+	const waitingElsewhere = needsYou({ ...snapshot, claims: others }).changes.length;
 	const loadDemo = api.demoRun;
 	const [query, setQuery] = useAddressQuery();
 	return (
@@ -64,6 +66,7 @@ export function HiveTab({
 				origin={typeof window === "undefined" ? "" : window.location.origin}
 				snapshot={onBranch}
 				elsewhere={elsewhere}
+				waitingElsewhere={waitingElsewhere}
 				{...(landing.data ? { landing: landing.data } : {})}
 				{...(landing.error ? { landingError: String(landing.error) } : {})}
 				{...(tree.data ? { tree: tree.data } : {})}
@@ -99,6 +102,8 @@ export interface HiveProps {
 	backlog?: BacklogItem[];
 	/** Changes landing on other branches, left out of this one's goals. */
 	elsewhere?: Set<string>;
+	/** How many changes on other branches wait on a person: the Inbox lists them, the banner here doesn't. */
+	waitingElsewhere?: number;
 	/** The time everything counts from (tests and the playground fix it). */
 	now?: number;
 }
@@ -119,10 +124,20 @@ export function Hive(props: HiveProps) {
 				...(events ? { events } : {}),
 				...(landing ? { landing } : {}),
 				...(props.elsewhere ? { elsewhere: props.elsewhere } : {}),
-				policy: snapshot.policy,
+				settings: { policy: snapshot.policy, branchRules: snapshot.branchRules, branch: snapshot.branch },
 				remembered,
 			}),
-		[snapshot.claims, snapshot.votes, snapshot.policy, events, landing, props.elsewhere, remembered],
+		[
+			snapshot.claims,
+			snapshot.votes,
+			snapshot.policy,
+			snapshot.branchRules,
+			snapshot.branch,
+			events,
+			landing,
+			props.elsewhere,
+			remembered,
+		],
 	);
 	const upNext = useMemo(() => (backlog ? freeWork(backlog, goals) : undefined), [backlog, goals]);
 	const cells = useMemo(
@@ -170,6 +185,7 @@ export function Hive(props: HiveProps) {
 				{...(landing ? { landing } : {})}
 				{...(snapshot.audit ? { audit: snapshot.audit } : {})}
 				snapshot={snapshot}
+				waitingElsewhere={props.waitingElsewhere ?? 0}
 				range={range}
 				since={since}
 				now={now}

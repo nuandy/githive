@@ -83,11 +83,20 @@ describe("the Hive tab", () => {
 		const html = render({ snapshot: { ...repoSnapshot, claims: asks, votes: [] } });
 		const banner = /aria-labelledby="needs-person-title".*?<\/section>/.exec(html)![0];
 		const text = visibleText(banner);
-		expect(text).toContain("question c?");
-		expect(text).not.toContain("question d?");
-		// The fourth question and the audit's flag.
-		expect(text).toContain("+2 more in the Inbox");
+		// Waiting longest first, as the Inbox lists them.
+		expect(text).toContain("question d?");
+		expect(text).toContain("question b?");
+		expect(text).not.toContain("question a?");
+		// The newest question and the audit's flag.
+		expect(text).toContain("+2 more. See them in the Inbox");
 		expect(banner).toContain('href="#/inbox"');
+		// The Inbox has what waits on other branches too; the banner counts it among what it leaves out.
+		const more = visibleText(render({ snapshot: { ...repoSnapshot, claims: asks, votes: [] }, waitingElsewhere: 2 }));
+		expect(more).toContain("+4 more, 2 of them on other branches. See them in the Inbox");
+		const one = { ...repoSnapshot, claims: asks.slice(0, 2), votes: [], audit: undefined };
+		expect(visibleText(render({ snapshot: one, waitingElsewhere: 1 }))).toContain(
+			"+1 more on another branch. See it in the Inbox",
+		);
 	});
 
 	it("asks a person for a vote only people may give, and leaves failed checks to the goal's own row", () => {
@@ -151,6 +160,14 @@ describe("the Hive tab", () => {
 			"No goals yet. Each change an agent claims here becomes a row",
 		);
 		expect(visibleText(render())).not.toContain("No goals yet");
+		// The sample is marked as one, its words at muted text's full contrast: only its bars are faint.
+		const sample = /<div class="[^"]*border-dashed[^"]*" aria-hidden="true">.*?<\/div><p/.exec(
+			render({ snapshot: empty }),
+		)![0];
+		expect(visibleText(sample)).toContain("Example ? What an agent sets out to do where it stands");
+		expect(sample).toMatch(/<span class="[^"]*text-muted-foreground[^"]*">What an agent sets out to do<\/span>/);
+		expect(sample.match(/opacity-55/g)).toHaveLength(1);
+		expect(sample).toMatch(/<span class="[^"]*opacity-55[^"]*"><span class="absolute top-1\/2/);
 		const landing = {
 			branch: "main",
 			checking: null,

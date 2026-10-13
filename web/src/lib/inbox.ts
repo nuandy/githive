@@ -1,3 +1,5 @@
+import { whoWaits } from "./agent";
+import { byWaiting } from "./needsYou";
 import { counted } from "./plural";
 import { type Summaries, waitingIn, type WaitingItem } from "./repos";
 import { href, withQuery } from "./routes";
@@ -48,7 +50,8 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 		if (repo.public) continue;
 		const { changes, violations } = waitingIn(repo.summary);
 		if (!changes && !violations) continue;
-		const items = (repo.summary?.waiting ?? []).map((item) => waitingItem(repo.repo, item)).sort(byUrgency);
+		// Questions, then votes, as the Hive's banner lists them.
+		const items = (repo.summary?.waiting ?? []).map((item) => waitingItem(repo.repo, item)).sort(byWaiting);
 		if (violations)
 			items.push({
 				kind: "audit",
@@ -70,11 +73,15 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 	return { groups, count };
 }
 
-/** Who waits, as a row's line starts: "mara/claude asks", "sam/codex waits on a payments vote", "The audit flags". */
+/**
+ * Who waits, as a row's line starts, naming them as the Hive's banner does: "mara/claude asks", "GitHive says", "sam/codex
+ * waits on a payments vote", "The audit flags".
+ */
 export function itemWho(item: InboxItem): string {
 	if (item.kind === "audit") return "The audit flags";
-	const who = item.agent || (item.kind === "vote" ? "A change" : "An agent");
-	return item.kind === "vote" ? `${who} waits on a ${item.role} vote` : `${who} asks`;
+	const who = item.agent ? whoWaits(item.agent) : item.kind === "vote" ? "A change" : "An agent";
+	if (item.kind === "vote") return `${who} waits on a ${item.role} vote`;
+	return `${who} ${who === "GitHive" ? "says" : "asks"}`;
 }
 
 /** What the reader does about an item, on its button: answer, vote, or read the audit. */
@@ -117,11 +124,6 @@ function waitingItem(repo: string, item: WaitingItem): InboxItem {
 		reason: item.reason,
 		...(item.urgency === undefined ? {} : { urgency: item.urgency }),
 	};
-}
-
-/** Most urgent first; a question Clef didn't rate stays where it was. */
-function byUrgency(a: InboxItem, b: InboxItem): number {
-	return (b.urgency ?? 0) - (a.urgency ?? 0);
 }
 
 /** A repo with an urgent question first. */
