@@ -160,6 +160,14 @@ describe("the Hive tab", () => {
 			"No goals yet. Each change an agent claims here becomes a row",
 		);
 		expect(visibleText(render())).not.toContain("No goals yet");
+		// The sample is marked as one, its words at muted text's full contrast: only its bars are faint.
+		const sample = /<div class="[^"]*border-dashed[^"]*" aria-hidden="true">.*?<\/div><p/.exec(
+			render({ snapshot: empty }),
+		)![0];
+		expect(visibleText(sample)).toContain("Example ? What an agent sets out to do where it stands");
+		expect(sample).toMatch(/<span class="[^"]*text-muted-foreground[^"]*">What an agent sets out to do<\/span>/);
+		expect(sample.match(/opacity-55/g)).toHaveLength(1);
+		expect(sample).toMatch(/<span class="[^"]*opacity-55[^"]*"><span class="absolute top-1\/2/);
 		const landing = {
 			branch: "main",
 			checking: null,

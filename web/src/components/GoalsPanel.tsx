@@ -459,27 +459,38 @@ function useHeld(live: GoalLayout, paused: (drawn: GoalLayout) => boolean) {
 	return { ...held, apply };
 }
 
-/** Before any goal: a faint sample row, saying what each one will show and where agents come from. */
+/** Before any goal: a sample row, saying what each one will show and where agents come from. */
 function EmptyGoals({ timeline }: { timeline: boolean }) {
 	return (
 		<div className="pt-2 pb-1">
-			{/* Dashed and faint, a picture of a goal rather than one. */}
+			{/* A picture of a goal rather than one: marked as an example, dashed, its bars faint. Its words keep muted
+			    text's contrast. */}
 			<div
-				className={cn(ROW, "pointer-events-none grid-rows-[1fr] border border-dashed border-border-strong opacity-55")}
+				className={cn(ROW, "pointer-events-none grid-rows-[1fr] border border-dashed border-border-strong")}
 				aria-hidden="true"
 			>
 				<div className="min-h-0 overflow-hidden">
+					<span className="block px-2 pt-1.5 text-micro font-bold tracking-[0.06em] text-muted-foreground uppercase">
+						Example
+					</span>
 					<div className={cn(LINE, "py-(--row-pad) [transition:padding_0.45s_ease]")}>
-						<span className={cn(chipBox(timeline), "grid place-items-center border-dashed")}>?</span>
+						<span
+							className={cn(
+								chipBox(timeline),
+								"grid place-items-center border-dashed border-border-strong text-muted-foreground",
+							)}
+						>
+							?
+						</span>
 						<span className="-mx-0.5 inline-grid size-5 flex-none place-items-center">
 							<Chevron />
 						</span>
 						<span className={cn(MAIN, !timeline && MAIN_STORY)}>
 							<span className={WORDS}>
-								<span className={titleClass(timeline)}>What an agent sets out to do</span>
+								<span className={cn(titleClass(timeline), "text-muted-foreground")}>What an agent sets out to do</span>
 								<span className={metaClass(timeline)}>where it stands · which agent · how long it took</span>
 							</span>
-							<span className={cn(TRACK, !timeline && "to-640:min-h-3 to-640:basis-full")}>
+							<span className={cn(TRACK, "opacity-55", !timeline && "to-640:min-h-3 to-640:basis-full")}>
 								<span className={phaseClass("building")} style={{ left: "38%", width: "24%" }} />
 								<span className={phaseClass("review")} style={{ left: "62%", width: "16%" }} />
 								<span className={markClass("approved", true, timeline)} style={{ left: "78%" }} />
