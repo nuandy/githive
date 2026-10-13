@@ -9,6 +9,7 @@ import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
+import { claimWorkTools } from "./tools/claim-work";
 import { githubTools } from "./tools/github-tools";
 import { mergeTools } from "./tools/merge-tools";
 import { withNext } from "./tools/next";
@@ -67,16 +68,18 @@ const noted = new Map<string, number>();
 
 /** Runs one tool and notes any write in the repo's summary. An object reply says what follows for the caller's change. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
-	const result = withNext(name, args, ctx, await withNews(name, args, ctx, await runTool(name, args, ctx)));
-	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
-	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
+	const reply = await runTool(name, args, ctx);
+	const written = writtenAs(name, args, reply);
+	const result = withNext(name, args, ctx, await withNews(name, args, ctx, reply));
+	const wrote = WRITES.has(written.name) && (result as { ok?: boolean } | null)?.ok !== false;
+	const event = wrote ? toolEvent(written.name, written.args, ctx.agent) : null;
 	if (wrote) {
-		const whom = await concernsOf(name, args, ctx).catch(() => undefined);
-		await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, name, whom).catch(() => undefined);
+		const whom = await concernsOf(written.name, written.args, ctx).catch(() => undefined);
+		await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, written.name, whom).catch(() => undefined);
 	}
 	if (ctx.summarize && wrote) {
 		const repo = requiredString(args, "repo");
-		const merged = name === "merge";
+		const merged = written.name === "merge";
 		// Activity alone is noted at most every 10 seconds per repo, so a busy repo doesn't queue on the index.
 		if (merged || Date.now() - (noted.get(repo) ?? 0) > 10_000) {
 			noted.set(repo, Date.now());
@@ -89,6 +92,17 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 			await repoSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
 	}
 	return result;
+}
+
+/**
+ * A call as the hive's events and rings know it: claim_work that took a piece is the claim it made, and any other call
+ * is itself.
+ */
+function writtenAs(name: string, args: Args, reply: unknown): { name: string; args: Args } {
+	if (name !== "claim_work") return { name, args };
+	const claimed = reply as { ok?: boolean; change?: string; intent?: string } | null;
+	if (!claimed?.ok) return { name, args };
+	return { name: "claim", args: { ...args, change: claimed.change, intent: claimed.intent } };
 }
 
 /**
@@ -137,6 +151,7 @@ const isLanded = (item: NewsItem): item is LandedNews => item.kind === "landed";
 const handlers: ToolHandlers = {
 	...setupTools,
 	...claimTools,
+	...claimWorkTools,
 	...workTools,
 	...reviewTools,
 	...mergeTools,

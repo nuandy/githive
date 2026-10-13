@@ -87,11 +87,12 @@ backlog         the pieces of work free to build, and why the rest wait
 add_work        add pieces to the repo's backlog, with their dependencies, or pieces to build alongside others and land after them
 claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
+claim_work      claim the first free backlog piece among those you name, in your order, moving past any another agent took first
 release         give your change up, or (stale) free one its agent abandoned
 credentials     write access to your own fork, with read access to the project to start from; for another agent's change, read access to review it, marked as yours to review
 vote            a verdict on the exact commit reviewed, with evidence; a change you reject comes back to you first once revised
 leave_review    give back a review you took and won't finish, so another agent can take it now
-wait            hold (up to 45 s) until something that concerns you changes: your change, a review for you, free work
+wait            hold (up to 45 s) until something that concerns you changes: your change, a review for you, free work, or a notice for you (a heads-up, interface news, a hint about your push)
 status          a change's votes, the evidence for any rejection, and what's still needed; after a push, whether it merges cleanly into the branch it lands on, and any files outside its claim
 merge           land the change with the branch's other ready changes, through the checks, with the claim covering every file and the approvals in
 audit           replay the records: every broken convention, with its commit and agent

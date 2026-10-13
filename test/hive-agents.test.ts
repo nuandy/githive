@@ -23,6 +23,8 @@ interface HiveOptions {
 	stalls?: string[];
 	/** Claims of these are written, then the call fails, once each: a busy store answering an error after a write. */
 	failAfterWrite?: string[];
+	/** Another agent claims these first, once each, as the agent's claim reaches them. */
+	raced?: string[];
 	/** Claims of these are refused once each, leaving the claim behind, as a claim refused partway in shards can. */
 	refusedPartway?: string[];
 	/** Claims already in an agent's name, by change, that the agent doesn't know it holds. */
@@ -40,7 +42,7 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 	const votes = new Map<string, { reviewer: string; verdict: string }[]>();
 	const merged = new Set<string>();
 	const log: string[] = [];
-	const claimedAfter = new Map<string, string[]>();
+	const namedBy = new Map<string, string[]>();
 	const givenBack = new Set<string>();
 	const rechecks: string[] = [];
 	const approved = (change: string) =>
@@ -92,18 +94,29 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 				const waiting = [...claimed.keys()].map((id) => ({ id, reason: "claimed" }));
 				return { open: [...free.slice(turn), ...free.slice(0, turn)], waiting };
 			}
-			case "claim":
-				if (claimed.has(change)) return { ok: false };
-				claimed.set(change, agent);
-				if (once(options.failAfterWrite, change)) throw new Error("[500] the store is busy");
-				if (once(options.refusedPartway, change)) return { ok: false, conflicts: [], stillHeld: [change] };
-				if (args.after) claimedAfter.set(change, args.after as string[]);
-				return { ok: true };
+			case "claim_work":
+				return claimWork(agent, args.pieces as string[]);
 			case "release":
 				claimed.delete(change);
 				return {};
 		}
 		throw new Error(`no ${name} here`);
+	};
+	// The first free piece named, as claim_work claims it. What a failed claim leaves stays, as if giving it back failed.
+	const claimWork = (agent: string, named: string[]) => {
+		namedBy.set(agent, named);
+		for (const id of named) {
+			if (claimed.has(id)) continue;
+			if (once(options.raced, id)) {
+				claimed.set(id, "githive-other");
+				continue;
+			}
+			claimed.set(id, agent);
+			if (once(options.failAfterWrite, id)) throw new Error("[500] the store is busy");
+			if (once(options.refusedPartway, id)) continue;
+			return { ok: true, change: id };
+		}
+		return { ok: false, passedOver: [] };
 	};
 	const instances = new Map<string, InstanceType<typeof HostedAgent>>();
 	class TestAgent extends HostedAgent {
@@ -149,7 +162,7 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 	const rounds = async (turns: number) => {
 		for (let round = 0; round < turns; round++) for (const agent of agents()) await agent.alarm();
 	};
-	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter, givenBack, rechecks, heads };
+	return { repoHive, agents, rounds, log, claimed, merged, votes, namedBy, givenBack, rechecks, heads };
 }
 
 const pieces = (...ids: string[]) => ids.map((id) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] }));
@@ -229,12 +242,13 @@ describe("a repo's hosted agents", () => {
 		expect(merged.has("a")).toBe(true);
 	});
 
-	it("claim a piece that lands after others with them as after, so it's built alongside them", async () => {
-		const wiring = { id: "app", title: "app", intent: "wire", paths: ["src/main.js"], landsAfter: ["a"] };
-		const { repoHive, rounds, claimedAfter } = hive([...pieces("a"), wiring]);
+	it("move on to their next free piece when another agent took their first, in the same turn", async () => {
+		const { repoHive, agents, namedBy } = hive(pieces("a", "b", "c"), { raced: ["a"] });
 		await start(repoHive);
-		await rounds(1);
-		expect(claimedAfter.get("app")).toEqual(["a"]);
+		const [forager] = agents();
+		await forager!.alarm();
+		expect(namedBy.get("githive-forager")).toEqual(["a", "b", "c"]);
+		expect(((await forager!.account()) as HostedAgentState).change).toBe("b");
 	});
 
 	it("wait on a review while they hold it, and move on once their hold is gone", async () => {

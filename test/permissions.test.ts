@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TOOL_LEVEL } from "../src/auth/access-control";
 import { type Level, OrgStore, atLeast } from "../src/auth/orgs";
 import { IdentityStore } from "../src/auth/store";
+import { TOOLS } from "../src/toolkit/mcp";
 import { fakeD1 } from "./fakes/d1";
 
 // Who gets past each repo route and MCP tool, for each kind of person, in the
@@ -156,6 +157,10 @@ describe("every repo route, for each person", () => {
 });
 
 describe("every MCP tool, for each person's agent", () => {
+	it("has a level of its own: a tool left out would need admin", () => {
+		expect(TOOLS.map((each) => each.name).filter((name) => !Object.hasOwn(TOOL_LEVEL, name))).toEqual([]);
+	});
+
 	for (const [person, level] of EXPECTED_ENTRIES) {
 		it(`lets ${person}'s agent (with ${level ?? "nothing"}) use exactly the tools that need no more`, async () => {
 			const { env, people } = await world();

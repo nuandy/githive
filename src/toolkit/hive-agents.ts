@@ -27,6 +27,12 @@ export const hiveAgentNames = (count: number) => HIVE_JOBS.slice(0, count).map((
 
 const NAMES = new Set(hiveAgentNames(MOST_HIVE_AGENTS));
 
+/** A hive agent's place among a repo's hosted agents, from 0; undefined for any other name. */
+export function hivePlace(name: string) {
+	const place = hiveAgentNames(MOST_HIVE_AGENTS).indexOf(name);
+	return place < 0 ? undefined : place;
+}
+
 /** Whether `name` is a hive agent's. */
 export const isHiveAgent = (name: string) => NAMES.has(name);
 

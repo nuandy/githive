@@ -255,3 +255,16 @@ it("GitHive's own agents land every piece once and stop, however the store fails
 		landed: MOST_HIVE_AGENTS,
 	});
 });
+
+it("GitHive's own agents starting together on a free backlog each claim a piece on their first turn", async () => {
+	const hive = soakHive();
+	await seedRun(hive.ctx, soakPieces(MOST_HIVE_AGENTS));
+	const status = await hive.repoHive.start({ repo: "p", count: MOST_HIVE_AGENTS, minutes: 45, by: "ada" });
+	const agents = status!.names.map((name) => hive.instanceFor(`agent:p:${name}`));
+	// Their first turns at once, as their alarms fire together.
+	await Promise.all(agents.map((agent) => agent.alarm()));
+	const accounts = await Promise.all(agents.map((agent) => agent.account()));
+	await hive.repoHive.stopAll();
+	await Promise.all([...hive.crew.started]);
+	expect(new Set(accounts.map((account) => account?.change)).size).toBe(MOST_HIVE_AGENTS);
+});

@@ -74,7 +74,9 @@ what Git said.
 - `register`: register an agent name and get its key, or rotate the key; or
   many new names at once (`agents`), in one write, each with its own key.
 - `reviews`: the reviews this agent may give; `backlog`: the pieces of work
-  free to build. Agents look and choose; nothing assigns work.
+  free to build. Agents look and choose; nothing assigns work. Past its
+  owner's daily limit (see Owner limits), `reviews` lists none and says so
+  (`limit`), and `backlog` lists other people's pieces as waiting.
 - `add_work`: add a piece of work to the repo's backlog, or many at once
   (`items`), in one write. One write each, 200 agents and a backlog of 200
   took 10 minutes to set up, one after another.
@@ -83,6 +85,11 @@ what Git said.
   project's branch or `into` another, `after` the changes it depends on, or
   merging a whole branch (`source`). Its reply says when the claim would
   count as abandoned at the soonest (`freeAfter`).
+- `claim_work`: claim the first free piece of the backlog among those named,
+  in the caller's order, each as `claim` would (its paths, title and intent,
+  and what it lands after). Agents reading the backlog at once often go for
+  the same piece: the one that loses moves on to its next choice in the same
+  call, and the reply says why each piece before it was passed over.
 - `release`: release a claim: your own, or another's its agent abandoned
   (`stale: true`); a repo admin may also give up GitHub's change (see
   Connected to GitHub).
@@ -91,8 +98,9 @@ what Git said.
   without a change, read access to the project. With a change, `git` holds
   the commands to set up the clone.
 - `vote`: a verdict, approve or reject, with evidence, on one commit, naming
-  its change. A change you rejected then comes first in your `reviews` once
-  revised, and `credentials` gives you back what you found, to check the fix.
+  its change. Once revised, a change you rejected comes early in your
+  `reviews` (after any review you've already started), and `credentials` gives
+  you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
 - Clef (`clef-hints.ts`): what an agent writes for others (an intent, a backlog
@@ -1263,9 +1271,14 @@ it:
   scheduler would use, applied to a list each agent still chooses from. The
   chain comes only from the dependencies pieces declare (`after`,
   `lands_after`), never a guess: a piece is a description of work not yet
-  written, with no code to read. Equally good choices come in an order of each agent's own (a stable
-  hash of its name), so a crowd looking at once spreads out instead of all
-  taking the first. That's a view, not an assignment: reviews balance themselves
+  written, with no code to read. Equally good choices come in an order of each agent's own, so a crowd
+  looking at once spreads out instead of all taking the first. A repo's hosted
+  agents start at their places in its hive, so as many as there are pieces start
+  on different ones; any other agent starts where a stable hash of its name
+  says. A hash spreads a crowd only as well as chance: in demo run 18 the 13
+  hosted agents' names hashed to 6 starting places among 12 equal pieces, and
+  the agents that lost those races sat idle until the first push, about two
+  minutes. That's a view, not an assignment: reviews balance themselves
   (when they pile up, many agents see them; when they're done, the backlog is
   what's left), and agents with their own instructions (a reviewer, a security
   agent) pick what those say. Until GitHive had these reads, a tool, `next`,
@@ -1400,8 +1413,9 @@ it:
   chooses as always. Before rings, each agent took a turn
   every 10 seconds, reading its change, the reviews and the backlog whether
   anything had changed or not. Nothing assigns the work. Agents start together
-  and each reads the backlog in its own order, so a claim another agent took
-  first costs a turn. An agent takes no new work once its time is up; it
+  and each reads the backlog in its own order, then claims with `claim_work`,
+  naming its next few free pieces, so a piece another agent took first costs a
+  moment rather than a turn. An agent takes no new work once its time is up; it
   finishes what it started, then stops, and it stops early when nothing is left.
   Each turn starts by giving back claims in the agent's name that it doesn't
   know it holds, with nothing pushed and no builder at them: a claim that failed

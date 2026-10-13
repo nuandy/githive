@@ -33,6 +33,9 @@ export const AGENT_TURN_GAP_MS = 5_000;
 const TURN_BEGAN = "turn-began";
 const RUNG_AT = "rung-at";
 
+/** How many free pieces an agent names when it claims: enough to get past the few others went for first. */
+const PIECES_NAMED = 5;
+
 /** Turns in a row an agent's loop may fail before it stops. */
 const FAILING_MOST = 15;
 
@@ -372,29 +375,26 @@ export class HostedAgent extends DurableObject<Env> {
 		}
 	}
 
-	/** Claims the first free piece it hasn't tried and starts a builder on it; a refused claim waits a turn. */
+	/**
+	 * Claims the first free piece it hasn't tried, passing over any another agent took first, and starts a builder on
+	 * it. With none of them free it waits a turn.
+	 */
 	private async takePiece(state: HostedAgentState, backlog: BacklogView, call: Call) {
-		const piece = backlog.open.find((open) => !state.tried.includes(open.id));
-		if (!piece) return;
-		const intent = piece.intent ? `${piece.title}\n\n${piece.intent}` : piece.title;
-		const after = piece.landsAfter ?? [];
-		const claim = { change: piece.id, paths: piece.paths ?? [], intent, ...(after.length ? { after } : {}) };
-		// Another agent may have claimed it since the backlog was read: then it tries again next turn.
-		const claimed = (await call("claim", claim).catch(async (err) => {
-			if (statusOf(err).status === 409) return { ok: false };
-			await giveBack(call, piece.id, "its claim failed partway");
-			throw err;
-		})) as { ok?: boolean; stillHeld?: string[] };
-		if (claimed.stillHeld?.length) await giveBack(call, piece.id, "its refused claim left records behind");
-		if (claimed.ok === false) return;
-		state.tried.push(piece.id);
+		const untried = backlog.open.filter((open) => !state.tried.includes(open.id));
+		const pieces = untried.slice(0, PIECES_NAMED).map((open) => open.id);
+		if (!pieces.length) return;
+		// A claim that fails partway is given back by the claim itself, or as a stray at the next turn.
+		const claimed = (await call("claim_work", { pieces })) as { ok?: boolean; change?: string };
+		if (!claimed.ok || !claimed.change) return;
+		const piece = claimed.change;
+		state.tried.push(piece);
 		try {
-			await this.startBuilder(state.repo, piece.id);
-			state.change = piece.id;
+			await this.startBuilder(state.repo, piece);
+			state.change = piece;
 		} catch (err) {
 			// No builder means nobody would push to the claim: give it up, so the piece is free again.
-			console.error(`${state.name}: starting a builder on ${piece.id} failed`, statusOf(err).message);
-			await call("release", { change: piece.id, reason: "its builder didn't start" }).catch(() => undefined);
+			console.error(`${state.name}: starting a builder on ${piece} failed`, statusOf(err).message);
+			await call("release", { change: piece, reason: "its builder didn't start" }).catch(() => undefined);
 		}
 	}
 }

@@ -16,8 +16,8 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | Needs | Routes and tools |
 |---|---|
 | read | the repo's pages, its code, `claims`, `backlog`, `status`, `audit`, `credentials` for the project |
-| review | `reviews`, `credentials` for a change to review, `vote`, `leave_review` (and a person's vote on the dashboard) |
-| write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build`, `github_pr` (and merging or making a branch on the dashboard) |
+| review | `reviews`, `wait`, `credentials` for a change (your own fork, or another's to review), `vote`, `leave_review` (and a person's vote on the dashboard) |
+| write | `register`, `claim`, `claim_work`, `release`, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build`, `github_pr` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
 
 An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone, signed in or not (its dashboard pages too, so a link to it just works); a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.

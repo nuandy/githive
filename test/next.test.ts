@@ -25,6 +25,8 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 	],
 	["claim", { change: "c-1" }, { ok: true, source: "feature/f", head: HEAD }, /already feature\/f's tip/],
 	["claim", { change: "c-1" }, { ok: false, conflicts: [] }, "Pick other work from `backlog`, or claim again later."],
+	["claim_work", { pieces: ["c-1"] }, { ok: true, change: "c-1" }, /^Call `credentials` with change c-1/],
+	["claim_work", { pieces: ["c-1"] }, { ok: false, passedOver: [] }, /^None of those pieces is free/],
 	["build", {}, { change: "stats-ab12", builder: "fork--p--stats-ab12" }, /builder makes stats-ab12.*`status`/],
 	["release", { change: "c-1" }, { ok: true }, "Released. Choose other work from `backlog`."],
 	["release", { change: "o-1", stale: true }, { ok: true }, "Released as abandoned: claim the paths you need."],

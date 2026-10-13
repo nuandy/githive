@@ -9,6 +9,7 @@ import { type ClaimRecord, type Registry, shardClaims } from "../src/toolkit/cla
 import { callTool, mergeAsPerson, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
 import type { VoteRecord } from "../src/toolkit/votes";
 import { backlogFor, reviewsFor, type WorkInput, type WorkItem, workId } from "../src/toolkit/work";
+import { hiveAgentNames, MOST_HIVE_AGENTS } from "../src/toolkit/hive-agents";
 import { memoryLanding } from "../src/toolkit/landing";
 import { holdsRef, type ReviewHolds, reviewHolds, reviewsRef } from "../src/toolkit/review-holds";
 import { pushChange } from "./helpers/agents";
@@ -268,6 +269,14 @@ describe("a crowd looking at once", () => {
 		expect(new Set(firsts).size).toBeGreaterThan(15);
 		// Each still sees all of it.
 		expect(backlogFor(base({ agent: "agent-1", work })).open).toHaveLength(40);
+	});
+
+	it("starts GitHive's hosted agents each at a piece of its own, as long as there are pieces enough", () => {
+		const work = Array.from({ length: 12 }, (_, i) => item(`w${i}`));
+		const firsts = hiveAgentNames(MOST_HIVE_AGENTS).map((agent) => backlogFor(base({ agent, work })).open[0]!.id);
+		expect(new Set(firsts.slice(0, 12)).size).toBe(12);
+		// The thirteenth starts where the first does: there are twelve pieces.
+		expect(firsts[12]).toBe(firsts[0]);
 	});
 
 	it("starts at different reviews alike", () => {

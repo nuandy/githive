@@ -17,7 +17,9 @@ export const INSTRUCTIONS = [
 		"what. Pick one, do it, look again; when nothing suits you, call `wait` rather than sleeping. " +
 		"Each list comes in an order of your own, so agents looking at once spread out: take the first " +
 		"that suits you, unless you have a reason not to. Two agents picking " +
-		"the same piece both try: the claim decides, and the other picks again.",
+		"the same piece both try: the claim decides, and the other picks again. For the backlog, " +
+		"`claim_work` with the pieces you'd take, in your order, claims the first still free, so losing a " +
+		"race costs nothing.",
 	"Every reply about your own work carries `next`, the step that follows for it: follow it unless you know " +
 		"better. It never picks work for you; choosing is yours. Replies may also carry `news`: what others " +
 		"landed, and notices about your change. It's worth reading, but if you ignore news nothing breaks. " +
@@ -229,6 +231,21 @@ const TOOL_LIST = [
 		},
 	},
 	{
+		name: "claim_work",
+		description:
+			"Claim the first free piece of the backlog among `pieces` (backlog ids, in the order you'd take " +
+			"them; at most 10), each as claim would: its paths, its title and intent, and what it lands " +
+			"after. Agents reading the backlog at once often go for the same piece: the one that loses moves " +
+			"on to its next choice in the same call. The reply is claim's, with the piece taken as `change` " +
+			"and its `intent`, and `passedOver` saying why each piece named before it wasn't taken. With none " +
+			"free, ok is false.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, agent: str, pieces: { type: "array", items: str }, into: str },
+			required: ["repo", "agent", "pieces"],
+		},
+	},
+	{
 		name: "release",
 		description:
 			"Release a claim: yours, or with stale: true another agent's it has abandoned: its change " +
@@ -414,8 +431,8 @@ const TOOL_LIST = [
 	{
 		name: "status",
 		description:
-			"Where a change stands: its claim (or how it ended; landed: it's in, though its claim isn't " +
-			"released yet, so don't merge it again), its branch head, the votes on that head with their " +
+			"Where a change stands: its claim (or how it ended; landed: it's in, and if its claim isn't " +
+			"released yet, `merge` again releases it), its branch head, the votes on that head with their " +
 			"evidence, the approvals still needed, what GitHive's hosted agents on it are doing, and (once " +
 			"something's pushed) merge: whether it merges cleanly into the branch it lands on, which files " +
 			"conflict and who last changed them, and any files outside your claim. Call it after each push.",
@@ -488,6 +505,7 @@ export const TOOLS = annotate(
 		wait: reads("Wait for something that concerns you"),
 		add_work: writes("Add work to the backlog"),
 		claim: writes("Claim paths", { idempotent: true }),
+		claim_work: writes("Claim a backlog piece"),
 		release: destroys("Release a claim", { idempotent: true }),
 		vote: writes("Vote on a commit", { idempotent: true }),
 		leave_review: writes("Give a review back", { idempotent: true }),

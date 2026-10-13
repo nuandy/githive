@@ -1,5 +1,6 @@
 import { entriesOverlap } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
+import { hivePlace } from "./hive-agents";
 import { type Author, approval, effectivePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";
 
 // What there is to do: reviews an agent may give and backlog items nobody has claimed. GitHive assigns nothing;
@@ -328,8 +329,12 @@ export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" 
 	});
 }
 
-// A small, stable hash that spreads agents over equally good choices.
+// Where an agent starts among equally good choices. A repo's hosted agents start at their places in its hive, so as
+// many as there are choices start on different ones. Any other agent starts where a small, stable hash of its name
+// says, which spreads a crowd only as well as chance does.
 function spread(agent: string, count: number) {
+	const place = hivePlace(agent);
+	if (place !== undefined) return place % count;
 	let hash = 0x811c9dc5;
 	for (let i = 0; i < agent.length; i++) hash = Math.imul(hash ^ agent.charCodeAt(i), 0x01000193);
 	return (hash >>> 0) % count;

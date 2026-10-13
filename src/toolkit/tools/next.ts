@@ -87,15 +87,22 @@ export function askingAgent(args: Args, ctx: ToolContext): string | undefined {
 }
 
 const CHOOSE_NEXT = "Choose your next work from `backlog` or `reviews`.";
+const NONE_FREE =
+	"None of those pieces is free (`passedOver` says why): look at `backlog` again, or call `wait` to hear when work " +
+	"frees up.";
 const NONE_NOW = "None for you now: choose from the other list, or call `wait` to hear when that changes.";
 const CHANGES_ASKED =
 	"Changes were asked for: address the rejection's evidence, push a new commit to `fork`, then call `status`.";
+
+// The piece claim_work took is the caller's change from then on, as if claimed by name.
+const tookPiece = (reply: Reply, args: Args) => madeClaim(reply, { ...args, change: reply.change });
 
 // Tools left out have no next step of the caller's own to give: settings and register set things up, audit and revert
 // are about the repo, add_work adds for anyone to take, and claims, reviews and backlog are lists to choose from, which
 // next must never choose from.
 const STEPS: Record<string, Step> = {
 	claim: (reply, args) => (reply.ok === false ? refusedClaim(reply, args) : madeClaim(reply, args)),
+	claim_work: (reply, args) => (reply.ok === true ? tookPiece(reply, args) : NONE_FREE),
 	build: (reply, args) => {
 		if (reply.ok === false) return refusedClaim(reply, args);
 		const change = text(reply.change);
