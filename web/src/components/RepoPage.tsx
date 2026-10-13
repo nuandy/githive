@@ -326,14 +326,19 @@ function ChangeView({
 		() => api.landing!(repo, branch),
 		5_000,
 	);
-	// Kept by the server like the change's own view, its files can come from an earlier push for a moment: asked again
-	// soon until they're the head's.
+	// Its files, up to about a megabyte of diff, are read only on the Files tab. Kept by the server like the change's own
+	// view, they can come from an earlier push for a moment: asked again soon until they're the head's.
 	const head = claim?.head ?? changeHistory?.released.find((release) => release.mergedAs)?.mergedAs ?? "";
-	const diffKey = api.diff ? `diff:${repo}:${view.change}:${head}` : null;
+	const pushed = `${repo}:${view.change}:${head}`;
+	const diffKey = api.diff && view.tab === "files" ? `diff:${pushed}` : null;
 	const [behind, setBehind] = useState(false);
 	const diff = usePoll(diffKey, () => api.diff!(repo, view.change), behind ? 5_000 : 120_000);
 	const nowBehind = !!claim?.head && diff.data?.of === "head" && !!diff.data.head && diff.data.head !== claim.head;
 	if (nowBehind !== behind) setBehind(nowBehind);
+	// How many files it changed, once read for this push: the Files tab keeps its count on the other tabs.
+	const [counted, setCounted] = useState<{ pushed: string; total: number }>();
+	if (diff.data && (counted?.pushed !== pushed || counted.total !== diff.data.total))
+		setCounted({ pushed, total: diff.data.total });
 	const writes = canWrite(access?.level);
 	return (
 		<ChangePage
@@ -349,6 +354,7 @@ function ChangeView({
 			access={access ? { by: access.by, teams: access.teams } : undefined}
 			landing={landing.data}
 			diff={diff.data ?? (diff.error ? null : undefined)}
+			fileCount={counted?.pushed === pushed ? counted.total : undefined}
 			diffError={diff.error}
 			onDiffRetry={diff.refresh}
 			merge={writes ? api.merge : undefined}

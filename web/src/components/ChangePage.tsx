@@ -62,8 +62,10 @@ export interface ChangePageProps {
 	access?: Reader | undefined;
 	/** What's landing on the change's branch: a change whose head is being checked says Landing. */
 	landing?: RepoLanding | undefined;
-	/** Its files: undefined while loading, null if they couldn't be read. */
+	/** Its files, on the Files tab: undefined while loading (or on another tab), null if they couldn't be read. */
 	diff?: ChangeDiff | null | undefined;
+	/** How many files it changed, once known: the Files tab's count. */
+	fileCount?: number | undefined;
 	diffError?: string | undefined;
 	onDiffRetry?: () => void;
 	/**
@@ -333,6 +335,7 @@ export function ChangePage({
 	access,
 	landing,
 	diff,
+	fileCount,
 	diffError,
 	onDiffRetry,
 	merge,
@@ -543,7 +546,7 @@ export function ChangePage({
 							label: "Files",
 							icon: "file",
 							href: href.change(repo, changeId, "files"),
-							count: diff?.total,
+							count: fileCount ?? diff?.total,
 						},
 					]}
 				/>
