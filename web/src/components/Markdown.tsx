@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, Fragment, type ReactNode, useMemo } from "react";
 import { languageOf } from "../lib/highlight";
-import { type Block, type Inline, linkTarget, parseMarkdown } from "../lib/markdown";
+import { type Block, type Inline, linkTarget, parseMarkdown, plainText } from "../lib/markdown";
 import { cn } from "../lib/utils";
 import { TokenLine, useHighlighted } from "./Highlighted";
 import { Icon } from "./Icon";
@@ -96,6 +96,8 @@ function Inlines({ inlines, where }: { inlines: Inline[]; where: Where }) {
 								role="checkbox"
 								aria-checked={inline.checked}
 								aria-disabled="true"
+								// Named by its item's words, as a checkbox is by its label.
+								aria-label={plainText(inlines.slice(index + 1)).trim() || "Task"}
 								className={cn(
 									"mr-1.5 -ml-5.5 inline-flex size-3.5 items-center justify-center rounded-xs border align-[-2px]",
 									inline.checked ? "border-link bg-link text-card" : "border-input bg-card",

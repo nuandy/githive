@@ -628,8 +628,8 @@ function readLink(scan: Scan, at: number): { label: string; url: string; end: nu
 	return url ? { label, url, end: close + 1 } : null;
 }
 
-/** Inlines' text alone: an image's alt from its label. */
-function plainText(inlines: Inline[]): string {
+/** Inlines' text alone: an image's alt from its label, a task box's item from the words after it. */
+export function plainText(inlines: Inline[]): string {
 	return inlines
 		.map((inline) => {
 			if (inline.kind === "text" || inline.kind === "code") return inline.text;

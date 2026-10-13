@@ -54,6 +54,9 @@ describe("a Markdown file, formatted", () => {
 			/<span role="checkbox" aria-checked="true" aria-disabled="true"[^>]*><svg[^>]*>.*?<\/svg><\/span>ship it/,
 		);
 		expect(html).not.toContain("<input");
+		// Each box is named by its item's words, as a checkbox is by its label.
+		expect(html).toContain('aria-label="write it"');
+		expect(html).toContain('aria-label="ship it"');
 	});
 
 	it("links outside in a new tab, inside to the Code tab, and nowhere for anything else", () => {
