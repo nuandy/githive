@@ -2134,6 +2134,21 @@ says the last it had and is sent what it missed, or `missed`, and reads
 everything again, when that's too far back or the repo's cache was cleared. The list of repos and their counts is a hint kept in
 one RepoIndex; the records in Git are what count.
 
+**Usage** (`#/usage`, `GET /usage?range=24h|7d`, `src/usage/`) shows each signed-in person what their own repos used
+on Cloudflare: the repos in orgs where they're an owner or admin, decided on the server from who's signed in. The
+Worker reads its own usage from Cloudflare's GraphQL Analytics API (`CF_ANALYTICS_TOKEN`, `CF_ACCOUNT_ID`,
+`WORKER_NAME`) at most every 10 minutes, keeps it in its cache, and never sends it whole. A person's part is found
+by name: every Durable Object GitHive makes is named for its repo (`repo:<id>`, `agent:<id>:<agent>`,
+`record:<id>:…`, `hive:<id>`, or the id alone), so its requests, active time and rows read and written are
+theirs. Clef's calls are tagged `<worker>:<repo>` (bench and production share an account and name repos alike), so
+its neurons are too, from 14 Oct, when the tagging began. The Worker's own requests and CPU, and what its objects
+store, aren't reported per repo, so each person gets a share of them in proportion to their objects' requests,
+marked as an estimate. Costs are at the Workers Paid plan's list prices before its monthly allowances, an upper
+bound: Workers $0.30 per million requests and $0.02 per million CPU ms; Durable Objects $0.15 per million requests
+and $12.50 per million GB-s (at 128 MB), SQLite $0.001 per million rows read, $1.00 per million written and $0.20
+per GB-month stored; Workers AI $0.011 per 1,000 neurons. The hosted agents' model calls (OpenAI) aren't on
+Cloudflare and aren't counted.
+
 **Sites.** A public repo's static site is served from its files at `/site/<owner>/<repo>/`, its default branch,
 and a change's latest push at `/site/<owner>/<repo>/@<change>/` (`routes/site.ts`). Each file is read through the
 Artifacts API (`readFile`, 10 MB at most) and typed by its extension; nothing is built or run on GitHive's side, so
