@@ -2,6 +2,7 @@ import { type CSSProperties, type MouseEvent, type RefObject, useEffect, useRedu
 import { useFresh } from "../hooks/useFresh";
 import { useGlide } from "../hooks/useGlide";
 import { useLingering } from "../hooks/useLingering";
+import { useWidth } from "../hooks/useWidth";
 import { displayName } from "../lib/agent";
 import { distinctTitles, type Goal, type GoalStep, goalStatus } from "../lib/goals";
 import { agentChip, agentHue, HUE_BORDER } from "../lib/hiveCells";
@@ -18,6 +19,7 @@ import {
 	type BarPhase,
 	goalBar,
 	quietWords,
+	ticksThatFit,
 	RANGE_WORDS,
 	RANGES,
 	timeAxis,
@@ -560,15 +562,20 @@ function FinishedWords({ goals }: { goals: Goal[] }) {
 
 const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
 
-/** The clock above the bars, with its folded quiet stretches. */
+/** The clock above the bars, with its folded quiet stretches, and as many labels as its width has room for. */
 function AxisRow({ axis, timeline }: { axis: Axis; timeline: boolean }) {
+	const [clockRef, width] = useWidth<HTMLSpanElement>();
+	const ticks = width ? ticksThatFit(axis, width) : axis.ticks;
 	return (
 		<div className={cn(LINE, "py-0")} aria-hidden="true">
 			<span className={cn(chipBox(timeline), "invisible")} />
 			<span className="-mx-0.5 size-5 flex-none" />
 			<span className={MAIN}>
 				<span className={cn(WORDS, !timeline && "to-640:hidden")} />
-				<span className="relative min-h-4 flex-1 self-stretch font-mono text-[10px] leading-4 font-normal text-muted-foreground">
+				<span
+					ref={clockRef}
+					className="relative min-h-4 flex-1 self-stretch font-mono text-[10px] leading-4 font-normal text-muted-foreground"
+				>
 					{axis.pieces
 						.filter((piece) => piece.kind === "quiet")
 						.map((piece) => (
@@ -581,7 +588,7 @@ function AxisRow({ axis, timeline }: { axis: Axis; timeline: boolean }) {
 								⋯
 							</span>
 						))}
-					{axis.ticks.map((tick, index) => (
+					{ticks.map((tick, index) => (
 						<span
 							key={index}
 							className={cn("absolute -translate-x-1/2 whitespace-nowrap last:-translate-x-full", GLIDES)}

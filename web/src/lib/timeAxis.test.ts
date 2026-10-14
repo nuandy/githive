@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, NOW } from "../test/fixtures";
 import type { Goal } from "./goals";
-import { chooseRange, goalBar, RANGES, timeAxis } from "./timeAxis";
+import { type AxisPiece, chooseRange, goalBar, RANGES, ticksThatFit, timeAxis } from "./timeAxis";
 
 const MINUTE = 60_000;
 const [QUARTER, HALF, HOUR, SIX_HOURS] = RANGES as [number, number, number, number, number];
@@ -92,5 +92,44 @@ describe("a goal's bar", () => {
 		const bar = goalBar(landed, timeAxis([landed], QUARTER, NOW));
 		expect(bar.end?.kind).toBe("landed");
 		expect(bar.clipped).toBe("started 30 minutes ago");
+	});
+});
+
+describe("the time axis's labels", () => {
+	// As on the demo repo's Hive tab: a burst long ago, a quiet stretch folded, and two labels just before now.
+	const quiet: AxisPiece = { kind: "quiet", from: 0, to: 1, x0: 0.82, x1: 0.87 };
+	const crowded = {
+		pieces: [quiet],
+		ticks: [
+			{ x: 0, label: "07:17" },
+			{ x: 0.9, label: "17:31" },
+			{ x: 0.95, label: "17:35" },
+			{ x: 1, label: "now" },
+		],
+	};
+	const labels = (ticks: { label: string }[]) => ticks.map((tick) => tick.label);
+
+	it("leaves out those that would touch another, the fold's mark or now, on a narrow axis", () => {
+		expect(labels(ticksThatFit(crowded, 130))).toEqual(["07:17", "now"]);
+	});
+
+	it("keeps them all where there's room", () => {
+		expect(labels(ticksThatFit(crowded, 1000))).toEqual(["07:17", "17:31", "17:35", "now"]);
+	});
+
+	it("never draws two labels over each other, however narrow, and always says now", () => {
+		const burst = goal(400, { state: "landed", finished: ago(390) });
+		const axis = timeAxis([burst, goal(6), goal(2)], QUARTER, NOW);
+		for (const width of [90, 130, 200, 400, 800]) {
+			const ticks = ticksThatFit(axis, width);
+			expect(ticks.at(-1)).toEqual({ x: 1, label: "now" });
+			const spans = ticks.map((tick, index) => {
+				const wide = tick.label.length * 6.2;
+				const at = tick.x * width;
+				return index === ticks.length - 1 ? [at - wide, at] : [at - wide / 2, at + wide / 2];
+			});
+			for (let index = 1; index < spans.length; index++)
+				expect(spans[index]![0]).toBeGreaterThanOrEqual(spans[index - 1]![1]);
+		}
 	});
 });

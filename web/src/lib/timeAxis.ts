@@ -185,6 +185,45 @@ function ticksOf(pieces: AxisPiece[]): { x: number; label: string }[] {
 	return ticks;
 }
 
+/** A label's width, in px: its characters in the axis's 10px monospace font. */
+const CHAR_PX = 6.2;
+/** The least room between two labels, or a label and a folded stretch's mark, in px. */
+const GAP_PX = 6;
+/** The width a folded stretch's mark takes, at least, in px. */
+const MARK_PX = 8;
+
+/**
+ * The axis's labels that fit an axis `width` px wide, oldest first: none touching another or the mark of a folded
+ * stretch, and "now" always. A label is centred on its time, and "now" ends at the right edge.
+ */
+export function ticksThatFit(axis: Pick<Axis, "ticks" | "pieces">, width: number): { x: number; label: string }[] {
+	const now = axis.ticks[axis.ticks.length - 1];
+	if (!now) return [];
+	const extent = (tick: { x: number; label: string }, last: boolean) => {
+		const wide = tick.label.length * CHAR_PX;
+		const at = tick.x * width;
+		return last ? { from: at - wide, to: at } : { from: at - wide / 2, to: at + wide / 2 };
+	};
+	const marks = axis.pieces
+		.filter((piece) => piece.kind === "quiet")
+		.map((piece) => {
+			const middle = ((piece.x0 + piece.x1) / 2) * width;
+			const wide = Math.max(MARK_PX, (piece.x1 - piece.x0) * width);
+			return { from: middle - wide / 2, to: middle + wide / 2 };
+		});
+	const taken = [...marks, extent(now, true)];
+	const clear = (span: { from: number; to: number }) =>
+		taken.every((other) => span.to + GAP_PX <= other.from || other.to + GAP_PX <= span.from);
+	const kept: { x: number; label: string }[] = [];
+	for (const tick of axis.ticks.slice(0, -1)) {
+		const span = extent(tick, false);
+		if (!clear(span)) continue;
+		kept.push(tick);
+		taken.push(span);
+	}
+	return [...kept, now];
+}
+
 /** How a folded quiet stretch reads: "3 hours quiet". */
 export const quietWords = (piece: AxisPiece) => `${durationWords(piece.to - piece.from)} quiet`;
 

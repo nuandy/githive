@@ -1,4 +1,5 @@
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useRef, useState } from "react";
+import { useWidth } from "../hooks/useWidth";
 import { useFresh } from "../hooks/useFresh";
 import { useLeaving } from "../hooks/useLeaving";
 import { displayName } from "../lib/agent";
@@ -779,17 +780,4 @@ function CellDetails({
 			</p>
 		</div>
 	);
-}
-
-/** The width of the box the map draws in, once known. */
-function useWidth<T extends Element>(): [(element: T | null) => void, number | undefined] {
-	const [element, setElement] = useState<T | null>(null);
-	const [width, setWidth] = useState<number>();
-	useEffect(() => {
-		if (!element || typeof ResizeObserver === "undefined") return;
-		const observer = new ResizeObserver((entries) => setWidth(entries[0]?.contentRect.width));
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [element]);
-	return [setElement, width];
 }
