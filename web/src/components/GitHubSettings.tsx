@@ -136,15 +136,15 @@ export function GitHubSettings({
 							<option value="mirror">Pushed to GitHub's {branch} after every landing</option>
 						</NativeSelect>
 					</SettingField>
-					<Label className="flex items-center gap-2 font-normal">
-						{/* The browser's own margins about a checkbox. */}
+					<Label className="flex items-start gap-2 font-normal">
+						{/* On the first line's letters, which sit high in their line, however many lines the text takes. */}
 						<input
 							type="checkbox"
-							className="mt-0.75 mr-0.75 mb-0.75 ml-1"
+							className="m-0 mt-0.75 shrink-0"
 							checked={draft.trust}
 							disabled={!connected}
 							onChange={(event) => edit({ trust: event.target.checked })}
-						/>{" "}
+						/>
 						Trust GitHub's changes: they land without review (their checks still run)
 					</Label>
 				</fieldset>

@@ -203,15 +203,15 @@ function ReviewPolicy({ draft, update, busy }: DraftSectionProps) {
 					</SettingHint>
 				</SettingField>
 				<SettingField>
-					<Label className="flex items-center gap-2 font-normal">
-						{/* The browser's own margins about a checkbox. */}
+					<Label className="flex items-start gap-2 font-normal">
+						{/* On the first line's letters, which sit high in their line, however many lines the text takes. */}
 						<input
 							type="checkbox"
-							className="mt-0.75 mr-0.75 mb-0.75 ml-1"
+							className="m-0 mt-0.75 shrink-0"
 							checked={draft.independent}
 							onChange={(event) => update({ independent: event.target.checked })}
 							disabled={busy}
-						/>{" "}
+						/>
 						Independent review: approvals come from someone other than the change's author
 					</Label>
 					<SettingHint>
