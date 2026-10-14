@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { repoTag } from "../src/clef";
 import type { WorkerUse } from "../src/usage/analytics";
+import { keptFor } from "../src/usage/kept";
 import { hourlyCosts, type HourlyRead } from "../src/usage/own-hours";
 import { ownUsage, PRICES, repoOfObject } from "../src/usage/own-usage";
 
@@ -140,5 +141,31 @@ describe("a person's usage hour by hour", () => {
 	it("is nothing at all for someone with no repos", () => {
 		const none = hourlyCosts(use, "blueprint", [], { objects: [], periodic: [], worker: read.worker, ai: [] });
 		expect(none.every((hour) => hour.own === 0 && hour.shared === 0)).toBe(true);
+	});
+});
+
+describe("usage reads kept in the Worker's cache", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("are kept on the Worker's own host, and a second read is answered from there", async () => {
+		const kept = new Map<string, Response>();
+		vi.stubGlobal("caches", {
+			default: {
+				match: async (request: Request) => kept.get(request.url)?.clone(),
+				put: async (request: Request, response: Response) => void kept.set(request.url, response),
+			},
+		});
+		let reads = 0;
+		const read = async () => ({ requests: ++reads });
+		expect(await keptFor("https://githive.app", "usage/blueprint/24h", 600, read)).toEqual({
+			value: { requests: 1 },
+			kept: false,
+		});
+		expect([...kept.keys()]).toEqual(["https://githive.app/_kept/usage/blueprint/24h"]);
+		expect(await keptFor("https://githive.app", "usage/blueprint/24h", 600, read)).toEqual({
+			value: { requests: 1 },
+			kept: true,
+		});
+		expect(reads).toBe(1);
 	});
 });

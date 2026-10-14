@@ -3,6 +3,8 @@
 // own-usage.ts gives each person only what their repos used. One read serves everyone for ten minutes, and analytics
 // lag a few minutes behind.
 
+import { keptFor } from "./kept";
+
 const GRAPHQL = "https://api.cloudflare.com/client/v4/graphql";
 
 /** How long one read of the analytics serves every reader. */
@@ -94,15 +96,9 @@ export async function query(env: UsageEnv, text: string, variables: Record<strin
 	return account;
 }
 
-/** What this Worker used over `range`, read at most every ten minutes. */
-export async function workerUse(env: UsageEnv, range: UsageRange): Promise<WorkerUse> {
-	const key = new Request(`https://usage.githive.internal/${workerName(env)}/${range}`);
-	const kept = await caches.default.match(key);
-	if (kept) return (await kept.json()) as WorkerUse;
-	const use = await readWorkerUse(env, range);
-	const stored = new Response(JSON.stringify(use), { headers: { "Cache-Control": `max-age=${KEPT_SECONDS}` } });
-	await caches.default.put(key, stored);
-	return use;
+/** What this Worker used over `range`, read at most every ten minutes from `origin`'s cache. */
+export function workerUse(env: UsageEnv, range: UsageRange, origin: string) {
+	return keptFor(origin, `usage/${workerName(env)}/${range}`, KEPT_SECONDS, () => readWorkerUse(env, range));
 }
 
 async function readWorkerUse(env: UsageEnv, range: UsageRange): Promise<WorkerUse> {

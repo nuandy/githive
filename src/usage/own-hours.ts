@@ -1,5 +1,6 @@
 import { repoTag } from "../clef";
 import { type Group, query, type UsageEnv, type WorkerUse, workerName } from "./analytics";
+import { keptFor } from "./kept";
 import { MONTH_MS, type OwnedRepo, PRICES, repoCost, repoOfObject, requestShare } from "./own-usage";
 
 // The Usage page's chart: what one person's repos cost hour by hour, priced as the table prices them, over the same
@@ -47,17 +48,12 @@ export interface HourlyRead {
 	ai: Group[];
 }
 
-/** What `repos` cost in each hour of the Worker's read `use`, kept for ten minutes under `reader`. */
-export async function ownHours(env: UsageEnv, use: WorkerUse, repos: OwnedRepo[], reader: string) {
-	const key = new Request(
-		`https://usage.githive.internal/${workerName(env)}/hours/${use.from}/${encodeURIComponent(reader)}`,
+/** What `repos` cost in each hour of the Worker's read `use`, kept for ten minutes under `reader` in `origin`'s cache. */
+export function ownHours(env: UsageEnv, use: WorkerUse, repos: OwnedRepo[], reader: string, origin: string) {
+	const path = `usage-hours/${workerName(env)}/${encodeURIComponent(use.from)}/${encodeURIComponent(reader)}`;
+	return keptFor(origin, path, KEPT_SECONDS, async () =>
+		hourlyCosts(use, workerName(env), repos, await readHours(env, use, repos)),
 	);
-	const kept = await caches.default.match(key);
-	if (kept) return (await kept.json()) as HourCost[];
-	const hours = hourlyCosts(use, workerName(env), repos, await readHours(env, use, repos));
-	const stored = new Response(JSON.stringify(hours), { headers: { "Cache-Control": `max-age=${KEPT_SECONDS}` } });
-	await caches.default.put(key, stored);
-	return hours;
 }
 
 async function readHours(env: UsageEnv, use: WorkerUse, repos: OwnedRepo[]): Promise<HourlyRead> {
