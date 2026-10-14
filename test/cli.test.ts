@@ -370,6 +370,11 @@ describe("githive CLI", () => {
 		expect(landed.stdout).toContain("not landed yet:");
 		expect(landed.stdout).toContain("approvals: 0 of 1");
 		expect(landed.stdout).toContain("next: waiting on 1 approval; meanwhile review others': githive reviews acme/app");
+		// When no other agent may review it, its own agent does, and votes naming the change.
+		answers.status = { ...answers.status, reviewYourself: true };
+		const alone = await cli(["land"], clone);
+		expect(alone.stdout).toContain("next: no other agent may review it, so review it yourself in a fresh context");
+		expect(alone.stdout).toContain(`githive vote acme/app ${head} approve|reject "<evidence>" --change rate-limit`);
 	});
 
 	it("sync merges the project's branch into the change branch, never rebasing", async () => {

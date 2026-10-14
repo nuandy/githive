@@ -267,6 +267,13 @@ function statusStep(status, repo) {
 	if (rejected || approval.vetoedBy?.length) return FIX_EVIDENCE;
 	if (status.waitsOn?.length) return WAIT_FOR_DEPENDENCIES(repo);
 	if (approval.approved) return "githive land";
+	// No other agent may review it, so its own agent does, from a context that didn't build it (see status).
+	if (status.reviewYourself && status.head)
+		return (
+			"no other agent may review it, so review it yourself in a fresh context (a new session that hasn't seen it " +
+			`built): read its diff and run its tests, then githive vote ${repo} ${status.head} approve|reject ` +
+			`"<evidence>" --change ${status.change}`
+		);
 	const needed = Math.max(0, (approval.required ?? 0) - (approval.approvals ?? 0));
 	const plural = needed === 1 ? "" : "s";
 	const awaiting = approval.awaiting?.length ? ` (${approval.awaiting.join(", ")})` : "";
