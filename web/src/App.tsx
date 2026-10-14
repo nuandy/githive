@@ -47,6 +47,7 @@ import { cn } from "./lib/utils";
 // Pages most visits never reach load as they're first shown (components/Lazy.tsx).
 const AdminPage = lazyPart(() => import("./components/AdminPage").then((module) => module.AdminPage));
 const AgentsPage = lazyPart(() => import("./components/AgentsPage").then((module) => module.AgentsPage));
+const UsagePage = lazyPart(() => import("./components/UsagePage").then((module) => module.UsagePage));
 const NewRepoPage = lazyPart(() => import("./components/NewRepoPage").then((module) => module.NewRepoPage));
 const OrgPage = lazyPart(() => import("./components/OrgPage").then((module) => module.OrgPage));
 const OrgsPage = lazyPart(() => import("./components/OrgsPage").then((module) => module.OrgsPage));
@@ -309,6 +310,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		const yours = summaries.data ? buildRepoRows(summaries.data).filter((row) => !row.public) : undefined;
 		const repos = yours?.map((row) => row.name);
 		page = me.kind === "user" ? <AgentsPage me={me} account={account} repos={repos} /> : <NoAgentsHere />;
+	} else if (route.page === "usage") {
+		page = me.kind === "user" ? <UsagePage load={account.usage} /> : <ForPeople what="Usage" />;
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
@@ -353,6 +356,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				adminCurrent={route.page === "admin"}
 				{...(adminRequests.data ? { adminRequests: adminRequests.data.length } : {})}
 				orgsCurrent={route.page === "orgs" || route.page === "org"}
+				usageCurrent={route.page === "usage"}
 			/>
 			<PageErrors errors={errors} />
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
@@ -370,7 +374,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 }
 
 /** The pages that load as they're first shown. */
-const LAZY_PAGES = new Set<Route["page"]>(["admin", "new-repo", "orgs", "org", "agents-settings"]);
+const LAZY_PAGES = new Set<Route["page"]>(["admin", "new-repo", "orgs", "org", "agents-settings", "usage"]);
 
 /**
  * A repo's data for its page: its snapshot, audit, the reader's access, and the change shown, if any. While the
@@ -530,6 +534,8 @@ function placeOf(route: Route, changeLabel: string): { crumbs: Crumb[]; title: s
 			return { crumbs: [{ label: "Your agents" }], title: "Your agents" };
 		case "admin":
 			return { crumbs: [{ label: "Admin" }], title: "Admin" };
+		case "usage":
+			return { crumbs: [{ label: "Usage" }], title: "Usage" };
 		case "new-repo":
 			return {
 				crumbs: [{ label: "Repositories", href: href.repos() }, { label: "New repository" }],

@@ -15,6 +15,7 @@ import { hostedAgentRoutes } from "./routes/hosted-agents";
 import { mcpResponse, mcpRoutes } from "./routes/mcp";
 import { repoRoutes } from "./routes/repos";
 import { siteRoutes } from "./routes/site";
+import { usageRoutes } from "./routes/usage";
 import type { AppEnv } from "./routes/shared";
 
 // The Worker: sign-in and request logging around every route, the route groups in src/routes, and MCP over OAuth.
@@ -110,6 +111,7 @@ app.get("/api", (c) =>
 			"GET  /repos       (the repos you can see)",
 			"POST /repos {owner, name, import_url? (import_token? for a private repo) | copy_from?, visibility?}  (a new repo)",
 			"GET  /summaries   (every repo you can see, with its counts)",
+			"GET  /usage?range=24h|7d   (what your own repos used on Cloudflare, and its cost at list prices)",
 			"GET  /repos/:owner/:name  (claims and votes, from Git); /access (your permission)",
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",
 			"POST /repos/:owner/:name/changes/:change/votes {role, verdict, evidence}  (a person's vote; review)",
@@ -137,6 +139,7 @@ dashboardRoutes(app);
 demoRoutes(app);
 hostedAgentRoutes(app);
 siteRoutes(app);
+usageRoutes(app);
 mcpRoutes(app);
 adminRoutes(app);
 

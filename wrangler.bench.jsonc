@@ -26,6 +26,8 @@
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
 		"ARTIFACTS_NAMESPACE": "blueprint-bench",
+		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (src/usage/).
+		"WORKER_NAME": "blueprint-bench",
 		// The one public repo demo runs build Honeycomb in (src/demo/demo-repo.ts); the first run makes it.
 		"DEMO_REPO": "nuandy/honeycomb",
 		// Bench only: POST /admin/wipe may delete every repo in this namespace. Never set on production.

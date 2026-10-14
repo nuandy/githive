@@ -248,8 +248,10 @@ async function hintPush(
 	claim: ClaimView,
 	placed: { head: string; base: string; files: string[] },
 ) {
-	const asked = parts.pushHints;
-	if (!asked) return;
+	const untagged = parts.pushHints;
+	if (!untagged) return;
+	// Clef's calls about the push are tagged with its repo (see usage).
+	const asked = { ...untagged, clef: untagged.clef.forRepo?.(project) ?? untagged.clef };
 	const placedPush = {
 		change: push.change,
 		agent: claim.agent,

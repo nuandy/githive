@@ -26,20 +26,30 @@ export interface Clef {
 		questions: Record<string, ClefQuestion>,
 		images?: string[],
 	): Promise<Record<string, ClefAnswer> | null>;
+	/** The same Clef, its calls tagged with the repo they're about, so a repo's owner can see what it used. */
+	forRepo?(repo: string): Clef;
 }
+
+/**
+ * How a repo's Workers AI calls are tagged, by the Worker that made them (bench and production share an account and
+ * name repos alike): letters, digits and : - . / @ only, at most 50 characters.
+ */
+export const repoTag = (worker: string, repo: string) =>
+	`${worker}:${repo}`.replace(/[^A-Za-z0-9:./@-]/g, "-").slice(0, 50);
 
 /** How long a call waits for each model before going on without its answer. */
 const ANSWER_WITHIN_MS: Record<ClefModel, number> = { "clef-flash": 1_500, clef: 4_000 };
 
-type Run = (model: string, input: unknown) => Promise<unknown>;
+type Run = (model: string, input: unknown, options: { tags?: string[] }) => Promise<unknown>;
 
-/** Clef through the Worker's Workers AI binding. */
-export function clefOn(ai: Ai): Clef {
+/** Clef through the Worker's Workers AI binding. Named for `worker`, it tags each repo's calls (forRepo). */
+export function clefOn(ai: Ai, worker?: string, tags: string[] = []): Clef {
 	const run = ai.run.bind(ai) as unknown as Run;
 	return {
+		...(worker ? { forRepo: (repo: string) => clefOn(ai, worker, [repoTag(worker, repo)]) } : {}),
 		ask: async (model, state, questions, images) => {
 			const input = { model, state, questions, ...(images?.length ? { images: images.slice(0, 4) } : {}) };
-			const asking = run(`@cf/cloudflare/${model}`, input);
+			const asking = run(`@cf/cloudflare/${model}`, input, tags.length ? { tags } : {});
 			const answer = await withinMs(asking, ANSWER_WITHIN_MS[model]).catch((err) => {
 				console.error(`asking ${model} failed`, String(err));
 				return undefined;

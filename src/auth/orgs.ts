@@ -499,6 +499,18 @@ export class OrgStore {
 		return new Set(results.map((row) => row.id));
 	}
 
+	/** The repos a person owns: their orgs' where they're an owner or admin (a personal org is its person's). */
+	async ownedRepos(userId: string) {
+		const { results } = await this.db
+			.prepare(
+				`${REPO_SELECT} WHERE r.org_id IN (SELECT org_id FROM org_members WHERE user_id = ? AND ` +
+					"role IN ('owner', 'admin')) ORDER BY o.slug, r.name",
+			)
+			.bind(userId)
+			.all<Row>();
+		return results.map(toRepo);
+	}
+
 	/** Every repo a person can see: their orgs', the ones they collaborate on, and public ones. */
 	async visibleRepos(userId: string) {
 		const { results } = await this.db

@@ -296,8 +296,10 @@ export interface ClaimsAdvice {
 }
 
 /** What a tool call works with: the repo's records as read once for this call, and helpers over them. */
-export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
+export async function openCall(args: Args, given: ToolContext, run: RunTool) {
 	const repo = requiredString(args, "repo");
+	// Clef's calls during the call are tagged with its repo (see usage).
+	const ctx = given.clef?.forRepo ? { ...given, clef: given.clef.forRepo(repo) } : given;
 	const write = () => ctx.remote(repo, "write");
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const votes = votesFor(ctx, repo);

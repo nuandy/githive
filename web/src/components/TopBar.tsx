@@ -44,12 +44,14 @@ export function UserMenu({
 	onSignOut,
 	agentsCurrent = false,
 	orgsCurrent = false,
+	usageCurrent = false,
 	onShortcuts,
 }: {
 	me: Extract<Me, { kind: "user" }>;
 	onSignOut: () => void;
 	agentsCurrent?: boolean;
 	orgsCurrent?: boolean;
+	usageCurrent?: boolean;
 	/** Shows the keyboard's shortcuts. */
 	onShortcuts?: () => void;
 }) {
@@ -109,6 +111,11 @@ export function UserMenu({
 				<DropdownMenuItem asChild className={menuItem}>
 					<a href={href.agents()} aria-current={agentsCurrent ? "page" : undefined}>
 						<Icon name="bot" /> Agents
+					</a>
+				</DropdownMenuItem>
+				<DropdownMenuItem asChild className={menuItem}>
+					<a href={href.usage()} aria-current={usageCurrent ? "page" : undefined}>
+						<Icon name="activity" /> Usage
 					</a>
 				</DropdownMenuItem>
 				{onShortcuts ? (
@@ -303,6 +310,7 @@ export function TopBar({
 	onSignOut,
 	agentsCurrent = false,
 	orgsCurrent = false,
+	usageCurrent = false,
 	adminCurrent = false,
 	adminRequests,
 	onSignIn,
@@ -322,6 +330,7 @@ export function TopBar({
 	onSignOut?: () => void;
 	agentsCurrent?: boolean;
 	orgsCurrent?: boolean;
+	usageCurrent?: boolean;
 	adminCurrent?: boolean;
 	/** For an Access caller: orgs' requests waiting for approval, once known. */
 	adminRequests?: number;
@@ -368,6 +377,7 @@ export function TopBar({
 						onSignOut={onSignOut ?? (() => undefined)}
 						agentsCurrent={agentsCurrent}
 						orgsCurrent={orgsCurrent}
+						usageCurrent={usageCurrent}
 						{...(onShortcuts ? { onShortcuts } : {})}
 					/>
 				) : null}

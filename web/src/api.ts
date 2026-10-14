@@ -841,7 +841,31 @@ export async function fetchMe(): Promise<Me | null> {
 }
 
 /** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
+/** One of a person's repos: what its Durable Objects and Clef calls used, and what that costs at list prices. */
+export interface RepoUsage {
+	repo: string;
+	objectRequests: number;
+	activeSeconds: number;
+	rowsRead: number;
+	rowsWritten: number;
+	clefNeurons: number;
+	cost: number;
+}
+
+/** GET /usage: what the reader's own repos used on Cloudflare over a range. */
+export interface UsageReport {
+	range: "24h" | "7d";
+	from: string;
+	to: string;
+	repos: RepoUsage[];
+	/** Their share of the Worker's requests, CPU and stored data, which aren't reported per repo. */
+	shared: { share: number; workerRequests: number; cpuMs: number; storedBytes: number; cost: number };
+	total: number;
+}
+
 export const account = {
+	/** What the reader's own repos used on Cloudflare (GET /usage). */
+	usage: (range: UsageReport["range"]) => call<UsageReport>("GET", `/usage?range=${range}`),
 	/** The sign-in providers set up here, whether an invite code lets people in, and the demo repo, if any. */
 	providers: () =>
 		call<{ providers: ("github" | "google")[]; inviteCode?: boolean; demoRepo?: string }>("GET", "/auth/providers"),

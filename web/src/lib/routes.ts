@@ -52,6 +52,7 @@ export type Route =
 	| { page: "org"; org: string }
 	| { page: "inbox" }
 	| { page: "agents-settings" }
+	| { page: "usage" }
 	| { page: "admin" }
 	| {
 			page: "repo";
@@ -127,6 +128,7 @@ export function parseRoute(hash: string): Route {
 	}
 	if (parts[0] === "settings" && parts[1] === "agents" && parts.length === 2) return { page: "agents-settings" };
 	if (parts[0] === "admin" && parts.length === 1) return { page: "admin" };
+	if (parts[0] === "usage" && parts.length === 1) return { page: "usage" };
 
 	if (parts[0] === "repos" && parts.length >= 3) {
 		const owner = decode(parts[1]);
@@ -223,6 +225,7 @@ export const href = {
 	inbox: () => "#/inbox",
 	agents: () => "#/settings/agents",
 	admin: () => "#/admin",
+	usage: () => "#/usage",
 };
 
 /**
