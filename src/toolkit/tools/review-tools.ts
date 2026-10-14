@@ -1,6 +1,6 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { keepSteering, questionHints, steeringReply, voteHints } from "../clef-hints";
-import { effectivePolicy } from "../votes";
+import { effectivePolicy, ownPersonsWork } from "../votes";
 import { holds } from "./merge-tools";
 import { holdKey } from "../work";
 import type { ToolCall, ToolHandlers } from "./context";
@@ -50,9 +50,11 @@ export const reviewTools: ToolHandlers = {
 		const evidence = requiredString(args, "evidence");
 		const role = requiredString(args, "role");
 		if (verdict === "approve" && change) await refuseOwnApprovalBesideSiblings(call, change, reviewer);
-		// A vote without a review taken first (credentials) still counts against the owner's limit.
+		// A vote on another person's change without a review taken first (credentials) still counts against the
+		// owner's limit; one on the owner's own change doesn't.
 		if (ctx.ownerLimits) {
-			const counted = await holds({ ctx, repo }, commit, role, reviewer);
+			const own = change ? ownPersonsWork(ctx.identity, (await call.claimOf(change))?.by) : false;
+			const counted = own || (await holds({ ctx, repo }, commit, role, reviewer));
 			const refused = counted ? null : await ctx.ownerLimits.take("review");
 			if (refused) fail(403, refused);
 		}

@@ -10,6 +10,7 @@ import { fakeD1 } from "./fakes/d1";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { soakReviews } from "./helpers/soak";
 import { toolCalls } from "./helpers/tool-calls";
+import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 
 // An agent's owner sets how much of other people's work it does: building their backlog pieces and reviewing their
 // changes, both never by default, counted a UTC day at a time. GitHive keeps to it where such
@@ -239,5 +240,39 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 			next: expect.stringMatching(/^Your owner's limit leaves you no reviews/),
 		});
 		expect(await refusal("vote", vote(head2))).toBe("403 limit of 1 reviews reached");
+	});
+
+	it("count none of an agent's reviews of its own owner's changes, at the default of never", async () => {
+		// Ada's two agents and Bob's, all at the defaults, stamped as the Worker stamps them.
+		const key = await generateStampKey();
+		const reviews = soakReviews(server);
+		const { limits, agent: helper } = await ownedAgent();
+		const as = (person: string, ownerLimits?: OwnerLimits) =>
+			toolCalls(() => server, {
+				identity: person,
+				reviews,
+				stamper: (name?: string) => makeStamper(key.privateKey, name ? `${person}/${name}` : person),
+				...(ownerLimits ? { ownerLimits } : {}),
+			});
+		const ada = as("person:ada", limits.ownerLimits(helper.id));
+		const bob = as("person:bob", limitsOf({ build: 0, review: 0 }));
+		await ada.call("settings", { required: 1 });
+		await ada.register("ada-builder", "ada-helper");
+		await bob.register("bob-agent");
+		await ada.call("claim", claim("ada-builder", "c1"), "ada-builder");
+		const head = await pushChange(server.url, work, "ada-builder", "c1", { "src/c1/x.js": "1\n" });
+
+		// Ada's helper is offered her change, takes it and approves it; none of it counts against its limit.
+		const offered = await ada.call("reviews", { agent: "ada-helper" }, "ada-helper");
+		expect(offered).toMatchObject({ reviews: [expect.objectContaining({ change: "c1" })] });
+		expect(offered.next).toMatch(/only reviews of their own changes/);
+		expect(await ada.call("credentials", { change: "c1", agent: "ada-helper" }, "ada-helper")).toBeTruthy();
+		const approve = { commit: head, change: "c1", role: "review", verdict: "approve", evidence: "ran it" };
+		expect(await ada.call("vote", { ...approve, reviewer: "ada-helper" }, "ada-helper")).toMatchObject({ ok: true });
+		expect(await limits.countsToday([helper.id])).toEqual({ [helper.id]: { build: 0, review: 0 } });
+
+		// Bob's agent, at the same default, still may not review Ada's change.
+		expect(await bob.call("reviews", { agent: "bob-agent" }, "bob-agent")).toMatchObject({ reviews: [] });
+		await expect(bob.call("vote", { ...approve, reviewer: "bob-agent" }, "bob-agent")).rejects.toThrow(/review/);
 	});
 });

@@ -169,6 +169,15 @@ export const personOf = (by: string | undefined) => by?.match(/^person:[^/]+/)?.
 
 export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.test(by);
 
+/**
+ * Whether a change claimed as `by` is the work of `identity`'s own person: an owner's limits on other people's work
+ * (see agent-limits.ts) don't count its agents' reviews of it.
+ */
+export function ownPersonsWork(identity: string | undefined, by: string | undefined) {
+	const caller = personOf(identity);
+	return !!caller && personOf(by) === caller;
+}
+
 /** A grant a person may vote under: people, one person, or an org team (see holdsRole). */
 const peopleGrant = (holder: string) => isPerson(holder) || holder.startsWith("@");
 

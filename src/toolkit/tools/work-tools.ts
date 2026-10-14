@@ -7,7 +7,7 @@ import { type LandingView, lastLandedOn, type Settled } from "../landing";
 import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
-import { countedVotes } from "../votes";
+import { countedVotes, ownPersonsWork } from "../votes";
 import { keepSteering, pieceHints, writtenSteering } from "../clef-hints";
 import { STEERING_SAYS } from "../../steering";
 import { addDependencies, addWork, addWorks } from "../backlog-records";
@@ -25,7 +25,6 @@ export const workTools: ToolHandlers = {
 	async reviews({ ctx, repo, votes, registered, actAs, openWork }) {
 		const agent = actAs("agent");
 		const limit = await ctx.ownerLimits?.reached("review");
-		if (limit) return { reviews: [], limit };
 		const state = await openWork(agent);
 		const heads = state.open.flatMap((entry) => (entry.head ? [entry.head] : []));
 		const held = ctx.reviews ? await ctx.reviews.held(repo, heads).catch(() => ({})) : {};
@@ -40,11 +39,17 @@ export const workTools: ToolHandlers = {
 				state.votes,
 				(claim) => claimPolicy(registered, claim),
 			).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
-		const options = await reviewOptions(ctx, repo, state, held);
+		const offered = await reviewOptions(ctx, repo, state, held);
+		// Past the owner's limit on other people's work, only its own person's changes are offered.
+		const own = new Set(
+			state.open.filter(({ claim }) => ownPersonsWork(ctx.identity, claim.by)).map(({ claim }) => claim.change),
+		);
+		const options = limit ? offered.filter((option) => own.has(option.change)) : offered;
 		return {
 			...yoursIn(state),
 			reviews: options.slice(0, LISTED_AT_MOST),
 			...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
+			...(limit ? { limit } : {}),
 		};
 	},
 	async backlog({ ctx, actAs, openWork }) {

@@ -146,7 +146,11 @@ const STEPS: Record<string, Step> = {
 	reviews: (reply) => {
 		const forgotten = unpushedStep(reply);
 		if (forgotten) return forgotten;
-		if (text(reply.limit)) return "Your owner's limit leaves you no reviews of others' changes today (see limit).";
+		const limited = text(reply.limit);
+		if (limited && isEmpty(reply.reviews))
+			return "Your owner's limit leaves you no reviews of others' changes today (see limit).";
+		// Past the limit, what's listed is the owner's own work, which the limit doesn't count.
+		if (limited) return "Your owner's limit leaves you only reviews of their own changes today (see limit).";
 		return isEmpty(reply.reviews) ? NONE_NOW : undefined;
 	},
 	backlog: (reply) => unpushedStep(reply) ?? (isEmpty(reply.open) ? NONE_NOW : undefined),

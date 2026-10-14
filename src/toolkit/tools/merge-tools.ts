@@ -10,7 +10,7 @@ import { pushToGitHub } from "../github-outbound";
 import { bringsGitHubBack, type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { writtenSteering } from "../clef-hints";
-import { countedVotes } from "../votes";
+import { countedVotes, ownPersonsWork } from "../votes";
 import { earlierRejection, holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
@@ -360,8 +360,9 @@ async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role
 	const reviews = role === "review" ? "reviews" : `${role} reviews`;
 	if (needed <= 0) fail(409, `${claim.change} needs no more ${reviews} at ${short}: take another from reviews`);
 	const key = holdKey(head, role);
-	// Asked before holding: taking a review it already holds counts nothing more.
-	const already = ctx.ownerLimits ? await holds(call, head, role, reviewer) : true;
+	// Asked before holding: taking a review it already holds counts nothing more, nor one of its owner's own change.
+	const limited = !!ctx.ownerLimits && !ownPersonsWork(ctx.identity, claim.by);
+	const already = limited ? await holds(call, head, role, reviewer) : true;
 	const taken = await ctx.reviews.hold(repo, key, reviewer, needed).catch(() => true);
 	if (taken) {
 		if (!already) await reviewWithinLimit(call, key, reviewer);
