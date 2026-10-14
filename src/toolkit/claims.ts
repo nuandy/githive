@@ -121,6 +121,7 @@ export async function startRepo(
 		branch?: string;
 		policy: ReviewPolicy;
 		verify?: string[];
+		skipChecks?: string[];
 		stampKey?: string;
 		shardDepth?: number;
 		recordsRepos?: number;
@@ -137,6 +138,7 @@ export async function startRepo(
 				...(input.branch ? { branch: input.branch } : {}),
 				policy: input.policy,
 				verify: input.verify ?? [],
+				...(input.skipChecks ? { skipChecks: input.skipChecks } : {}),
 				stampKey: input.stampKey,
 				...sharding,
 			},
@@ -307,6 +309,8 @@ export async function claim(
 	let previous: string[] | null = null;
 	// The state the claim was written onto, which shows whether the registry was sharded by then.
 	let seen: Registry | undefined;
+	// The stale claims this one released on its way, whose landing attempts go with them.
+	let released: string[] = [];
 	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
 		seen = state;
 		const nowMs = fixedNow ?? Date.now();
@@ -316,6 +320,7 @@ export async function claim(
 		if (blocking.length) return { refused: blocking };
 		const now = new Date(nowMs).toISOString();
 		const freedClaims = state.claims.filter((held) => stale.has(held.change));
+		released = freedClaims.map((held) => held.change);
 		const releases: ReleaseRecord[] = [];
 		for (const held of freedClaims)
 			releases.push(await stamped("release", staleRelease(held, wanted.agent, now), stamper, "verifiedBy"));
@@ -338,7 +343,7 @@ export async function claim(
 			text: `${wanted.agent} claims ${wanted.paths.join(", ")} for ${wanted.change}: ${wanted.intent}${freed}`,
 		};
 	});
-	return outcome.ok ? { ...outcome, previous, seen } : { ok: false as const, conflicts: outcome.refused };
+	return outcome.ok ? { ...outcome, previous, seen, released } : { ok: false as const, conflicts: outcome.refused };
 }
 
 // The changes in the way, by conflicting or by taking the same name, whose claims are stale. Stale means idle past
@@ -423,14 +428,13 @@ export function withdraw(
 }
 
 /** Releases a change's claim after it merged (naming the merge) or was given up. */
-export function release(
-	log: CasLog<Registry>,
-	input: { change: string; agent: string; reason: string; mergedAs?: string },
-	stamper?: Stamper,
-) {
+export function release(log: CasLog<Registry>, input: ReleaseInput, stamper?: Stamper) {
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
+		// Checked again here, in the write: another agent may have taken the name over since the caller looked.
+		if (input.holder && held.agent !== input.holder)
+			return { refused: `${input.change} is ${held.agent}'s claim now, not ${input.holder}'s` };
 		const into = scopedInto(held.paths);
 		const record: ReleaseRecord = {
 			change: input.change,
@@ -452,6 +456,15 @@ export function release(
 			text: `${input.agent} releases ${input.change}${merged}: ${input.reason}`,
 		};
 	});
+}
+
+/** A release: who gives the change up and why, and, when it must still be theirs, the agent whose claim it is. */
+export interface ReleaseInput {
+	change: string;
+	agent: string;
+	reason: string;
+	mergedAs?: string;
+	holder?: string;
 }
 
 /** Whether a claim is abandoned (see staleness.ts). The caller decides, since the claims don't know heads or votes. */

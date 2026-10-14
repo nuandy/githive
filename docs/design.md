@@ -740,15 +740,18 @@ asked both the same question, where their change stands.)
 
 A change that only touches documentation and other files no check reads
 merges without running the checks: by default Markdown and other doc formats
-(`*.md`, `*.mdx`, `*.markdown`, `*.rst`, `*.adoc`), `docs/` and `doc/`
-folders, licenses, notices and authors, and images (png, jpg, gif, webp,
-ico; not SVG). Not `*.txt`: `requirements.txt`
+(`*.md`, `*.mdx`, `*.markdown`, `*.rst`, `*.adoc`), the top's `docs/` and
+`doc/` folders (one deeper down, like `src/docs/`, can be code), licenses,
+notices and authors by their names (`LICENSE`, `LICENSE.md`, `LICENSE-MIT`, but
+not `NOTICEBoard.ts`), and images (png, jpg, gif, webp, ico; not SVG). A repo
+started before these defaults keeps the list it started with. Not `*.txt`: `requirements.txt`
 and `CMakeLists.txt` are code as far as the checks go. A file under a folder
 tests read (`test/`, `tests/`, `__tests__/`, `spec/`, `specs/`, `fixtures/`,
 `examples/`, `example/`) always runs them, whatever it is: Express's tests render
 `examples/markdown/views/index.md`. A repo sets its own list with `settings`
-`skip_checks` (a name like `*.md`, a folder anywhere like `docs/`, or a path
-from the top like `site/*.html`), or `[]` to always run them. `merge` says
+`skip_checks` (a name like `*.md`, a folder anywhere like `docs/` or at the top
+like `/docs/`, or a path from the top like `site/*.html`), or `[]` to always run
+them. `merge` says
 when it skipped them, and the audit applies the same rule with the list in
 force when the change merged (`check-scope.ts`).
 
@@ -844,7 +847,8 @@ change's files put in place: it needs no checkout and no real merge. The
 landing reads only the trees along each change's paths, through Artifacts'
 `readTree`; writes the new trees and the merge commits in memory, the same
 commits the Gate's `git merge --no-ff` makes (author, message and stamp
-included); and pushes them, with the objects the changes add, in one
+included; a change whose head is already in main's history gets a merge with
+main's tree unchanged, in both); and pushes them, with the objects the changes add, in one
 `git-receive-pack` request that moves the branch only if it's still at the
 base. Those objects come from each change's fork as Artifacts packs them,
 joined byte for byte into the push. Artifacts takes 5 to 10 s to answer any

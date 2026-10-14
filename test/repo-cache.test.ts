@@ -279,6 +279,20 @@ describe("forgetting a deleted repo's views", () => {
 		expect(await live.clearViews()).toEqual([]);
 	});
 
+	it("forgets the hive's feed and what Clef kept, so a repo made again under the name starts clean", async () => {
+		const storage = new FakeStorage();
+		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		await storage.put("event:2026-10-14T10:00:00.000Z claimed", { kind: "claimed", change: "c-1" });
+		await storage.put("steering:c-1", [{ in: "intent", by: "a", likelihood: 0.9 }]);
+		await storage.put("push-hints:c-1", { head: "h1", hints: [] });
+		await storage.put("stretch", { since: "2026-10-14T10:00:00.000Z" });
+		await live.clearViews();
+		expect(await live.events()).toEqual([]);
+		expect(await live.keptPushHints("c-1")).toBeNull();
+		expect(await live.steeringOf(["c-1"])).toEqual({});
+		expect(await storage.get("stretch")).toBeUndefined();
+	});
+
 	it("drops kept views and builds, and keeps counting writes", async () => {
 		const { live } = feed();
 		await live.keep("snapshot", "{}", 0);

@@ -137,6 +137,28 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
 	});
 
+	it("lands a change whose head is already on main as an empty merge of its own, as tree landing does", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		const first = await gate.landBatch({
+			repo: "t1",
+			branch: "main",
+			base: base(),
+			baseHead: main,
+			merges: [{ ...source("a-1"), head: a, claimed: claimed("a-1", a) }],
+		});
+		const [landedA] = (first as { commits: [string] }).commits;
+		// b-1 is a's head again, so main already has all of it.
+		server.git("update-ref", "refs/heads/changes/b-1", a);
+		const merges = [{ ...source("b-1"), head: a, claimed: claimed("b-1", a) }];
+		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: landedA, merges });
+		expect(landed).toEqual({ commits: [expect.any(String)] });
+		const [empty] = (landed as { commits: [string] }).commits;
+		expect(server.git("rev-list", "--parents", "-1", empty).trim()).toBe(`${empty} ${landedA} ${a}`);
+		expect(server.git("rev-parse", `${empty}^{tree}`).trim()).toBe(server.git("rev-parse", `${landedA}^{tree}`).trim());
+		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Change,valueonly)", empty).trim()).toBe("b-1");
+	});
+
 	it("names the change that doesn't merge onto the batch and the files it conflicts on, and lands nothing", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/shared.txt": "a\n" });

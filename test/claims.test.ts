@@ -23,6 +23,17 @@ describe("claims", () => {
 		expect(head!.commit.entries.map((e) => e.text)).toEqual(["agent-a claims src/stats/ for stats-1a2b: Add stats"]);
 	});
 
+	it("refuses a release meant for one agent's claim once another agent holds the change", async () => {
+		const log = new MemoryLog<Registry>();
+		// agent-a looked and saw stats-1a2b as its own, but agent-b has taken the name over since.
+		await claim(log, { ...a, agent: "agent-b" });
+		expect(await release(log, { change: "stats-1a2b", agent: "agent-a", reason: "done", holder: "agent-a" })).toEqual({
+			ok: false,
+			refused: "stats-1a2b is agent-b's claim now, not agent-a's",
+		});
+		expect(activeClaims((await log.read())!.commit.state).map((held) => held.agent)).toEqual(["agent-b"]);
+	});
+
 	it("refuses an overlapping claim, naming the holder, and leaves the registry as it was", async () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);

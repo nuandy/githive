@@ -19,6 +19,7 @@ import {
 	type ClaimRecord,
 	type Conflict,
 	type Registry,
+	type ReleaseInput,
 	type ReleaseRecord,
 } from "./claims";
 import { appendRecord } from "./records";
@@ -87,10 +88,7 @@ export interface ClaimStore {
 	/** readScope for several changes at once, reading each record once for all of them. */
 	readScopes(scopes: Scope[]): Promise<ClaimsView[]>;
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
-	release(
-		input: { change: string; agent: string; reason: string; mergedAs?: string },
-		stamper?: Stamper,
-	): Promise<ReleaseOutcome>;
+	release(input: ReleaseInput, stamper?: Stamper): Promise<ReleaseOutcome>;
 	releaseStale(
 		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
 		stamper?: Stamper,
@@ -413,6 +411,7 @@ class Claims implements ClaimStore {
 				const reason = `part of the claim is held by ${outcome.conflicts[0]?.change}`;
 				return { ...outcome, ...(await this.backOut(input, written, reason, stamper)) };
 			}
+			for (const freed of outcome.released) await this.forgetAttempts(freed);
 			// Written in the registry after sharding, so it sits above every shard and must look below.
 			if (shard === ROOT) this.learn(outcome.seen);
 			written.push({ shard, previous: outcome.previous });
@@ -585,10 +584,7 @@ class Claims implements ClaimStore {
 		return own ? { own, shards: entries.map((entry) => entry.shard) } : null;
 	}
 
-	async release(
-		input: { change: string; agent: string; reason: string; mergedAs?: string },
-		stamper?: Stamper,
-	): Promise<ReleaseOutcome> {
+	async release(input: ReleaseInput, stamper?: Stamper): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
 		const released = await this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));

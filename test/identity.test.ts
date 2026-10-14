@@ -75,6 +75,14 @@ describe("agent identity", () => {
 		expect(await call(as(), "register", { agent: "Agent_1.b" })).toMatchObject({ agent: "Agent_1.b" });
 	});
 
+	it("won't hold a review in a registered agent's name for a caller without its key", async () => {
+		await call(as(), "register", { agent: "agent-a" });
+		await call(as(), "claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" });
+		expect(await call(as(), "credentials", { change: "c-1", agent: "agent-a" })).toEqual({
+			error: "agent-a is registered: call with its agent key",
+		});
+	});
+
 	it("refuses a registered name without its key, and a key acting as another name", async () => {
 		const { key } = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
 		expect(await call(as(), "claim", claimA)).toEqual({ error: "agent-a is registered: call with its agent key" });

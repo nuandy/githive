@@ -141,6 +141,11 @@ const KEPT_PREFIXES = [
 	"pack:",
 	"placed:",
 	"kept-at:",
+	// The hive's feed and what Clef kept, which a repo made again under the name would otherwise show as its own.
+	EVENT,
+	"steering:",
+	"push-hints:",
+	"stretch",
 ];
 
 /** Where the names of the repo's RecordCaches are noted, so a deleted repo's can be forgotten too. */

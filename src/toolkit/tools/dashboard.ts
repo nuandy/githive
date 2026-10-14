@@ -6,7 +6,7 @@ import { projectBranch } from "../../project-branch";
 import type { SteeringFlag } from "../../steering";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
-import { DEFAULT_SKIP_CHECKS } from "../check-scope";
+import { FIRST_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
 import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
@@ -485,7 +485,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		repo,
 		/** The project's branch, which changes merge into by default. */
 		branch: projectBranch(state),
-		skipChecks: state.skipChecks ?? DEFAULT_SKIP_CHECKS,
+		skipChecks: state.skipChecks ?? FIRST_SKIP_CHECKS,
 		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
 		/** Other branches that changes land on, and where each started. */
 		branches: Object.entries(state.branches ?? {}).map(([name, record]) => ({

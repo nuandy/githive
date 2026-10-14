@@ -81,7 +81,7 @@ export const mergeTools: ToolHandlers = {
 		return outcome;
 	},
 	async credentials(call) {
-		const { args, ctx, repo, acting, changeOf } = call;
+		const { args, ctx, repo, acting, registered, changeOf } = call;
 		if (typeof args.change !== "string" || !args.change.trim()) {
 			const remote = await ctx.remote(repo, "read");
 			return {
@@ -95,6 +95,8 @@ export const mergeTools: ToolHandlers = {
 		const change = requiredString(args, "change");
 		const { claim: held, released } = await changeOf(change);
 		const named = optionalString(args, "agent");
+		// A name given without a key holds the review in that name, so it must be one the caller may act as.
+		if (named) mayActAs(named, acting, registered, ctx);
 		const caller = acting ?? named;
 		// Your own change gets write access to your fork; anyone else's, read-only access to review it.
 		if (held && (caller === undefined || caller === held.agent)) return ownChangeAccess(call, change, held);

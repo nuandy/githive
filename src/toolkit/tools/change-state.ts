@@ -132,7 +132,8 @@ export function changeSigns(input: {
 	const onHead = head ? latestVotes(input.counted.filter((v) => v.commit === head)) : [];
 	const counted = onHead.filter((v) => v.reviewer !== claim.agent);
 	const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
-	const outcome = head ? approval({ votes: counted }, head, input.policy, author, claim.paths) : undefined;
+	// The author's own approval counts as the policy says (a lone agent's own review), so it's judged with them all.
+	const outcome = head ? approval({ votes: onHead }, head, input.policy, author, claim.paths) : undefined;
 	const batched = input.landing?.checking?.changes.some(
 		(landing) => landing.change === claim.change && landing.head === head,
 	);

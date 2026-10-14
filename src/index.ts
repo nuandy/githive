@@ -4,7 +4,7 @@ import { authRoutes } from "./auth/routes";
 import { authorize } from "./auth/authorize";
 import { orgRoutes } from "./auth/org-routes";
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
-import { statusOf } from "./errors";
+import { isFailure, statusOf } from "./errors";
 import { notePushEvents } from "./push-events";
 import { awarenessHandOff } from "./footprint-cache";
 import { countingRequests, describeCounts } from "./git-http";
@@ -83,8 +83,13 @@ app.use("*", async (c, next) => {
 
 app.onError((err, c) => {
 	const { status, message } = statusOf(err);
-	if (status >= 500) console.error("API error", err);
-	return c.json({ error: message }, status as 400);
+	if (status < 500) return c.json({ error: message }, status as 400);
+	// Text from underneath (D1, Artifacts, Cloudflare's APIs) isn't the client's to read: it's logged under an id
+	// the reply gives instead.
+	const id = crypto.randomUUID().slice(0, 8);
+	console.error(`API error ${id}`, err);
+	const said = isFailure(err) ? message : `GitHive failed unexpectedly (error ${id}); try again`;
+	return c.json({ error: said }, status as 500);
 });
 
 authRoutes(app);

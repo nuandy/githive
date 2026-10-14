@@ -113,7 +113,7 @@ const TOOL_LIST = [
 			"(feature/*, release/*, a name), the first match winning: each changes only the policy fields " +
 			"and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's " +
 			"branch always has the repo's settings. skip_checks lists what the checks skip: a change " +
-			"touching only these merges without them (*.md, docs/, licenses and images by default; a file " +
+			"touching only these merges without them (*.md, the top's /docs/, licenses and images by default; a file " +
 			"under test/, fixtures/ or examples/ always runs them); [] makes them always run. github " +
 			"connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed " +
 			"there. github_sync says how GitHive's work reaches it: 'pr' (new connections) pushes main to " +

@@ -199,11 +199,18 @@ async function commitMerge(
 ): Promise<{ commit: string } | { error: string; conflict?: LandingConflict }> {
 	const identity = `-c user.name="${BOT.name}" -c user.email="${BOT.email}"`;
 	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers. The conflicted files
-	// are listed between two markers, so the Worker can name who changed them.
-	const script =
+	// are listed between two markers, so the Worker can name who changed them. A head already in the batch's history
+	// has nothing to merge, which git merge won't commit, so its merge is written as it is: the tree unchanged, the
+	// head its second parent, as tree landing writes it.
+	const merged =
 		`git merge -q --no-ff --no-commit ${merge.head} ${MERGE_OR_LIST}\n` +
-		`git ${identity} commit -q --no-verify -F - >/tmp/commit.out 2>&1 || { cat /tmp/commit.out; exit 2; }\n` +
-		"git rev-parse HEAD";
+		`git ${identity} commit -q --no-verify -F - >/tmp/commit.out 2>&1 || { cat /tmp/commit.out; exit 2; }\n`;
+	const alreadyIn =
+		`commit=$(git ${identity} commit-tree "HEAD^{tree}" -p HEAD -p ${merge.head} -F - 2>/tmp/commit.out) ` +
+		"|| { cat /tmp/commit.out; exit 2; }\n" +
+		'git reset -q --hard "$commit"\n';
+	const script =
+		`if git merge-base --is-ancestor ${merge.head} HEAD; then\n${alreadyIn}else\n${merged}fi\n` + "git rev-parse HEAD";
 	const message = await mergeMessage({ ...merge.claimed, base }, stamper);
 	const ran = await run(container, ["bash", "-c", script], WORKDIR, message);
 	// Exit 1 is git merge failing, which names the change even when it listed no files (see conflictIn in

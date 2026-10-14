@@ -9,6 +9,11 @@ export function fail(status: number, message: string, next?: string): never {
 	throw new Error(`[${status}] ${said}${next ? `\nnext: ${next}` : ""}`);
 }
 
+/** Whether `err` was raised on purpose with fail, rather than by something else failing underneath. */
+export function isFailure(err: unknown): boolean {
+	return err instanceof Error && /^\[\d{3}\] /.test(err.message);
+}
+
 export function statusOf(err: unknown): { status: number; message: string; next?: string } {
 	const text = err instanceof Error ? err.message : String(err);
 	const [, status, message, next] = /^\[(\d{3})\] (.*?)(?:\nnext: (.*))?$/s.exec(text) ?? [];

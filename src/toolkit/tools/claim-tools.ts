@@ -50,7 +50,9 @@ export const claimTools: ToolHandlers = {
 				stamper,
 			);
 		const mergedAs = held ? await landedAs(call, held) : undefined;
-		return store.release({ change, agent, reason, ...(mergedAs ? { mergedAs } : {}) }, stamper);
+		// Still the caller's when it's written: another agent may take the name over meanwhile.
+		const holder = held ? { holder: held.agent } : {};
+		return store.release({ change, agent, reason, ...holder, ...(mergedAs ? { mergedAs } : {}) }, stamper);
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
 		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");

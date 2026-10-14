@@ -187,6 +187,17 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		expect(await active()).toEqual([["z-1", ["a/"]]]);
 	});
 
+	it("forgets the landing attempts of a stale claim a new one takes over, sharded or not", async () => {
+		const forgotten: string[] = [];
+		const forgetAttempts = async (change: string) => void forgotten.push(change);
+		const plain = () =>
+			claimStore({ repo: "p", registry: { claims: [], released: [] }, root: root(), remote, forgetAttempts });
+		await plain().claim(want("old-1", ["src/"], Date.now() - 31 * 60_000));
+		const takeover = { ...want("old-1", ["src/"]), agent: "agent-new" };
+		expect(await plain().claim(takeover)).toMatchObject({ ok: true });
+		expect(forgotten).toEqual(["old-1"]);
+	});
+
 	it("cites, for a merge, the tips of the shards its files and claim are in, and their ancestors", async () => {
 		await store().claim(want("wide-1", ["docs/"]));
 		await store().claim(want("a-1", ["src/a/"]));

@@ -254,6 +254,18 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("claim", { repo: "project" })).toEqual({ error: "change is required" });
 	});
 
+	it("refuses text longer than any record should hold, wherever it is in the arguments", async () => {
+		await call("settings", { repo: "project" });
+		const long = "x".repeat(20_001);
+		expect(await call("claim", { repo: "project", change: "c-1", agent: "a", paths: ["src/"], intent: long })).toEqual({
+			error: "intent is 20001 characters; at most 20000",
+		});
+		const items = [{ title: "a piece", intent: long }];
+		expect(await call("add_work", { repo: "project", items })).toEqual({
+			error: "items[0].intent is 20001 characters; at most 20000",
+		});
+	});
+
 	it("refuses a change id a shell would read more into", async () => {
 		await call("settings", { repo: "project" });
 		const claim = (change: string) =>

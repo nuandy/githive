@@ -43,4 +43,20 @@ describe("a change's signs", () => {
 		expect(signed.asked).toBe(false);
 		expect(waitingOn(signed).turn).not.toBe("person");
 	});
+
+	it("counts a lone agent's own approval, so its claim can be abandoned if it then goes quiet", () => {
+		const own: VoteRecord = {
+			commit: HEAD,
+			reviewer: "builder",
+			role: "review",
+			verdict: "approve",
+			evidence: "reviewed in a fresh context; tests pass",
+			at: "2026-10-14T10:40:00.000Z",
+		};
+		const record = { votes: [own], flags: [] };
+		const reviewed = { required: 1, vetoes: [] as string[] };
+		const signs = changeSigns({ claim, head: HEAD, counted: [own], record, policy: reviewed });
+		expect(signs.approved).toBe(true);
+		expect(waitingOn(signs)).toMatchObject({ turn: "agent", why: "is approved and not merged" });
+	});
 });

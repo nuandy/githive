@@ -69,7 +69,14 @@ const WRITES = new Set([
 const noted = new Map<string, number>();
 
 /** Runs one tool and notes any write in the repo's summary. An object reply says what follows for the caller's change. */
+/**
+ * The longest text any argument may hold. What agents write (an intent, a reason, evidence) goes into records every
+ * reader fetches, so one huge value would slow every call that reads them.
+ */
+export const LONGEST_TEXT = 20_000;
+
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
+	refuseLongText(args);
 	const reply = await runTool(name, args, ctx);
 	const written = writtenAs(name, args, reply);
 	const result = withNext(name, args, ctx, await withNews(name, args, ctx, reply));
@@ -161,6 +168,22 @@ const handlers: ToolHandlers = {
 	...githubTools,
 	...waitTools,
 };
+
+// Every string in the arguments, however deep in lists and objects. `field` names where it is, for the refusal.
+function refuseLongText(value: unknown, field?: string) {
+	if (typeof value === "string") {
+		if (value.length > LONGEST_TEXT) fail(400, `${field} is ${value.length} characters; at most ${LONGEST_TEXT}`);
+		return;
+	}
+	if (Array.isArray(value)) {
+		value.forEach((item, index) => refuseLongText(item, `${field}[${index}]`));
+		return;
+	}
+	if (!value) return;
+	if (typeof value !== "object") return;
+	const named = (key: string) => (field ? `${field}.${key}` : key);
+	for (const [key, item] of Object.entries(value)) refuseLongText(item, named(key));
+}
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { skipsChecks, skipsFile } from "../src/toolkit/check-scope";
+import { DEFAULT_SKIP_CHECKS, FIRST_SKIP_CHECKS, skipsChecks, skipsFile } from "../src/toolkit/check-scope";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
@@ -19,6 +19,27 @@ describe("what the checks skip", () => {
 		expect(skipsChecks(["test/fixtures/data.md"])).toBe(false);
 		expect(skipsChecks(["requirements.txt"])).toBe(false);
 		expect(skipsChecks([])).toBe(false);
+	});
+
+	it("skips only the top's docs folders and license files by their names, for a repo started now", () => {
+		const now = DEFAULT_SKIP_CHECKS;
+		expect(skipsChecks(["docs/guide.md", "doc/api.html", "LICENSE-MIT", "NOTICE.txt", "COPYING"], now)).toBe(true);
+		// A docs folder deeper down can be code, and a name that only starts like a license's is one.
+		expect(skipsChecks(["src/docs/render.ts"], now)).toBe(false);
+		expect(skipsChecks(["packages/api/doc/parser.ts"], now)).toBe(false);
+		expect(skipsChecks(["lib/NOTICEBoard.ts"], now)).toBe(false);
+		expect(skipsChecks(["AUTHORSHIP.js"], now)).toBe(false);
+		// A repo started before stored no list, and keeps the rule its merges were made under.
+		expect(skipsChecks(["src/docs/render.ts"])).toBe(true);
+		expect(FIRST_SKIP_CHECKS).toContain("docs/");
+	});
+
+	it("reads a leading / as from the top, and / alone as nothing", () => {
+		expect(skipsFile("/site/", "site/index.html")).toBe(true);
+		expect(skipsFile("/site/", "app/site/index.html")).toBe(false);
+		expect(skipsFile("/*.html", "index.html")).toBe(true);
+		expect(skipsFile("/*.html", "app/index.html")).toBe(false);
+		expect(skipsFile("/", "anything.js")).toBe(false);
 	});
 
 	it("follows a repo's own patterns, and never skips with none", () => {

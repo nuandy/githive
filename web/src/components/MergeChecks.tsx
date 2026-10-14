@@ -66,8 +66,9 @@ export function MergeChecks({ draft, update, busy, branch, problems = [] }: Merg
 				/>
 				{skip.line}
 				<SettingHint id="skip-checks-hint">
-					One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top (site/*.html).
-					A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.
+					One pattern a line: a name (*.md, LICENSE.*), a folder anywhere (docs/) or at the top (/docs/), or a path from
+					the top (site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always
+					run.
 				</SettingHint>
 			</SettingField>
 			<CheckEnvironment branch={branch} />

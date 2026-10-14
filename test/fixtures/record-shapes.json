@@ -53,6 +53,7 @@
 					"verifiedBy": "string"
 				}
 			],
+			"skipChecks": ["string"],
 			"stampKey": "string",
 			"verify": ["string"]
 		},

@@ -1,7 +1,7 @@
 import { fail, requiredString } from "../../errors";
 import { projectBranch } from "../../project-branch";
 import { onActions } from "../actions-checks";
-import { DEFAULT_SKIP_CHECKS } from "../check-scope";
+import { DEFAULT_SKIP_CHECKS, FIRST_SKIP_CHECKS } from "../check-scope";
 import { changeSettings, type Registry, registerAgent, registerAgents, startRepo } from "../claims";
 import { grantWarnings } from "../votes";
 import type { ToolCall, ToolHandlers } from "./context";
@@ -105,6 +105,7 @@ async function startOnRepo({ args, ctx, run, repo, claims, registered, stamper }
 		branch: into,
 		policy,
 		verify,
+		skipChecks: DEFAULT_SKIP_CHECKS,
 		stampKey: stamper?.publicKey,
 		...shardingAtStart(asked, recordsRepos, spread),
 	});
@@ -198,7 +199,7 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 		branch: projectBranch(registry),
 		policy: registry?.policy ?? DEFAULT_POLICY,
 		verify: registry?.verify ?? [],
-		skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS,
+		skipChecks: registry?.skipChecks ?? FIRST_SKIP_CHECKS,
 	};
 	if (registry?.branchRules?.length) reply.branchRules = registry.branchRules;
 	if (registry?.github) Object.assign(reply, githubReply(registry));
