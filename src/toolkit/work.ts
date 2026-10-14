@@ -13,7 +13,8 @@ import {
 
 // What there is to do: reviews an agent may give and backlog items nobody has claimed. GitHive assigns nothing;
 // each agent looks and picks. Each sees equally good choices in its own order, so a crowd spreads out instead of
-// all taking the first. Nothing is reserved: if two agents pick the same thing, the claim or vote count settles it.
+// all taking the first. Nothing is reserved for an agent: it holds a review only by taking one (review-holds.ts), and
+// if two agents pick the same thing, the claim, the hold or the vote count settles it.
 
 /** A backlog item: taken once a change with its id is claimed, done once that change merges. */
 export interface WorkItem {
