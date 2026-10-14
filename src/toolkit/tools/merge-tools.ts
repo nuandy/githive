@@ -138,9 +138,9 @@ async function reviewWithinLimit(call: ToolCall, key: string, reviewer: string) 
 /**
  * Releases a landed change's claim if it's still held. A batch releases its changes' claims after handing the lease
  * on; if that's cut short (an object dropped mid-call), the claim stays, and changes that land after it wait on it
- * forever. Asking to merge a change that has landed finishes the job instead.
+ * forever. Asking to merge a change that has landed, or its status, finishes the job instead.
  */
-async function releaseLanded(call: ToolCall, change: string, commit: string) {
+export async function releaseLanded(call: ToolCall, change: string, commit: string) {
 	const { ctx, repo, store, stamper } = call;
 	const held = (await store.readChange(change).catch(() => null))?.claim;
 	if (!held) return;

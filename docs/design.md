@@ -1060,9 +1060,11 @@ each change against them.
 released once the lease is handed on: a write per change, a few at a time, it
 grew with the batch and held up the next one. Until a claim is released, no
 batch takes its change up again: the branch's recent outcomes (in the
-RepoCache) say it landed at that head. A merge asked again meanwhile finds it
-landed, and releases its claim, naming the merge, if it's still held: a
-release cut short would otherwise leave changes that land after it waiting. Each batch asks
+RepoCache) say it landed at that head. A release a busy record fails is tried
+three times. A merge asked again meanwhile finds it landed, and releases its
+claim, naming the merge, if it's still held, and so does its `status`, which an
+outside agent reads to see it landed: a release cut short would otherwise leave
+the claim held, and changes that land after it waiting. Each batch asks
 for its forks' read access 6 at a time: a Worker request holds 6 connections
 open.
 

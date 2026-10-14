@@ -395,6 +395,24 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
+	it("tries a landed change's release again when a busy record fails it once", async () => {
+		for (const id of ["a-1", "b-1"]) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
+		const claimStore = store();
+		const release = claimStore.release.bind(claimStore);
+		let failed = false;
+		claimStore.release = async (r, stamper) => {
+			if (r.change === "b-1" && !failed) {
+				failed = true;
+				throw new Error("[500] the records repo is busy");
+			}
+			return release(r, stamper);
+		};
+		expect(await merge("a-1", runner(), memoryLanding(), { store: claimStore })).toMatchObject({ ok: true });
+		expect(landed().sort()).toEqual(["a-1", "b-1"]);
+		expect(failed).toBe(true);
+		expect((await store().read()).claims).toEqual([]);
+	});
+
 	it("without checks, batches every ready change and releases their claims once the lease is handed on", async () => {
 		const ids = Array.from({ length: 6 }, (_, i) => `n-${i}`);
 		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });

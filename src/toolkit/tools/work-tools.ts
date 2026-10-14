@@ -18,6 +18,7 @@ import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
 import { onlyItsAgentCanReview } from "./no-reviewer";
 import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
+import { releaseLanded } from "./merge-tools";
 
 // Tools agents use to choose their work: reviews, backlog, add_work, and status.
 
@@ -126,6 +127,10 @@ export const workTools: ToolHandlers = {
 			landed = landing?.recent.findLast(
 				(outcome) => outcome.change === change && outcome.head === status.head && outcome.how === "landed",
 			);
+		}
+		if (landed?.commit) {
+			// Landed but still claimed: the batch's release didn't get through, so this finishes it.
+			if (held) await releaseLanded(call, change, landed.commit);
 		}
 		const reply: Record<string, unknown> = { change, claim: held };
 		if (released) reply.released = released;

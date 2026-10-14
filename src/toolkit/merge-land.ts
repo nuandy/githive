@@ -6,8 +6,11 @@ import { batchChange, putOut } from "./merge-checks";
 import { ATTEMPT_LINE_MOST, ATTEMPTS_MOST, type MergeReview } from "./merge-commit";
 import { type Holding, STEP_MS } from "./merge-lease";
 import type { Conflict, MergeInput, Ready, Unlanded } from "./merge-types";
+import { retryTransient } from "../retry";
 
 const RELEASES_AT_ONCE = 4;
+/** How many times a landed change's release is tried before it's left for `status` or `merge` to finish. */
+const RELEASE_TRIES = 3;
 
 // A landed batch: each change's outcome, and the release of their claims for after the lease is handed on.
 export interface Landed {
@@ -269,7 +272,8 @@ async function settleLanded(
 }
 
 // Releases the claims of `changes` as merged, a few at a time, because a Worker stalls past a handful of open
-// connections. A failed release is logged with `failure`.
+// connections. A busy record can fail a release, which would leave a landed change claimed, so each is tried a few
+// times; one that still fails is logged with `failure`, and `status` or `merge` on the change releases it later.
 async function releaseClaims(
 	input: MergeInput,
 	changes: Ready[],
@@ -286,7 +290,12 @@ async function releaseClaims(
 				reason: "merged" as const,
 				...(merged ? { mergedAs: merged } : {}),
 			};
-			return input.store.release(release, input.stamper).catch((err) => console.error(failure(ready), String(err)));
+			const released = () => input.store.release(release, input.stamper);
+			return retryTransient(released, {
+				maxAttempts: RELEASE_TRIES,
+				retryable: () => true,
+				delayMs: (n) => n * 500,
+			}).catch((err) => console.error(failure(ready), String(err)));
 		});
 		await Promise.all(releases);
 	}

@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Landing, memoryLanding } from "../src/toolkit/landing";
+import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
@@ -34,4 +38,19 @@ it("names no merge for a landing from before the claim, an earlier change under 
 	await landedAt("2026-10-01T00:00:00.000Z");
 	await call("release", { change: "x", agent: "a" }, "a");
 	expect((await call("status", { change: "x" })).released).not.toHaveProperty("mergedAs");
+});
+
+it("releases a claim whose change landed at its head when the change's status is read", async () => {
+	const work = mkdtempSync(join(tmpdir(), "githive-release-landed-"));
+	try {
+		const head = await pushChange(server.url, work, "a", "x", { "src/x/a.txt": "x\n" });
+		await landing.settle([
+			{ change: "x", head, agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
+		]);
+		expect(await call("status", { change: "x", agent: "a" }, "a")).toMatchObject({ landed: { commit: "m1" } });
+		expect(await call("claims", {})).toEqual([]);
+		expect((await call("status", { change: "x" })).released).toMatchObject({ reason: "merged", mergedAs: "m1" });
+	} finally {
+		rmSync(work, { recursive: true, force: true });
+	}
 });
