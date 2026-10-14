@@ -10,7 +10,7 @@ import { conflictLine, conflictWords, type Landing, lastLandedOn, type Settled }
 import { BATCH_MERGE, CHECKS_REVIEWER, rejectedFor } from "./merge-checks";
 import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused, Why } from "./merge-types";
 import type { VotesView } from "./vote-store";
-import { approval, countedVotes, effectivePolicy } from "./votes";
+import { approval, countedVotes, effectivePolicy, sentBackBy } from "./votes";
 import { fail } from "../errors";
 import { shellWord } from "../git-guidance";
 
@@ -334,7 +334,7 @@ async function voteReasons(
 		else if (said.check) refusal.checks = [said.check];
 	} else if (!proposed.mine && !trusted) {
 		const author = own?.agent ?? proposed.agent;
-		const sentBack = counted.find((vote) => vote.verdict === "reject" && vote.reviewer !== author);
+		const sentBack = sentBackBy(counted, head, author);
 		if (sentBack) refuse(refusal, "changes-asked", `${sentBack.reviewer} asked for changes on ${head}`);
 	}
 }

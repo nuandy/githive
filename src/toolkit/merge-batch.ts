@@ -6,7 +6,7 @@ import { type Attempts, attemptsOf, land, type Landed, leaveOutLanded } from "./
 import { type Holding, STEP_MS } from "./merge-lease";
 import { conflict, scopedFiles, validated } from "./merge-ready";
 import type { BatchSource, Candidate, Inspected, MergeInput, Ready, Refused } from "./merge-types";
-import { approval, countedVotes } from "./votes";
+import { approval, countedVotes, sentBackBy } from "./votes";
 
 const ATTEMPTS = 3;
 /** The fewest and most changes checked and landed together (see batchSize). */
@@ -278,10 +278,7 @@ async function approvedAsSeen<C extends Candidate & { head: string }>(input: Mer
 		const { claim, head } = candidate;
 		if (isGitHubChange(claim)) return false;
 		const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
-		const sentBack = counted.some(
-			(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== author.agent,
-		);
-		if (sentBack) return false;
+		if (sentBackBy(counted, head, author.agent)) return false;
 		return approval({ votes: counted }, head, input.policy, author, claim.paths).approved;
 	});
 }

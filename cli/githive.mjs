@@ -252,6 +252,13 @@ function nextForStatus(status, repo) {
 	follow(status, statusStep(status, repo), { fix: status.merge?.clean === false ? status.merge.fix : undefined });
 }
 
+/** Each voter's latest vote, the one that counts: a rejection its reviewer has since changed asks for nothing. */
+function standingVotes(votes) {
+	const latest = new Map();
+	for (const vote of votes) latest.set(vote.by ?? `name:${vote.reviewer}`, vote);
+	return [...latest.values()];
+}
+
 function statusStep(status, repo) {
 	const approval = status.approval ?? {};
 	if (status.landed || status.released?.mergedAs)
@@ -263,7 +270,7 @@ function statusStep(status, repo) {
 	const merge = status.merge ?? {};
 	if (merge.clean === false) return resolveConflict;
 	if (merge.outsideClaim?.length) return claimThemToo(repo, status.change);
-	const rejected = (status.votes ?? []).some((vote) => vote.verdict === "reject");
+	const rejected = standingVotes(status.votes ?? []).some((vote) => vote.verdict === "reject");
 	if (rejected || approval.vetoedBy?.length) return FIX_EVIDENCE;
 	if (status.waitsOn?.length) return WAIT_FOR_DEPENDENCIES(repo);
 	if (approval.approved) return "githive land";

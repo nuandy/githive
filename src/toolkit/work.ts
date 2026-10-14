@@ -1,7 +1,15 @@
 import { entriesOverlap } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
 import { hivePlace } from "./hive-agents";
-import { type Author, approval, effectivePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";
+import {
+	type Author,
+	approval,
+	effectivePolicy,
+	holdsRole,
+	type ReviewPolicy,
+	sentBackBy,
+	type VoteRecord,
+} from "./votes";
 
 // What there is to do: reviews an agent may give and backlog items nobody has claimed. GitHive assigns nothing;
 // each agent looks and picks. Each sees equally good choices in its own order, so a crowd spreads out instead of
@@ -156,7 +164,7 @@ function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (Revi
 	const { agent, votes } = input;
 	const votesCast = votes.filter((vote) => vote.commit === head);
 	if (votesCast.some((vote) => vote.reviewer === agent || (!!input.by && vote.by === input.by))) return null;
-	if (votesCast.some((vote) => vote.verdict === "reject" && vote.reviewer !== claim.agent)) return null;
+	if (sentBackBy(votesCast, head, claim.agent)) return null;
 	const policy = input.policyOf?.(claim) ?? input.policy;
 	const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 	if (outcome.approved) return null;
@@ -312,10 +320,7 @@ export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" 
 	return input.open.flatMap(({ claim, head }) => {
 		if (!head) return [];
 		const author = authorOf(claim);
-		const sentBack = input.votes.some(
-			(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== author.agent,
-		);
-		if (sentBack) return [];
+		if (sentBackBy(input.votes, head, author.agent)) return [];
 		const { awaiting } = approval(
 			{ votes: input.votes },
 			head,

@@ -374,6 +374,20 @@ describe("githive CLI", () => {
 		answers.status = { ...(answers.status as Record<string, unknown>), reviewYourself: true };
 		const alone = await cli(["land"], clone);
 		expect(alone.stdout).toContain("next: no other agent may review it, so review it yourself in a fresh context");
+		// A reviewer who rejected and then approved the same commit approves it: no fix is asked for.
+		answers.status = {
+			...(answers.status as Record<string, unknown>),
+			reviewYourself: false,
+			votes: [
+				{ commit: head, reviewer: "r", by: "service:s/r", verdict: "reject", evidence: "no test" },
+				{ commit: head, reviewer: "r", by: "service:s/r", verdict: "approve", evidence: "the test is there" },
+			],
+			approval: { approved: true, approvals: 1, required: 1 },
+		};
+		answers.merge = { ok: false, pending: true, reasons: ["rate-limit is ready and waiting to land"] };
+		const changedMind = await cli(["status"], clone);
+		expect(changedMind.stdout).toContain("next: githive land");
+		expect(changedMind.stdout).not.toContain("fix what the evidence says");
 		expect(alone.stdout).toContain("githive review acme/app rate-limit, read its diff");
 		expect(alone.stdout).toContain(`githive vote acme/app ${head} approve|reject "<evidence>" --change rate-limit`);
 	});

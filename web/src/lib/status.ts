@@ -205,7 +205,7 @@ export function changeState(claim: Claim, context: StateContext = {}): ClaimStat
 
 /** Whether its agent's turn has gone unanswered longer than allowed (see the toolkit's staleness.ts). */
 function isAbandoned(claim: Claim, votes: Vote[], landing: boolean, now: number): boolean {
-	const onHead = claim.head ? votes.filter((vote) => vote.commit === claim.head && vote.reviewer !== claim.agent) : [];
+	const onHead = claim.head ? latestOn(claim.head, votes).filter((vote) => vote.reviewer !== claim.agent) : [];
 	const signs = {
 		active: claim.active,
 		head: claim.head,
@@ -218,12 +218,21 @@ function isAbandoned(claim: Claim, votes: Vote[], landing: boolean, now: number)
 	return abandoned(signs, now).abandoned;
 }
 
-/** Rejections on the change's current head from anyone but its agent: a reviewer's, or failed checks'. */
+/** Each voter's latest vote on `head`, the one that counts: a reviewer who rejected and then approved approves. */
+function latestOn(head: string, votes: Vote[]): Vote[] {
+	const latest = new Map<string, Vote>();
+	for (const vote of votes.filter((each) => each.commit === head)) {
+		const voter = vote.by ?? `name:${vote.reviewer}`;
+		const known = latest.get(voter);
+		if (!known || known.at <= vote.at) latest.set(voter, vote);
+	}
+	return [...latest.values()];
+}
+
+/** Rejections still standing on the change's current head from anyone but its agent: a reviewer's, or checks'. */
 export function rejectionsOnHead(claim: Claim, votes: Vote[]): Vote[] {
 	if (!claim.head) return [];
-	return votes.filter(
-		(vote) => vote.commit === claim.head && vote.reviewer !== claim.agent && vote.verdict === "reject",
-	);
+	return latestOn(claim.head, votes).filter((vote) => vote.reviewer !== claim.agent && vote.verdict === "reject");
 }
 
 /** What a change waits on a person for: its agent's question (or a failed builder), or a vote only people give. */

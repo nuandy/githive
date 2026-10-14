@@ -4,6 +4,7 @@ import {
 	effectivePolicy,
 	grantWarnings,
 	holdsRole,
+	sentBackBy,
 	openFlag,
 	vote,
 	type VoteRecord,
@@ -98,6 +99,16 @@ describe("votes count per verified identity", () => {
 		verdict: "approve" | "reject" = "approve",
 		role = "tests",
 	): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "", ...(by ? { by } : {}) });
+
+	it("takes a voter's latest vote: one who rejected and then approved has sent nothing back", () => {
+		const votes = [cast("rev-1", "service:shared/rev-1", "reject"), cast("rev-1", "service:shared/rev-1")];
+		expect(approval({ votes }, head, { required: 1, vetoes: [] })).toMatchObject({ approved: true, approvals: 1 });
+		expect(sentBackBy(votes, head, "agent-a")).toBeUndefined();
+		const changedBack = [...votes, cast("rev-1", "service:shared/rev-1", "reject")];
+		expect(sentBackBy(changedBack, head, "agent-a")).toMatchObject({ reviewer: "rev-1", verdict: "reject" });
+		// The author's own rejection doesn't send its change back to it.
+		expect(sentBackBy([cast("agent-a", "service:shared/agent-a", "reject")], head, "agent-a")).toBeUndefined();
+	});
 
 	it("counts one identity once, whatever names it votes under", () => {
 		const votes = { votes: [cast("rev-1", "service:shared/agent-x"), cast("rev-2", "service:shared/agent-x")] };

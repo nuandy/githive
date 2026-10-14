@@ -108,6 +108,10 @@ describe("a change's state", () => {
 		expect(changeState(claim({ approval: { ...approved, approved: false, vetoedBy: ["security"] } }))).toBe(
 			"changes-requested",
 		);
+		// A reviewer who rejected and then approved this head approves it, in whichever order the votes are listed.
+		const approvedSince = vote({ verdict: "approve", at: "2026-10-09T00:05:00.000Z" });
+		expect(changeState(done, { votes: [vote(), approvedSince] })).toBe("approved");
+		expect(changeState(done, { votes: [approvedSince, vote()] })).toBe("approved");
 		// An earlier head's rejection, or its own agent's, says nothing of this one.
 		expect(changeState(done, { votes: [vote({ commit: "b".repeat(40) })] })).toBe("approved");
 		expect(changeState(done, { votes: [vote({ reviewer: "agent-c" })] })).toBe("approved");

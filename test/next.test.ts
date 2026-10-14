@@ -109,6 +109,23 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 		},
 		"Changes were asked for: address the rejection's evidence, push a new commit to `fork`, then call `status`.",
 	],
+	// The reviewer voted again on the same commit and approved: its latest vote counts, so nothing is asked for.
+	[
+		"status",
+		{ change: "c-1" },
+		{
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			votes: [
+				{ commit: HEAD, reviewer: "r", by: "service:s/r", verdict: "reject", evidence: "breaks rounding" },
+				{ commit: HEAD, reviewer: "r", by: "service:s/r", verdict: "approve", evidence: "rounding is fine" },
+			],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		},
+		"Call `merge`.",
+	],
 	[
 		"status",
 		{ change: "c-1" },

@@ -1,7 +1,7 @@
 import type { ClaimRecord } from "../claims";
 import { isHiveAgent } from "../hive-agents";
 import { AGENT_TURN_IDLE_MS, type ChangeSigns, waitingOn } from "../staleness";
-import { isPerson, ownerOf, personOf, type VoteRecord } from "../votes";
+import { isPerson, latestVotes, ownerOf, personOf, type VoteRecord } from "../votes";
 import { claimPolicy } from "./repo";
 import type { HostedStatus, ToolCall } from "./context";
 
@@ -139,7 +139,7 @@ export async function onlyAPersonCanReview(
 /** Where a change stands as `status` worked it out: what its agent needs to know to review it itself. */
 interface StatusSeen {
 	head: string | null;
-	votes: Pick<VoteRecord, "commit" | "verdict">[];
+	votes: Pick<VoteRecord, "commit" | "verdict" | "by" | "reviewer">[];
 	approval: { approved: boolean; approvals: number; required: number };
 	hosted?: HostedStatus;
 }
@@ -155,7 +155,8 @@ export async function onlyItsAgentCanReview(
 ): Promise<boolean> {
 	if (!seen.head || seen.approval.approved) return false;
 	if (seen.approval.approvals >= seen.approval.required) return false;
-	if (seen.votes.some((vote) => vote.commit === seen.head && vote.verdict === "reject")) return false;
+	const onHead = latestVotes(seen.votes.filter((vote) => vote.commit === seen.head));
+	if (onHead.some((vote) => vote.verdict === "reject")) return false;
 	if (claimPolicy(call.registered, claim).independent) return false;
 	const agents = await agentsAtWorkIn(call);
 	const notReviewing = call.ctx.notReviewing ?? (async () => new Set<string>());

@@ -337,6 +337,13 @@ const HINT_LINES: [string, { author: string; reviewer: string }][] = [
 ];
 
 /** Where the caller's change stands, and what it takes to land: fix it, wait, or merge. */
+// Each voter's latest vote, the one that counts: a rejection its reviewer has since changed asks for nothing.
+function standingVotes(votes: Record<string, unknown>[]) {
+	const latest = new Map<string, Record<string, unknown>>();
+	for (const vote of votes) latest.set(text(vote.by) ?? `name:${text(vote.reviewer)}`, vote);
+	return [...latest.values()];
+}
+
 function standingStep(reply: Reply, args: Args, caller: string | undefined) {
 	const claim = record(reply.claim);
 	const released = record(reply.released);
@@ -367,9 +374,8 @@ function standingStep(reply: Reply, args: Args, caller: string | undefined) {
 		fixes.push(conflictStep(merge.fix, conflicts, text(merge.into), change));
 	const outside = texts(merge?.outsideClaim);
 	if (outside.length) fixes.push(outsideStep(change, outside));
-	const rejections = records(reply.votes).filter(
-		(vote) => vote.verdict === "reject" && vote.reviewer !== holder && (!vote.commit || vote.commit === head),
-	);
+	const onHead = standingVotes(records(reply.votes).filter((vote) => !vote.commit || vote.commit === head));
+	const rejections = onHead.filter((vote) => vote.verdict === "reject" && vote.reviewer !== holder);
 	// A head the checks rejected because it didn't merge conflicts still, which status's own test merge says above.
 	const checks = rejections.find((vote) => vote.reviewer === CHECKS_REVIEWER);
 	const rejected = checks && rejectedFor(text(checks.evidence) ?? "");

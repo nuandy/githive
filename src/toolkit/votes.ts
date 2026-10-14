@@ -290,6 +290,26 @@ export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "
 	);
 }
 
+/**
+ * Each voter's latest vote, the one that counts: a voter who rejected and then approved the same commit approves it.
+ * Votes come in the order they were cast.
+ */
+export function latestVotes<V extends Pick<VoteRecord, "by" | "reviewer">>(votes: V[]): V[] {
+	const latest = new Map<string, V>();
+	for (const vote of votes) latest.set(vote.by ?? `name:${vote.reviewer}`, vote);
+	return [...latest.values()];
+}
+
+/** Someone other than its author still asking for changes on `head`, by their latest vote on it, if anyone. */
+export function sentBackBy<V extends Pick<VoteRecord, "by" | "reviewer" | "commit" | "verdict">>(
+	votes: V[],
+	head: string,
+	author: string,
+): V | undefined {
+	const onHead = latestVotes(votes.filter((vote) => vote.commit === head));
+	return onHead.find((vote) => vote.verdict === "reject" && vote.reviewer !== author);
+}
+
 /** A change's author, whose own approval doesn't count: the claim's agent and its verified identity. */
 export interface Author {
 	agent: string;
@@ -310,10 +330,7 @@ export function approval(
 	paths: string[] = [],
 ) {
 	const policy = effectivePolicy(base, paths);
-	const latest = new Map<string, VoteRecord>();
-	for (const vote of state?.votes ?? [])
-		if (vote.commit === commit) latest.set(vote.by ?? `name:${vote.reviewer}`, vote);
-	const verdicts = [...latest.values()];
+	const verdicts = latestVotes((state?.votes ?? []).filter((vote) => vote.commit === commit));
 	// The author's own agents are those of the same person or service token, whoever made the change. The person
 	// may still approve their agent's change.
 	const owner = ownerOf(author?.by);

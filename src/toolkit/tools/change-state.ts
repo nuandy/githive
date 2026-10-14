@@ -11,6 +11,7 @@ import {
 	approval,
 	countedVotes,
 	effectivePolicy,
+	latestVotes,
 	openFlag,
 	type ReviewPolicy,
 	type VoteRecord,
@@ -128,7 +129,8 @@ export function changeSigns(input: {
 	policy: ReviewPolicy;
 }): ChangeSigns {
 	const { claim, head } = input;
-	const counted = head ? input.counted.filter((v) => v.commit === head && v.reviewer !== claim.agent) : [];
+	const onHead = head ? latestVotes(input.counted.filter((v) => v.commit === head)) : [];
+	const counted = onHead.filter((v) => v.reviewer !== claim.agent);
 	const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
 	const outcome = head ? approval({ votes: counted }, head, input.policy, author, claim.paths) : undefined;
 	const batched = input.landing?.checking?.changes.some(

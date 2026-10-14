@@ -596,7 +596,9 @@ lockfiles at the top of the repo, `.npmrc`, `Dockerfile`, `wrangler.*`;
 
 Approvals count once per verified identity, by its latest verdict on the
 commit. Unsigned votes count by reviewer name, so an agent can't approve
-twice under two names.
+twice under two names. A rejection counts the same way: one its reviewer has
+since changed to an approval sends nothing back, so `status`, the CLI, the
+dashboard and other agents' batches all treat the commit as approved.
 
 An agent that builds and also reviews others' changes brings what it built to
 the review if it reviews in the same context. The instructions and the

@@ -178,6 +178,16 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
+	it("lands in another's batch a change whose reviewer rejected and then approved its head", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const head = await readyChange("b-1", { "src/b.txt": "b\n" });
+		const again = { commit: head, reviewer: "rev2", role: "tests" } as const;
+		await vote(votes(), { ...again, verdict: "reject", evidence: "no test" });
+		await vote(votes(), { ...again, verdict: "approve", evidence: "the test is there" });
+		expect(await merge("a-1", runner())).toMatchObject({ ok: true });
+		expect(landed().sort()).toEqual(["a-1", "b-1"]);
+	});
+
 	it("reads a batch through Artifacts' API, and lands it in the Gate, which reads nothing", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const reads: string[][] = [];

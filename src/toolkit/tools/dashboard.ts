@@ -12,7 +12,15 @@ import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../g
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
-import { DEFAULT_GRANT, type FlagRecord, openFlag, peopleOnly, type ReviewPolicy, type VoteRecord } from "../votes";
+import {
+	DEFAULT_GRANT,
+	type FlagRecord,
+	openFlag,
+	peopleOnly,
+	type ReviewPolicy,
+	sentBackBy,
+	type VoteRecord,
+} from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
@@ -692,9 +700,7 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 	// A flag holds nothing up; it asks a person to look before the change lands. A vote it waits on shows there too.
 	if (claim.steering?.length) return steeringItem(claim, claim.steering, title);
 	if (!head || approval.approved || approval.vetoedBy.length) return null;
-	const sentBack = votes.some(
-		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
-	);
+	const sentBack = !!sentBackBy(votes, head, claim.agent);
 	if (sentBack || claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject")) return null;
 	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
 	if (!role) return null;
