@@ -227,12 +227,20 @@ Without `STAMP_KEY`, records aren't signed and the audit can't verify them. `OPE
 ### Develop
 
 ```sh
-npm test            # unit tests
+npm test            # the full suite (unit tests)
+npm run test:changed # only the tests touched by your changes since origin/dev
+npm run test:related -- src/usage/own-usage.ts   # the tests that import these files
 npm run test:workerd # the tests that need workerd (test/workerd), apart from npm test
 npm run test:soak   # a demo's whole life under a failing store: outside agents, then GitHive's own (about 3 min)
 npm run typecheck
 npm run types       # regenerate worker-configuration.d.ts after editing wrangler.jsonc
+npm run ci:status   # whether the full suite passed on GitHub Actions for this commit
 ```
+
+While working on a change, run the tests it touches (`test:changed`, `test:related`): seconds, where the full suite
+takes minutes. The full suite runs on GitHub Actions for every push to `dev` and `main`
+([`.github/workflows/test.yml`](.github/workflows/test.yml)), so it's run once a commit rather than once a fix, and
+two people's runs never slow each other down. Deploy a commit once its run has passed (`npm run ci:status`).
 
 How the dashboard (`web/`) is styled, with its theme and components, is in [docs/dashboard-ui.md](docs/dashboard-ui.md).
 

@@ -1,0 +1,29 @@
+# The full suite, on every push to dev and main and on pull requests, so no one waits for it locally: a deploy goes
+# ahead once its commit has passed here (`npm run ci:status`).
+name: Tests
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+# A newer push to the same branch makes an older run's result moot.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The tests make commits in throwaway repos; some read the identity from git's config.
+      - run: git config --global user.name "GitHive CI" && git config --global user.email ci@githive.app
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
