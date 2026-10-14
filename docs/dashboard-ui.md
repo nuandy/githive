@@ -18,6 +18,8 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `web/src/components/ThemeMenu.tsx` |
 | Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) and `useAnnouncer` | `web/src/hooks/` |
+| An element's drawn width, as it changes (`useWidth`) | `web/src/hooks/useWidth.ts` |
+| A time axis's labels that fit its width (`ticksThatFit`) | `web/src/lib/timeAxis.ts` |
 | Whether JavaScript motion should move (`reducedMotion`, `motionMs`) | `web/src/lib/motion.ts` |
 | The visual regression check | `web/visual/` |
 
@@ -77,7 +79,7 @@ mark has a glyph or a pattern too.
 Pills and headings use the noun ("Needs a person"); cells, goal rows and legends the same words in lowercase. A change
 lands: "Land", "Landed on main"; "merge" is only git's own (a merge commit, a conflict with main). "Needs you" is only
 for counts addressed to the reader: the Inbox's count, "2 changes need you". What needs you is agents' questions,
-changes waiting on a vote only people may give, and the audit's open violations, never failed checks (the agent's own
+text Clef flags as steering agents, changes waiting on a vote only people may give, and the audit's open violations, never failed checks (the agent's own
 work): `waitingOn()` in `status.ts` and `needsYou()` in `needsYou.ts` decide it, and the server's repo summaries count
 the same for the Inbox and Repositories. A vote is people's alone when every holder of its role is people
 (`person:*`) or one person, never a team, whose members' agents may vote as it; and it's read from the policy the
@@ -98,7 +100,12 @@ chips and clock) and a state's glyph on its lamp or mark, where type sits inside
 10px: the map's cells are drawn at their own size and never scaled down, and a name that doesn't fit is cut in the
 middle so its end stays (`cellNames`). Long-form text (an intent, a review, an agent's
 question, an Inbox reason) wraps at `max-w-measure`, 70ch. Fonts: `font-sans` (Overpass) and `font-mono` (Overpass
-Mono).
+Mono). Their `@font-face` rules in `theme.css` override Overpass's metrics (ascent 98%, descent 28%, no line gap: the
+same height as its own) so its capitals sit in the middle of their line, and text centred by its line box sits in the
+middle beside an icon, in a pill or in a badge; don't pad text by hand to centre it. Glyphs Overpass lacks (✓, ●) come
+from a fallback face, on Overpass's baseline, and may need their own nudge (`StateMark`). `font-sans` starts with a
+"Separator" face that only draws the "·" between words, from the system face, since Overpass's sits hard against the
+next letter.
 
 **Narrow windows**: `to-480:`, `to-560:`, `to-640:`, `to-720:`, `to-900:`, `to-1100:` apply up to and including that
 width (`to-560:hidden`).
@@ -133,7 +140,7 @@ Reach for `components/ui` before writing a control by hand:
   `Popover` (a panel opened by a click or a tap: what a tooltip says where there's no hover, or a few controls),
   `Dialog` (a window of its own over the dimmed page) and `AlertDialog` (a question to answer before going on: delete,
   revoke, remove; `AlertDialogAction` is `danger` unless told otherwise).
-- Asking first: `ConfirmButton` (a destructive action asked in place, its No saying what it keeps: `keep="Keep
+- Asking first: `ConfirmButton` (in `components/Confirm.tsx`: a destructive action asked in place, its No saying what it keeps: `keep="Keep
   invitation"`) and `Question` (the same question for something else, a promotion, say); every question names what
   it changes. What can be taken back says so instead, with `useUndo()` and `UndoLine`: Undo for ten seconds, where
   the row was. What changes at once (a role, a permission) says Saved by it (`useSavedNote`, `SAVED_NOTE`).
@@ -204,7 +211,8 @@ lucide icons for `Icon`, and restyle it from the theme.
   are its owner (the org or person's page) and its name, a switcher to the reader's other repos. An Inbox row has its
   kind's icon, who waits and for how long ("mara/claude asks · 38m", "GitHive says" for its own agents), the question
   at body size in ink, and a verb (Answer, "Vote as payments", See the audit) that opens the change at its decision.
-  A repo's rows, like the Hive's banner, list questions, then votes, each most urgent and then longest waiting first
+  A repo's rows, like the Hive's banner, list questions, then Clef's steering flags, then votes, then the audit's open
+  violations, each most urgent and then longest waiting first
   (`byWaiting`); the banner shows three and counts the rest, other branches' too, for the Inbox.
 - **Moving between places.** A new place starts at the top with its `h1` focused (no ring: it isn't a control), so a
   screen reader starts there; Back and Forward go back to where each history entry was scrolled once the page has

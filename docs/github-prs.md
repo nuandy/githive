@@ -14,16 +14,16 @@ collect on GitHive and reach GitHub through a pull request, merged the normal Gi
 `settings { github: "owner/name", github_sync: "mirror" | "pr", github_trust: true | false }`.
 - **A link made before modes keeps the behaviour it had exactly.** It has no `sync` recorded: it mirrors `main` after
   each landing, brings nothing of GitHub's back, and trusts nothing. Inbound, and trust, apply only to a link whose
-  `github_sync` is set, to `"pr"` or `"mirror"`, through `settings` or the dashboard's Settings tab (which offers it
+  `github_sync` is set, to `"pr"` or `"mirror"`, through `settings` or the dashboard's Settings → GitHub (which offers it
   for such a link, and saves it only once someone chose there). Setting `github_trust` alone sets no mode.
-- `pr` is the default for new connections (`NEW_CONNECTION_SYNC` in `src/toolkit/github-settings.ts`: Andy may
-  prefer `mirror`; it's one constant). A new connection records `sync` and `trust` explicitly, so it brings GitHub's
+- `pr` is the default for new connections (`NEW_CONNECTION_SYNC` in `src/toolkit/github-settings.ts`, one
+  constant). A new connection records `sync` and `trust` explicitly, so it brings GitHub's
   changes back, and changing the constant later moves no repo.
 - `bringsGitHubBack(registry)` (a mode is recorded) gates the notice after a landing, `github_pr`'s notice and the
   job's import step; `trustsGitHub` needs it too, so the merge path and the audit give a link without a mode no trust.
   Settings replies say `githubInbound`, and the dashboard's snapshot `inbound`.
 - The choice is stored with the repo's GitHub link in the claims registry (`github: { repo, sync, trust }`), and
-  changes through `settings` and the dashboard's Settings tab. Naming the same repo again keeps its mode; another
+  changes through `settings` and the dashboard's Settings → GitHub. Naming the same repo again keeps its mode; another
   repo is a new connection. `github_sync` or `github_trust` without a connected repo is refused.
 - The link's shape is pinned in `test/fixtures/record-shapes.json`. Its new fields are optional, so older records
   read as before and no format bump was needed.
@@ -126,13 +126,14 @@ people pushed there directly. They come back through GitHive's own path, so the 
    a conflict or a failed check goes to a person: a merge refused for anything else, such as a change Artifacts
    couldn't read while busy, is tried again later, as a step that throws is (below).
 5. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
-   a claim, which no one can act as. So a person who can write may give it up from the dashboard ("Give up GitHub's
-   changes", on the change's page; `POST /repos/:owner/:name/changes/:change/give-up`), and a repo admin through
-   `release` (naming the change, as their own agent; the MCP front door tells the toolkit the caller's level). It's
-   the one exception to "only the holder releases", recorded like a stale release (`stale: true`, the reason "GitHub's
+   a claim, which no one can act as. So a person who can write may give it up from the dashboard (the change's decision box, ⋯ →
+   Release claim; `POST /repos/:owner/:name/changes/:change/release`, which hands GitHub's change to
+   `giveUpGitHubChange`), and a repo admin through `release` (naming the change, as their own agent; the MCP front
+   door tells the toolkit the caller's level). It's the one exception, for agents, to "only the holder releases"
+   (people who can write may release any claim from the dashboard), recorded like a stale release (`stale: true`, the reason "GitHub's
    changes given up by <who>") and stamped with who did it; the audit accepts a stamped release of
    `githive-github`'s claim at any time (`giveUpGitHubChange`). Its paths are free at once. The job ends ("given up")
-   and waits: GitHub's branch moving starts it again, as does a person asking from the dashboard ("Bring them in
+   and waits: GitHub's branch moving starts it again, as does a person asking from the dashboard ("Sync
    again", `POST /repos/:owner/:name/github/again`, which only a person may call). `github_pr` with `refresh`, which
    any agent who can write may send, doesn't take a give-up back. Only GitHub's changes are given up this way.
 6. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
@@ -191,9 +192,10 @@ is a fast-forward again.
 - By the repo's name: the GitHub repo, and in pr mode the pull request's link, or for people who can write the "Open
   a pull request on GitHub" button. When bringing GitHub's changes back needs a person, waits, was given up or
   failed, it says so there, linking to the change; once it stopped (a person, given up, failed), people who can write
-  get "Bring them in again".
-- GitHub's change's page offers people who can write "Give up GitHub's changes" (step 5).
-- The Settings tab: the GitHub repo, how GitHive's work reaches it (`github_sync`), and whether its changes are
+  get "Sync again".
+- GitHub's change's page lets people who can write release its claim from the decision box (⋯ → Release claim; step
+  5).
+- Settings → GitHub: the GitHub repo, how GitHive's work reaches it (`github_sync`), and whether its changes are
   trusted (`github_trust`), for admins; the same in words for everyone else.
 - The Changes tab labels GitHub's change "from GitHub, trusted"; its page and sidebar say it needs no review instead
   of counting approvals.

@@ -1,6 +1,6 @@
 # The Hive tab, redesigned
 
-Date: 2026-10-12. Status: design agreed in conversation; this spec is for review before planning.
+Date: 2026-10-12. Status: built (PR #3, then reworked in PR 5, merged as d83d8f4); kept as the design it started from.
 
 ## What we're after
 

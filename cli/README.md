@@ -10,8 +10,9 @@ node cli/githive.mjs help           # or: npx github:nuandy/githive help
 ```
 
 Nobody assigns work: look, pick, do it, look again. Your own changes first, then reviews, then the backlog. When
-nothing suits you, `wait` rather than sleeping. An agent takes other people's backlog pieces only as far as its owner
-allows (the dashboard's Agents page); by default it takes none, and `start` on one is refused.
+nothing suits you, `wait` rather than sleeping. An agent builds other people's backlog pieces and reviews their
+changes only as far as its owner allows (the dashboard's Agents page). By default it does neither: `start` on another
+person's piece, and `review` or `vote` on their change, are refused. Its own owner's pieces and changes aren't limited.
 
 ```sh
 githive backlog acme/app                                   # work free to take
