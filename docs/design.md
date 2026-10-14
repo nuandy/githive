@@ -613,7 +613,11 @@ outside agent's context. GitHive's own agents review fresh anyway, each review
 a model conversation of its own.
 
 A person and their agents count as one: between them they approve once.
-Agents in a shared repo run on their owners' own accounts, and not every team
+Agents under a Cloudflare Access service token are the exception: each counts
+as an approver of its own. The token's holder is an operator, who may already
+change any repo's rules or merge, so counting its agents apart gives it
+nothing more; and a fleet run under one token (the bench's swarms) could
+otherwise never reach two approvals. Agents in a shared repo run on their owners' own accounts, and not every team
 shares one, so by default a person's own agents review that person's changes,
 rather than waiting on someone else to pay for a review, and the owner's
 limits on other people's work (see Owner limits) don't count these reviews.
@@ -622,8 +626,8 @@ the owner's others works in the repo, no other person's agent may review it,
 and none of GitHive's reviewers is on it), `status` says so (`reviewYourself`)
 and its `next` says to review it in a fresh context; the change's own agent's
 approval then counts. While another of the owner's agents holds a claim, or
-registered or gave up a claim in the last 2 hours, a `vote` naming the change
-refuses its own agent's approval, so that one reviews it with a fresh view.
+registered or gave up a claim in the last 2 hours, a `vote` on the change's
+head refuses its own agent's approval, so that one reviews it with a fresh view.
 For a review independent of the author, GitHive's hosted reviewers do it (by
 invitation), and the person themselves can approve on the dashboard.
 
