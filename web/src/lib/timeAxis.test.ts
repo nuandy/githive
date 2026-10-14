@@ -126,10 +126,10 @@ describe("the time axis's labels", () => {
 			const spans = ticks.map((tick, index) => {
 				const wide = tick.label.length * 6.2;
 				const at = tick.x * width;
-				return index === ticks.length - 1 ? [at - wide, at] : [at - wide / 2, at + wide / 2];
+				return index === ticks.length - 1 ? { from: at - wide, to: at } : { from: at - wide / 2, to: at + wide / 2 };
 			});
 			for (let index = 1; index < spans.length; index++)
-				expect(spans[index]![0]).toBeGreaterThanOrEqual(spans[index - 1]![1]);
+				expect(spans[index]!.from).toBeGreaterThanOrEqual(spans[index - 1]!.to);
 		}
 	});
 });
