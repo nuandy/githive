@@ -384,19 +384,36 @@ const LAZY_PAGES = new Set<Route["page"]>(["admin", "new-repo", "orgs", "org", "
 function useRepoData(repoName: string | null, changeId: string | null) {
 	const feedKey = repoName;
 	const refreshers = useRef<Record<RepoPart, () => void>>({ snapshot: noop, audit: noop, change: noop });
-	const liveStatus = useLiveFeed(feedKey, (kinds) => {
-		for (const part of touchedBy(kinds)) refreshers.current[part]();
+	// The feed's number while a ping reads again, so pages reading at the same number share one answer on the server.
+	const readAt = useRef<number | undefined>(undefined);
+	const liveStatus = useLiveFeed(feedKey, (kinds, latest) => {
+		const readAgain = () => {
+			readAt.current = latest.seq;
+			for (const part of touchedBy(kinds)) refreshers.current[part]();
+			readAt.current = undefined;
+		};
+		// When many watch, each page waits a moment of its own, so the first reads are shared by the rest.
+		if (latest.spreadMs > 0) setTimeout(readAgain, Math.random() * latest.spreadMs);
+		else readAgain();
 	});
 	const every = (intervalMs: number) => (liveStatus === "live" ? 30_000 : intervalMs);
 
-	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
+	const snapshot = usePoll(
+		repoName !== null ? `repo:${repoName}` : null,
+		() => api.snapshot(repoName!, readAt.current),
+		every(5_000),
+	);
 	// The audit replays every record in Git, so it loads on its own and less often.
-	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
+	const audit = usePoll(
+		repoName !== null ? `audit:${repoName}` : null,
+		() => api.audit(repoName!, readAt.current),
+		60_000,
+	);
 	// What the reader may do here decides the vote form and which settings they can change.
 	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
 	const change = usePoll(
 		changeId ? `change:${repoName}:${changeId}` : null,
-		() => api.change(repoName!, changeId!),
+		() => api.change(repoName!, changeId!, readAt.current),
 		every(10_000),
 	);
 	refreshers.current = { snapshot: snapshot.refresh, audit: audit.refresh, change: change.refresh };

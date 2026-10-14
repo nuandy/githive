@@ -12,7 +12,8 @@ import {
 	toldKey,
 	trimTold,
 } from "./news-log";
-import { keepPageMessage, PAGE_PREFIXES, pageMessagesSince } from "./page-feed";
+import { feedShardName, PAGES_PER_SHARD } from "./feed-shard";
+import { keepPageMessage, PAGE_PREFIXES, pageMessagesSince, spreadFor } from "./page-feed";
 import type { KeptPushHints } from "./push-hints";
 import { pushFlags, type SteeringFlag, withFlag } from "./steering";
 import { rpc } from "./rpc";
@@ -29,8 +30,8 @@ import {
 	settleOutcomes,
 } from "./toolkit/landing";
 
-// One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: live-update sockets for pages,
-// prebuilt views, the hive's events, changes' heads, landing progress, agents' news and the fork queue. Record tips
+// One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: the numbered messages for pages'
+// live feeds, which FeedShards hold the sockets for, prebuilt views, the hive's events, changes' heads, landing progress, agents' news and the fork queue. Record tips
 // and states (RecordCache) and what merges keep for their landing (ChangeCache) have objects of their own, so they
 // don't share this one's memory. Git stays the source of truth, so losing any of this costs only speed.
 
@@ -120,6 +121,13 @@ const FORK_TRIES = 3;
 /** Storage reads and writes at most this many keys at once. */
 const STORAGE_BATCH = 128;
 
+/** The repo's feed shards and how many pages each holds, by shard number. */
+interface Feeds {
+	repo: string;
+	pages: Record<number, number>;
+}
+const FEEDS = "feeds";
+
 /** What clearViews forgets: everything kept for a repo. */
 const KEPT_PREFIXES = [
 	"view:",
@@ -133,6 +141,7 @@ const KEPT_PREFIXES = [
 	"notice:",
 	...NEWS_PREFIXES,
 	...PAGE_PREFIXES,
+	FEEDS,
 	"attempts:",
 	"merge:",
 	// Record tips and states, and packs, before they had objects of their own.
@@ -221,18 +230,33 @@ export class RepoCache extends DurableObject<Env> {
 	/** Calls held in ringAfter, each woken by the next ring. */
 	private readonly listening = new Set<Listener>();
 
-	/**
-	 * A dashboard page's live feed. A page that reconnects with `?since=<seq>`, the last message it had, is first sent
-	 * what it missed (see page-feed.ts).
-	 */
-	async fetch(request: Request) {
-		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
-		const { 0: client, 1: server } = new WebSocketPair();
-		this.ctx.acceptWebSocket(server);
-		const since = Number(new URL(request.url).searchParams.get("since") ?? "");
-		if (Number.isInteger(since) && since >= 0)
-			for (const message of await pageMessagesSince(this.ctx.storage, since)) server.send(JSON.stringify(message));
-		return new Response(null, { status: 101, webSocket: client });
+	/** Which of the repo's feed shards a page opening its feed joins: the first with room, counted at once. */
+	async feedShardFor(repo: string) {
+		const feeds = await this.feeds(repo);
+		let shard = 0;
+		while ((feeds.pages[shard] ?? 0) >= PAGES_PER_SHARD) shard++;
+		// Counted before the page joins, so a crowd opening at once doesn't all pick the same shard.
+		feeds.pages[shard] = (feeds.pages[shard] ?? 0) + 1;
+		await this.ctx.storage.put(FEEDS, feeds);
+		return shard;
+	}
+
+	/** How many pages a feed shard holds, as it tells it. */
+	async feedPages(shard: number, pages: number) {
+		const feeds = await this.ctx.storage.get<Feeds>(FEEDS);
+		if (!feeds) return;
+		if (pages > 0) feeds.pages[shard] = pages;
+		else delete feeds.pages[shard];
+		await this.ctx.storage.put(FEEDS, feeds);
+	}
+
+	/** The messages after `since`, for a page that reconnects (see page-feed.ts). */
+	async pagesSince(since: number) {
+		return pageMessagesSince(this.ctx.storage, since);
+	}
+
+	private async feeds(repo: string): Promise<Feeds> {
+		return (await this.ctx.storage.get<Feeds>(FEEDS)) ?? { repo, pages: {} };
 	}
 
 	/**
@@ -820,23 +844,26 @@ export class RepoCache extends DurableObject<Env> {
 		void ring().catch((err) => console.error(`ringing the hive (${rung.reason}) failed`, String(err)));
 	}
 
-	// Sends watching pages what changed, with its events, numbered and kept for a page that reconnects.
+	// Sends watching pages what changed, with its events, numbered and kept for a page that reconnects. Each shard with
+	// pages gets it once, without holding up the write that sent it: a page that misses one catches up by its number.
 	private async broadcast(kind: string, events: HiveEvent[] = []) {
-		const message = JSON.stringify(await keepPageMessage(this.ctx.storage, kind, events));
-		for (const socket of this.ctx.getWebSockets()) {
-			try {
-				socket.send(message);
-			} catch {
-				// The page went away; the runtime closes the socket.
-			}
-		}
+		const feeds = await this.ctx.storage.get<Feeds>(FEEDS);
+		const pages = Object.values(feeds?.pages ?? {}).reduce((total, count) => total + count, 0);
+		const message = JSON.stringify(await keepPageMessage(this.ctx.storage, kind, events, spreadFor(pages)));
+		if (!feeds || !pages || !this.env.FEED_SHARD) return;
+		const sending = Object.keys(feeds.pages).map((shard) => this.sendToShard(feeds.repo, Number(shard), message));
+		this.ctx.waitUntil(Promise.all(sending));
 	}
 
-	// Pages only listen; anything they send is ignored.
-	async webSocketMessage() {}
-
-	async webSocketClose(socket: WebSocket, code: number) {
-		socket.close(code === 1005 ? 1000 : code, "closed");
+	// A shard that answers with how many pages it holds corrects the count; one that fails keeps its count, to be tried
+	// again with the next message.
+	private async sendToShard(repo: string, shard: number, message: string) {
+		try {
+			const pages = await rpc(this.env.FEED_SHARD.getByName(feedShardName(repo, shard)).send(message));
+			await this.feedPages(shard, pages);
+		} catch (err) {
+			console.error(`sending ${feedShardName(repo, shard)} a page message failed`, String(err));
+		}
 	}
 }
 

@@ -16,6 +16,12 @@ export interface SocketLike {
 	close(): void;
 }
 
+/** Where the feed is: the last message's number, if the server numbers them, and how long to spread reads over. */
+export interface Latest {
+	seq?: number;
+	spreadMs: number;
+}
+
 export interface Timers {
 	setTimeout(callback: () => void, ms: number): unknown;
 	clearTimeout(timer: unknown): void;
@@ -26,9 +32,10 @@ export interface LiveFeedOptions {
 	connect: (url: string) => SocketLike;
 	/**
 	 * Read again what these kinds of change touch: "records", "pushed", "landing", "awareness", "view:<name>", or
-	 * "missed" (read everything). A message from an older server, without a kind, comes as "missed".
+	 * "missed" (read everything). A message from an older server, without a kind, comes as "missed". `latest` is the
+	 * last message's number, to read at, and how long to spread the reads over when many pages watch.
 	 */
-	onPing(kinds: string[]): void;
+	onPing(kinds: string[], latest: Latest): void;
 	/** The hive events a message carried, as it arrives. */
 	onEvents?(events: unknown[]): void;
 	onStatus(status: LiveStatus): void;
@@ -58,6 +65,8 @@ export class LiveFeed {
 	private everOpened = false;
 	/** The number of the last message had, once a server that numbers them has sent one. */
 	private lastSeq: number | null = null;
+	/** How long the last message asked pages to spread their reads over. */
+	private spreadMs = 0;
 	private readonly kinds = new Set<string>();
 	private readonly timers: Timers;
 
@@ -140,6 +149,7 @@ export class LiveFeed {
 	private received(event: unknown) {
 		const message = messageOf(event);
 		if (message.seq !== undefined) this.lastSeq = message.seq;
+		this.spreadMs = message.spreadMs ?? 0;
 		if (message.events?.length) this.options.onEvents?.(message.events);
 		this.ping(message.kind);
 	}
@@ -151,7 +161,8 @@ export class LiveFeed {
 			this.pingTimer = null;
 			const kinds = [...this.kinds];
 			this.kinds.clear();
-			if (!this.stopped) this.options.onPing(kinds);
+			const latest = { ...(this.lastSeq !== null ? { seq: this.lastSeq } : {}), spreadMs: this.spreadMs };
+			if (!this.stopped) this.options.onPing(kinds, latest);
 		}, this.options.debounceMs ?? 250);
 	}
 }
@@ -160,6 +171,7 @@ interface Message {
 	kind: string;
 	seq?: number;
 	events?: unknown[];
+	spreadMs?: number;
 }
 
 // A message as the server sends it. Anything else, from an older server, means only "something changed".
@@ -177,5 +189,6 @@ function messageOf(event: unknown): Message {
 		kind: message.kind,
 		...(typeof message.seq === "number" ? { seq: message.seq } : {}),
 		...(Array.isArray(message.events) ? { events: message.events } : {}),
+		...(typeof message.spreadMs === "number" ? { spreadMs: message.spreadMs } : {}),
 	};
 }

@@ -26,6 +26,7 @@ import type { Registry } from "../toolkit/claims";
 import { GitCasLog } from "../record-log";
 import { projectBranch } from "../project-branch";
 import { rpc } from "../rpc";
+import { openFeed } from "../feed-shard";
 import { keptView } from "./kept-view";
 import { type AppEnv, jsonArgs, repoIndex, routeRepo, toolContext } from "./shared";
 
@@ -246,7 +247,7 @@ function changeViewRoutes(app: Hono<AppEnv>) {
 	// Live updates for a repo: a WebSocket on its feed, which pings when its records change.
 	app.get("/repos/:owner/:name/live", async (c) => {
 		const repo = await routeRepo(c, "read");
-		return c.env.REPO_CACHE.getByName(`repo:${repo.id}`).fetch(c.req.raw);
+		return openFeed(c.env, repo.id, c.req.raw);
 	});
 }
 

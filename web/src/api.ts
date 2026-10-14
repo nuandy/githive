@@ -657,13 +657,17 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	return data as T;
 }
 
+// A read at a live-feed number (see kept-view.ts on the server).
+const atSeq = (seq: number | undefined) => (seq === undefined ? "" : `?seq=${seq}`);
+
 export const api = {
 	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
-	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
+	/** `seq`: the live feed's number this is read at, so readers at the same number share one answer. */
+	snapshot: (repo: string, seq?: number) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}${atSeq(seq)}`),
 	/** The latest demo run on a repo, for its Hive tab's banner (404 unless it's the demo repo). */
 	demoRun: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
-	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
+	audit: (repo: string, seq?: number) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit${atSeq(seq)}`),
 	history: (repo: string, branch: string) =>
 		call<BranchHistory>("GET", `/repos/${repoPath(repo)}/history?branch=${encodeURIComponent(branch)}`),
 	/** What's landing on a branch of the repo. */
@@ -693,8 +697,8 @@ export const api = {
 	vote: (repo: string, change: string, vote: VoteInput) =>
 		call<unknown>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
 	/** One change: its claim or how it ended, its commits and the votes on them. */
-	change: (repo: string, change: string) =>
-		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
+	change: (repo: string, change: string, seq?: number) =>
+		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}${atSeq(seq)}`),
 	/** One change's files, each with its diff. */
 	diff: (repo: string, change: string) =>
 		call<ChangeDiff>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/diff`),

@@ -11,7 +11,19 @@ export interface PageMessage {
 	kind: string;
 	at: string;
 	events?: HiveEvent[];
+	/** How long, at most, pages wait before reading again: set when so many watch that their reads would pile up. */
+	spreadMs?: number;
 }
+
+/** How many watching pages a repo has before they're asked to spread their reads. */
+const SPREAD_FROM = 50;
+const MOST_SPREAD_MS = 2_000;
+
+/**
+ * How long `pages` watching pages should spread their reads over: none for a few, then a fifth of a millisecond a page,
+ * so the first reads fill the Worker's cache for the rest.
+ */
+export const spreadFor = (pages: number) => (pages < SPREAD_FROM ? 0 : Math.min(MOST_SPREAD_MS, Math.round(pages / 5)));
 
 const SENT = "page-sent";
 const PAGE = "page:";
@@ -27,9 +39,20 @@ export const PAGE_PREFIXES = [PAGE, SENT];
 const pageKey = (seq: number) => `${PAGE}${String(seq).padStart(12, "0")}`;
 
 /** Numbers and keeps a message, and returns it to send. */
-export async function keepPageMessage(storage: Storage, kind: string, events: HiveEvent[]): Promise<PageMessage> {
+export async function keepPageMessage(
+	storage: Storage,
+	kind: string,
+	events: HiveEvent[],
+	spreadMs = 0,
+): Promise<PageMessage> {
 	const seq = (await sentCount(storage)) + 1;
-	const message: PageMessage = { seq, kind, at: new Date().toISOString(), ...(events.length ? { events } : {}) };
+	const message: PageMessage = {
+		seq,
+		kind,
+		at: new Date().toISOString(),
+		...(events.length ? { events } : {}),
+		...(spreadMs ? { spreadMs } : {}),
+	};
 	await storage.put({ [SENT]: seq, [pageKey(seq)]: message });
 	if (seq > PAGES_KEPT) await storage.delete(pageKey(seq - PAGES_KEPT));
 	return message;

@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { listRepoNames } from "../artifacts";
+import { openFeed } from "../feed-shard";
 import { retryTransient } from "../retry";
 import { type AppEnv, forgetRepo, isProject, jsonArgs, repoIndex, requireAccess } from "./shared";
 
@@ -92,6 +93,6 @@ export function adminRoutes(app: Hono<AppEnv>) {
 		requireAccess(c);
 		const key = c.req.param("key");
 		if (!/^repo:[A-Za-z0-9._-]+$/.test(key)) return c.json({ error: "not a feed" }, 400);
-		return c.env.REPO_CACHE.getByName(key).fetch(c.req.raw);
+		return openFeed(c.env, key.slice("repo:".length), c.req.raw);
 	});
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FakeStorage } from "./fakes/env";
+import { watchedCache } from "./fakes/feed";
 
 const { RepoCache, RINGS_KEPT } = await import("../src/repo-cache");
 const { TOLD_KEPT } = await import("../src/news-log");
@@ -12,25 +13,14 @@ type Notice = import("../src/repo-cache").Notice;
 // them stale, a stale view is still served while one build runs, and a view
 // built before a write that landed during its build stays stale.
 
-const feed = () => {
-	const sent: string[] = [];
-	const messages: PageMessage[] = [];
-	const socket = {
-		send: (message: string) => {
-			messages.push(JSON.parse(message));
-			sent.push(JSON.parse(message).kind);
-		},
-	};
-	return {
-		live: new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never),
-		sent,
-		messages,
-	};
+const feed = async () => {
+	const { cache, messages, sent } = await watchedCache();
+	return { live: cache, messages, sent };
 };
 
 describe("kept views", () => {
 	it("has nothing until a view is built, then serves it fresh", async () => {
-		const { live, sent } = feed();
+		const { live, sent } = await feed();
 		expect(await live.view("snapshot", 60_000)).toEqual({ json: undefined, fresh: false, building: false, writes: 0 });
 		expect(await live.startBuild("snapshot")).toBe(true);
 		const version = await live.keep("snapshot", '{"open":1}', 0);
@@ -39,7 +29,7 @@ describe("kept views", () => {
 	});
 
 	it("leaves out a view the caller already has", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const version = await live.keep("snapshot", '{"open":1}', 0);
 		expect(await live.view("snapshot", 60_000, version)).toEqual({
 			json: undefined,
@@ -52,7 +42,7 @@ describe("kept views", () => {
 	});
 
 	it("goes stale on a write but not on a view's own ping", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.keep("snapshot", "{}", 0);
 		await live.ping("records", false);
 		expect(await live.view("snapshot", 60_000)).toMatchObject({ fresh: true });
@@ -61,7 +51,7 @@ describe("kept views", () => {
 	});
 
 	it("lets one build run at a time, and the next once it's kept or failed", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		expect(await live.startBuild("audit")).toBe(true);
 		expect(await live.startBuild("audit")).toBe(false);
 		expect(await live.view("audit", 60_000)).toMatchObject({ building: true });
@@ -72,7 +62,7 @@ describe("kept views", () => {
 	});
 
 	it("keeps a view built across a write stale, so the next read rebuilds it", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const { writes } = await live.view("snapshot", 60_000);
 		await live.ping("records");
 		await live.keep("snapshot", "{}", writes);
@@ -80,13 +70,13 @@ describe("kept views", () => {
 	});
 
 	it("ages a view out", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.keep("snapshot", "{}", 0);
 		expect(await live.view("snapshot", -1)).toMatchObject({ fresh: false });
 	});
 
 	it("keeps the files of the 20 changes kept last, each up to most of a megabyte, forgetting older ones", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.keep("snapshot", "{}", 0);
 		for (let n = 1; n <= 21; n++) await live.keep(`diff:c-${n}`, `{"n":${n}}`, 0);
 		expect((await live.view("diff:c-1", 60_000)).json).toBeUndefined();
@@ -114,7 +104,7 @@ const settled = (change: string, agent: string, how: "landed" | "failed", at: st
 
 describe("news of what landed", () => {
 	it("tells an agent what others landed since it last heard, nothing old on its first call, never its own", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const landed = (change: string, agent: string, at: string) => ({
 			change,
 			head: `h-${change}`,
@@ -147,14 +137,14 @@ describe("news of what landed", () => {
 	});
 
 	it("tells the first landings on a new repo", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		expect(await live.newsFor("main", "agent-a")).toEqual([]);
 		await live.landingSettled("main", [settled("first", "agent-b", "landed", soon(1))]);
 		expect(await live.newsFor("main", "agent-a")).toMatchObject([{ kind: "landed", change: "first" }]);
 	});
 
 	it("the cursor follows the newest outcome, not the last one kept", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.newsFor("main", "agent-a");
 		await live.landingSettled("main", [settled("landed", "agent-b", "landed", soon(2))]);
 		// A failure noted later, with an earlier time.
@@ -176,13 +166,13 @@ describe("notices", () => {
 	});
 
 	it("delivers a notice on the agent's first call, with the branch it's about", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("hello") }]);
 		expect(await live.newsFor("main", "agent-a")).toEqual([{ ...notice("hello", expect.any(String)), branch: "main" }]);
 	});
 
 	it("tells a notice once, after what landed, only to its agent, whichever branch it's about", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.newsFor("main", "agent-a");
 		await live.landingSettled("main", [settled("theirs", "agent-b", "landed", soon(1))]);
 		await live.notify("main", [
@@ -204,7 +194,7 @@ describe("notices", () => {
 	});
 
 	it("tells at most 50 notices at once, the newest, and none older than a day", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("stale", minutesAgo(25 * 60)) }]);
 		const many = (from: number) =>
 			Array.from({ length: 30 }, (_, i) => ({
@@ -244,7 +234,7 @@ describe("notices", () => {
 	});
 
 	it("keeps the hive events that come with them, and tells watching pages", async () => {
-		const { live, sent } = feed();
+		const { live, sent } = await feed();
 		const at = new Date().toISOString();
 		await live.notify(
 			"main",
@@ -260,7 +250,7 @@ describe("notices", () => {
 
 describe("forgetting a deleted repo's views", () => {
 	it("drops everything kept for it, however much, the heads seen on its changes among it", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.noteHeads(Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`note-${i}`, `h${i}`])));
 		await live.landingSettled("master", [
 			{ change: "note-1", head: "h1", agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
@@ -272,7 +262,7 @@ describe("forgetting a deleted repo's views", () => {
 	});
 
 	it("names the repo's record caches for the caller to forget", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.noteRecordCache("record:p:refs/notes/githive-claims/p");
 		await live.noteRecordCache("record:p:refs/notes/githive-claims/p");
 		expect(await live.clearViews()).toEqual(["record:p:refs/notes/githive-claims/p"]);
@@ -294,7 +284,7 @@ describe("forgetting a deleted repo's views", () => {
 	});
 
 	it("drops kept views and builds, and keeps counting writes", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.keep("snapshot", "{}", 0);
 		await live.startBuild("audit");
 		await live.ping("records");
@@ -323,7 +313,7 @@ describe("the fork queue", () => {
 
 describe("attempts", () => {
 	it("keeps each change's 10 newest attempts, 200 characters of each, and leaves out changes with none", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		for (let i = 0; i < 12; i++) await live.noteAttempt("c-1", `conflict ${i}`);
 		await live.noteAttempt("c-2", "x".repeat(300));
 		expect(await live.attemptsOf(["c-1", "c-2", "c-3", "c-1"])).toEqual({
@@ -337,7 +327,7 @@ describe("attempts", () => {
 	});
 
 	it("are cleared when a change lands, so a later claim of its name starts with none", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		await live.noteAttempt("c-1", "conflict on a.ts");
 		await live.noteAttempt("c-2", "checks failed: npm test exited 1");
 		await live.landingSettled("main", [
@@ -348,7 +338,7 @@ describe("attempts", () => {
 	});
 
 	it("are forgotten when a claim is released without merging, through the hook the claim store calls", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
 		await live.noteAttempt("c-1", "conflict on a.ts");
 		await live.noteAttempt("c-2", "conflict on b.ts");
@@ -365,7 +355,7 @@ describe("attempts", () => {
 
 describe("the hooks tools reach it through", () => {
 	it("leave notices for the agent's next news, and a RepoCache that doesn't answer never fails the call", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
 		const notice = { kind: "interface", at: new Date().toISOString(), says: "hello" };
 		await ctx.notify!("p", "main", [{ agent: "agent-a", notice }]);
@@ -378,7 +368,7 @@ describe("the hooks tools reach it through", () => {
 	});
 
 	it("note attempts and read them back, and a RepoCache that doesn't answer never fails the call", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
 		await ctx.noteAttempt!("p", "c-1", "conflicted on a.ts");
 		expect(await ctx.attemptsOf!("p", ["c-1", "c-2"])).toEqual({ "c-1": ["conflicted on a.ts"] });
@@ -394,7 +384,7 @@ describe("the hooks tools reach it through", () => {
 
 describe("the doorbell's hold", () => {
 	it("answers at once once it has rung past the mark, holds until the next ring, and gives up after ms", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		expect(await live.rings()).toBe(0);
 		expect(await live.ringAfter(0, 50)).toBeNull();
 		const held = live.ringAfter(0, 5_000);
@@ -408,7 +398,7 @@ describe("the doorbell's hold", () => {
 	});
 
 	it("wakes a hold only for a ring that concerns its agent, and every hold for one that concerns everyone", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		const at = new Date().toISOString();
 		const x = live.ringAfter(0, 5_000, "x");
 		const y = live.ringAfter(0, 5_000, "y");
@@ -429,7 +419,7 @@ describe("the doorbell's hold", () => {
 	});
 
 	it("keeps the last rings in its log, and says when a mark is older than that", async () => {
-		const { live } = feed();
+		const { live } = await feed();
 		for (let ring = 0; ring < RINGS_KEPT + 2; ring++) await live.ping("records", true, [], "claim", { for: [] });
 		expect(await live.rungFor("x", 1)).toBeNull();
 		expect(await live.rungFor("x", 2)).toEqual([]);
@@ -440,7 +430,7 @@ describe("the doorbell's hold", () => {
 
 describe("what pages are sent", () => {
 	it("numbers each message and carries its events, so a page shows them without reading the feed", async () => {
-		const { live, messages } = feed();
+		const { live, messages } = await feed();
 		const at = new Date().toISOString();
 		const claimed = { kind: "claimed" as const, agent: "agent-a", change: "c-1", at };
 		await live.ping("records", true, [claimed], "claim", { for: [] });

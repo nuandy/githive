@@ -29,6 +29,7 @@ export { RecordCache } from "./record-cache";
 export { ChangeCache } from "./change-cache";
 export { TokenCache } from "./token-cache";
 export { FootprintCache } from "./footprint-cache";
+export { FeedShard } from "./feed-shard";
 export { GitHubSync } from "./github-sync";
 export { DemoRun } from "./demo/demo-run";
 export { HostedAgent } from "./hosted-agents";

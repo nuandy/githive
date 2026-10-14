@@ -55,6 +55,7 @@
 			{ "name": "GITHUB_SYNC", "class_name": "GitHubSync" },
 			{ "name": "DEMO_RUN", "class_name": "DemoRun" },
 			{ "name": "HOSTED_AGENT", "class_name": "HostedAgent" },
+			{ "name": "FEED_SHARD", "class_name": "FeedShard" },
 		],
 	},
 	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
@@ -111,5 +112,7 @@
 		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
 		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (src/demo/).
 		{ "tag": "v17", "new_sqlite_classes": ["DemoRun", "HostedAgent"] },
+		// A share of the pages watching a repo's live feed, so many viewers don't slow its RepoCache.
+		{ "tag": "v18", "new_sqlite_classes": ["FeedShard"] },
 	],
 }

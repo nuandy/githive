@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backoffDelay, LiveFeed, type LiveStatus, type SocketLike, type Timers } from "./liveFeed";
+import { backoffDelay, type Latest, LiveFeed, type LiveStatus, type SocketLike, type Timers } from "./liveFeed";
 
 class FakeSocket implements SocketLike {
 	onopen: ((event: unknown) => void) | null = null;
@@ -45,6 +45,7 @@ function setup() {
 	const statuses: LiveStatus[] = [];
 	let pings = 0;
 	const kinds: string[][] = [];
+	const latest: Latest[] = [];
 	const events: unknown[][] = [];
 	const timers = new FakeTimers();
 	const feed = new LiveFeed({
@@ -54,19 +55,36 @@ function setup() {
 			sockets.push(socket);
 			return socket;
 		},
-		onPing: (said) => {
+		onPing: (said, where) => {
 			pings++;
 			kinds.push(said);
+			latest.push(where);
 		},
 		onEvents: (brought) => events.push(brought),
 		onStatus: (status) => statuses.push(status),
 		timers,
 		debounceMs: 200,
 	});
-	return { feed, sockets, statuses, timers, pings: () => pings, kinds, events };
+	return { feed, sockets, statuses, timers, pings: () => pings, kinds, latest, events };
 }
 
 describe("the live feed", () => {
+	it("says the last message's number to read at, and how long to spread reads when many watch", () => {
+		const { feed, sockets, timers, latest } = setup();
+		feed.start();
+		sockets[0]!.onopen?.({});
+		const message = (body: object) => sockets[0]!.onmessage?.({ data: JSON.stringify(body) });
+		message({ seq: 7, kind: "records" });
+		message({ seq: 8, kind: "view:snapshot", spreadMs: 400 });
+		timers.advance(200);
+		message({ seq: 9, kind: "records" });
+		timers.advance(200);
+		expect(latest).toEqual([
+			{ seq: 8, spreadMs: 400 },
+			{ seq: 9, spreadMs: 0 },
+		]);
+	});
+
 	it("connects, and folds a burst of pings into one refresh", () => {
 		const { feed, sockets, statuses, timers, pings } = setup();
 		feed.start();

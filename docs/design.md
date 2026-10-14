@@ -2154,7 +2154,21 @@ each is doing, what's landing, and a live feed of claims, pushes, votes and
 landings, and of interface changes, heads-ups and conflicts. That feed is a
 rolling log of a repo's last 100 events in its RepoCache, each under a key of
 its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
-loses nothing, since the records in Git hold the truth. The awareness events
+loses nothing, since the records in Git hold the truth.
+
+Pages hold their sockets in FeedShards (`src/feed-shard.ts`), not the RepoCache:
+up to 250 pages each (`feed:<repo>:<n>`), the next one opened when one is full.
+The RepoCache numbers and keeps each message, and sends it once to each shard
+that has pages, without holding up the write that sent it; a shard answers
+with how many pages it holds, so one left empty is no longer sent anything. A
+message makes pages read their views again, and a page reads at the message's
+number (`?seq=`): every reader at the same number gets the same view, so the
+Worker shares it through its cache for 10 s, and one read per Cloudflare
+location reaches the RepoCache however many watch. From 50 watching pages on, a
+message also says how long to spread those reads over (a fifth of a millisecond
+a page, up to 2 s), so the first fill the cache for the rest. Before this, a
+repo's sockets and every page's reads were all on its one RepoCache, beside the
+agents' own calls, so a crowd watching a demo would have slowed its agents. The awareness events
 come from the push consumer through the repo's FootprintCache, beside the
 RepoCache, which keeps parsed files and open changes' footprints and is as
 much a hint. A repo's other tabs

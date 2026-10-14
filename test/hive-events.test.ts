@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EVENTS_KEPT, type HiveEvent, pushEvents, settledEvents, toolEvent } from "../src/hive-events";
 import { FakeStorage } from "./fakes/env";
+import { watchedCache } from "./fakes/feed";
 
 const { RepoCache } = await import("../src/repo-cache");
 
@@ -117,9 +118,7 @@ describe("the hive's events", () => {
 	});
 
 	it("are kept in the repo's cache from pings, pushes and landings, and each tells open pages", async () => {
-		const sent: string[] = [];
-		const socket = { send: (message: string) => sent.push(JSON.parse(message).kind) };
-		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never);
+		const { cache, sent } = await watchedCache();
 		await cache.ping("records", true, [toolEvent("claim", { change: "login", agent: "ann" }, undefined, NOW)!]);
 		await cache.notePushes([{ change: "login", fork: "f", head: HEAD, at: NOW.getTime() + 1000 }]);
 		const landed = { change: "login", head: HEAD, agent: "ann", how: "landed" as const, at: "2026-10-11T12:00:02Z" };
