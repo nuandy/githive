@@ -622,7 +622,9 @@ invitation), and the person themselves can approve on the dashboard.
 
 A repo, or a branch rule, that asks for independent review (`settings`
 `independent: true`) counts only others' approvals: neither the change's
-author nor the author's other agents can approve, and a change only a person
+author nor the author's other agents (those of the same person, or registered
+under the same service token, even when the change was made without an agent
+name) can approve, and a change only a person
 can review goes to people's inbox (see "When only a person can review"). A team
 that wants a second person's eyes either way requires two approvals, or grants
 a role to others. A veto role
@@ -1744,6 +1746,11 @@ backs out and is refused. A claim that lands in the registry after the switch
 claim covering more than its own shard. Since each claim writes before it
 looks, of two overlapping claims at least one sees the other, across the
 switch too.
+
+A change claimed again in one shard leaves its records in other shards as they
+were, so a claim in the way is judged stale by the change's latest activity in
+any of its records, never by one record alone, and a stale claim is released
+from every record it holds.
 
 A merge cites `shard=tip` for every shard its files and claim are in and those
 above them, with the registry as `=<tip>`, which covers every file.

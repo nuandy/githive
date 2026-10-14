@@ -120,8 +120,10 @@ describe("votes count per verified identity", () => {
 		};
 		// Its verified identity and its unsigned name are two votes, one per identity as ever.
 		expect(approval(votes, head, policy, author)).toMatchObject({ approved: true, approvals: 3 });
-		// Independent review leaves out the author, by verified identity or, unsigned, by name.
-		expect(approval(votes, head, { ...policy, independent: true }, author)).toEqual({
+		// Independent review leaves out the author, by verified identity or, unsigned, by name, and the other agents
+		// under its service token. Only the outside reviewer counts.
+		const outside = { votes: [...votes.votes, cast("rev-3", "service:other/rev-3")] };
+		expect(approval(outside, head, { ...policy, independent: true }, author)).toEqual({
 			approved: false,
 			approvals: 1,
 			vetoedBy: [],
@@ -211,6 +213,35 @@ describe("a person and their agents count as one", () => {
 			approved: false,
 			approvals: 0,
 		});
+		// Nor her agents', though the change names no agent of hers.
+		const hers = [cast("alice/a2", `${alice}/alice/a2`), cast("a4", `${alice}/a4`)];
+		expect(approval({ votes: hers }, head, { required: 1, vetoes: [], independent: true }, own)).toMatchObject({
+			approved: false,
+			approvals: 0,
+		});
+	});
+
+	it("and under independent review a service token's agents are its author's, as a person's are", () => {
+		const independent = { required: 1, vetoes: [] as string[], independent: true };
+		const token = "service:ci";
+		const byToken = { agent: "ci", by: token };
+		const byAgent = { agent: "r1", by: `${token}/r1` };
+		expect(approval({ votes: [cast("r1", `${token}/r1`)] }, head, independent, byToken)).toMatchObject({
+			approved: false,
+		});
+		expect(approval({ votes: [cast("r2", `${token}/r2`)] }, head, independent, byAgent)).toMatchObject({
+			approved: false,
+		});
+		expect(approval({ votes: [cast("ci", token)] }, head, independent, byAgent)).toMatchObject({ approved: false });
+		expect(approval({ votes: [cast("bob", bob)] }, head, independent, byToken)).toMatchObject({ approved: true });
+	});
+
+	it("never lets a pool sign off a change made under its own identity", () => {
+		const pooled = { required: 0, vetoes: ["security"], grants: { security: ["service:ci/*"] } };
+		const vote = { reviewer: "r1", by: "service:ci/r1" };
+		expect(holdsRole(pooled, "security", vote, { by: "service:ci" })).toBe(false);
+		expect(holdsRole(pooled, "security", vote, { by: "service:ci/r2" })).toBe(false);
+		expect(holdsRole(pooled, "security", vote, { by: bob })).toBe(true);
 	});
 
 	it("and another person's agents approve once between them", () => {

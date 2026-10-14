@@ -1,7 +1,7 @@
 import type { ClaimRecord } from "../claims";
 import { isHiveAgent } from "../hive-agents";
 import { AGENT_TURN_IDLE_MS, type ChangeSigns, waitingOn } from "../staleness";
-import { isPerson, personOf, type VoteRecord } from "../votes";
+import { isPerson, ownerOf, personOf, type VoteRecord } from "../votes";
 import { claimPolicy } from "./repo";
 import type { HostedStatus, ToolCall } from "./context";
 
@@ -68,10 +68,10 @@ export function agentsAtWork(
  */
 export function otherPeoplesAgents(agents: AgentAtWork[], claim: ClaimRecord): string[] {
 	const reviews = (record: AgentAtWork) => !record.agent.startsWith("githive") || isHiveAgent(record.agent);
-	const author = personOf(claim.by);
+	const author = ownerOf(claim.by);
 	const othersOnly = (record: AgentAtWork) => {
-		const person = personOf(record.by);
-		if (author && person) return person !== author;
+		const owner = ownerOf(record.by);
+		if (author && owner) return owner !== author;
 		return record.agent !== claim.agent;
 	};
 	return agents

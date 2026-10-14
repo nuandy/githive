@@ -403,9 +403,10 @@ class Claims implements ClaimStore {
 		const shards = [...placed.keys()].sort();
 		const below = shards.filter((shard) => shard !== ROOT);
 		if (below.length) await this.claimIndex(input, below, stamper);
+		const judged = this.sharded ? { ...input, abandoned: this.judgedWhole(input) } : input;
 		const written: Written[] = [];
 		for (const shard of shards) {
-			const outcome = await claim(this.logOf(shard), { ...input, paths: placed.get(shard)! }, stamper);
+			const outcome = await claim(this.logOf(shard), { ...judged, paths: placed.get(shard)! }, stamper);
 			if (!outcome.ok) {
 				const reason = `part of the claim is held by ${outcome.conflicts[0]?.change}`;
 				return { ...outcome, ...(await this.backOut(input, written, reason, stamper)) };
@@ -424,6 +425,16 @@ class Claims implements ClaimStore {
 			return { ok: false, conflicts, ...(await this.backOut(input, written, reason, stamper)) };
 		}
 		return { ok: true };
+	}
+
+	// A claim in the way, as one shard's record shows it, judged by the change's latest activity in any shard: one
+	// claimed again elsewhere is still active, however long this record has been idle.
+	private judgedWhole(input: ClaimInput): Abandoned {
+		return async (held) => {
+			const whole = (await this.holding(held.change))?.own ?? held;
+			if (!idleTooLong(input, whole)) return { abandoned: false, why: "was claimed again lately" };
+			return input.abandoned ? input.abandoned(whole) : { abandoned: true, why: "is idle" };
+		};
 	}
 
 	// Writes the change's index before its sharded claim, so the index always covers every shard the change holds.
@@ -529,13 +540,19 @@ class Claims implements ClaimStore {
 			const paths = [...placed].flatMap(([shard, written]) => (shard === entry.shard ? [] : written));
 			for (const conflict of conflictsWith(entry.state, paths, input.change)) {
 				const holder = entry.state.claims.find((held) => held.change === conflict.change)!;
-				if (await staleFor(input, holder)) {
-					const freed = await releaseStale(
-						this.logOf(entry.shard),
-						{ change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now },
+				// This record can be older than the change's activity in its other shards, so the release judges the
+				// whole claim, and frees it everywhere.
+				if (idleTooLong(input, holder)) {
+					const freed = await this.releaseStale(
+						{
+							change: conflict.change,
+							agent: input.agent,
+							staleAfterMs: input.staleAfterMs!,
+							...(input.abandoned ? { abandoned: input.abandoned } : {}),
+							...(input.now !== undefined ? { now: input.now } : {}),
+						},
 						stamper,
 					);
-					if (freed.ok) await this.forgetAttempts(conflict.change);
 					if (freed.ok || /holds no claim/.test(freed.refused)) continue;
 				}
 				live.push(conflict);
@@ -645,13 +662,16 @@ class Claims implements ClaimStore {
 	}
 }
 
+// Whether `held` has been idle past the floor this claim allows.
+function idleTooLong(input: Pick<ClaimInput, "staleAfterMs" | "now">, held: ClaimRecord): boolean {
+	if (input.staleAfterMs === undefined) return false;
+	return (input.now ?? Date.now()) - Date.parse(held.active) > input.staleAfterMs;
+}
+
 // Whether `held` is stale for this claim: idle past the floor and, when the caller can tell, abandoned.
 async function staleFor(input: ClaimInput, held: ClaimRecord): Promise<boolean> {
-	return (
-		input.staleAfterMs !== undefined &&
-		(input.now ?? Date.now()) - Date.parse(held.active) > input.staleAfterMs &&
-		(!input.abandoned || (await input.abandoned(held)).abandoned)
-	);
+	if (!idleTooLong(input, held)) return false;
+	return !input.abandoned || (await input.abandoned(held)).abandoned;
 }
 
 // A change's records across shards as one claim: all its paths, its first claim and its latest activity.

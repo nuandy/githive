@@ -128,6 +128,22 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		expect(await active()).toEqual([["a-1", ["src/a/x.ts"]]]);
 	});
 
+	it("keeps a claim whose record in one shard is idle while the change was claimed again in another", async () => {
+		const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
+		await store().claim(want("x-1", ["a/x/f.ts"], minutesAgo(31)));
+		await store().claim(want("x-1", ["b/y/g.ts"], minutesAgo(6)));
+		// In the same shard, and from another level.
+		expect(await store().claim({ ...want("y-1", ["a/x/f.ts"]), agent: "agent-y" })).toMatchObject({ ok: false });
+		expect(await store().claim({ ...want("z-1", ["a/"]), agent: "agent-z" })).toMatchObject({ ok: false });
+		expect(await active()).toEqual([["x-1", ["a/x/f.ts", "b/y/g.ts"]]]);
+	});
+
+	it("frees a claim idle in every shard from all of them at once", async () => {
+		await store().claim(want("x-1", ["a/x/f.ts", "b/y/g.ts"], Date.now() - 31 * 60_000));
+		expect(await store().claim({ ...want("z-1", ["a/"]), agent: "agent-z" })).toMatchObject({ ok: true });
+		expect(await active()).toEqual([["z-1", ["a/"]]]);
+	});
+
 	it("cites, for a merge, the tips of the shards its files and claim are in, and their ancestors", async () => {
 		await store().claim(want("wide-1", ["docs/"]));
 		await store().claim(want("a-1", ["src/a/"]));

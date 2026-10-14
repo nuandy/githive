@@ -170,6 +170,12 @@ export const personOf = (by: string | undefined) => by?.match(/^person:[^/]+/)?.
 export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.test(by);
 
 /**
+ * Whose an identity is: `person:<hash>` for a person and their agents, `service:<id>` for a service token and the
+ * agents registered under it.
+ */
+export const ownerOf = (by: string | undefined) => by?.match(/^(?:person|service):[^/]+/)?.[0] ?? null;
+
+/**
  * Whether a change claimed as `by` is the work of `identity`'s own person: an owner's limits on other people's work
  * (see agent-limits.ts) don't count its agents' reviews of it.
  */
@@ -239,7 +245,7 @@ export function holdsRole(
 		if (grant === "person:*") return isPerson(vote.by);
 		if (grant.startsWith("@")) return !!vote.teams?.includes(grant);
 		const pool = poolOf(grant);
-		if (pool) return !!vote.by?.startsWith(`${pool}/`) && !author?.by?.startsWith(`${pool}/`);
+		if (pool) return !!vote.by?.startsWith(`${pool}/`) && ownerOf(author?.by) !== pool;
 		if (/^(person|service):/.test(grant)) return vote.by === grant;
 		if (grant === "githive") return isGitHiveReviewer(vote, role);
 		return vote.reviewer === grant && (!vote.by || vote.by.endsWith(`/${grant}`));
@@ -308,13 +314,12 @@ export function approval(
 	for (const vote of state?.votes ?? [])
 		if (vote.commit === commit) latest.set(vote.by ?? `name:${vote.reviewer}`, vote);
 	const verdicts = [...latest.values()];
-	// When the author is one of a person's agents, the person may approve but their other agents may not.
-	const authorPerson = author?.by && !isPerson(author.by) ? personOf(author.by) : null;
+	// The author's own agents are those of the same person or service token, whoever made the change. The person
+	// may still approve their agent's change.
+	const owner = ownerOf(author?.by);
+	const ownAgent = (vote: VoteRecord) => !!owner && ownerOf(vote.by) === owner && !isPerson(vote.by);
 	const isAuthor = (vote: VoteRecord) =>
-		!!author &&
-		((!!vote.by && vote.by === author.by) ||
-			vote.reviewer === author.agent ||
-			(!!authorPerson && personOf(vote.by) === authorPerson && !isPerson(vote.by)));
+		!!author && ((!!vote.by && vote.by === author.by) || vote.reviewer === author.agent || ownAgent(vote));
 	const counts = (vote: VoteRecord) => !base.independent || !isAuthor(vote);
 	const approving = verdicts.filter((vote) => vote.verdict === "approve" && counts(vote));
 	// One approval per person, however many of their agents approve.
