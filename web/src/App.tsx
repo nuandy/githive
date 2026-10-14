@@ -36,7 +36,14 @@ import { claimTitle, shortTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type Route } from "./lib/routes";
-import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
+import {
+	type Provider,
+	inviteOf,
+	signedOutScreen,
+	signinErrorMessage,
+	signinErrorOf,
+	withoutSigninError,
+} from "./lib/session";
 import { cn } from "./lib/utils";
 // The page column's classes, for the pages not yet on utilities.
 
@@ -165,12 +172,16 @@ export function App() {
 function SignedOut({ signIn: options }: { signIn: Omit<ComponentProps<typeof SignIn>, "hash"> }) {
 	const route = useHashRoute();
 	const [signingIn, setSigningIn] = useState(false);
-	const signIn = <SignIn {...options} hash={window.location.hash} />;
-	const error = options.error;
+	const [errorSeen, setErrorSeen] = useState(false);
+	// Following the card's link to a hive leaves the sign-in screen, even on that repo's page already.
+	const seeHive = () => {
+		setSigningIn(false);
+		setErrorSeen(true);
+	};
+	const signIn = <SignIn {...options} hash={window.location.hash} onSeeHive={seeHive} />;
 	const reading = route.page === "repo" || route.page === "change";
-	// After a failed sign-in, or once they ask to sign in, the sign-in screen.
-	const toSignIn = signingIn || !!error;
-	if (!reading || toSignIn) return signIn;
+	const failed = !!options.error && !errorSeen;
+	if (!reading || signedOutScreen({ reading, signingIn, failed }) === "sign-in") return signIn;
 	return <Visitor route={route} onSignIn={() => setSigningIn(true)} signIn={signIn} />;
 }
 

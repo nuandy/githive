@@ -134,6 +134,7 @@ export function SignIn({
 	takesInviteCode = false,
 	invite: linkedInvite = "",
 	demoRepo,
+	onSeeHive,
 }: {
 	providers: Provider[] | undefined;
 	error?: string | null;
@@ -144,6 +145,8 @@ export function SignIn({
 	invite?: string;
 	/** A public repo where GitHive's own agents work, readable signed out: the card links to it. */
 	demoRepo?: string;
+	/** Called as its link is followed: on that repo's page already, the address doesn't change, so nothing else would. */
+	onSeeHive?: () => void;
 }) {
 	const [invite, setInvite] = useState(linkedInvite);
 	return (
@@ -167,7 +170,11 @@ export function SignIn({
 					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
 					recorded in Git.
 				</p>
-				{demoRepo ? <a href={href.repo(demoRepo)}>See a hive at work →</a> : null}
+				{demoRepo ? (
+					<a href={href.repo(demoRepo)} onClick={onSeeHive}>
+						See a hive at work →
+					</a>
+				) : null}
 				{error ? (
 					<p className="mt-1 mb-0 w-full rounded-md bg-warn-soft px-3 py-2.5 text-left text-warn" role="alert">
 						{error}

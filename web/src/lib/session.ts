@@ -145,3 +145,14 @@ export const tokenLabel = (prefix: string) => `ghv_${prefix}…`;
 
 /** A calendar date for an expiry, as YYYY-MM-DD; "never" for none. */
 export const expiryDate = (iso: string | null) => (iso ? iso.slice(0, 10) : "never");
+
+/**
+ * What someone signed out sees: a public repo's pages when the address names one, unless they asked to sign in or
+ * a sign-in just failed; the sign-in screen otherwise.
+ */
+export function signedOutScreen(at: { reading: boolean; signingIn: boolean; failed: boolean }) {
+	if (!at.reading) return "sign-in";
+	if (at.signingIn) return "sign-in";
+	if (at.failed) return "sign-in";
+	return "repo";
+}

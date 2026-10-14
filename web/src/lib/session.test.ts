@@ -13,6 +13,7 @@ import {
 	signinErrorOf,
 	tokenLabel,
 	withoutSigninError,
+	signedOutScreen,
 } from "./session";
 
 describe("signing in", () => {
@@ -92,5 +93,14 @@ describe("agent tokens", () => {
 		]);
 		for (const client of ["claude-code", "codex", "other"] as const)
 			expect(JSON.stringify(tokenSteps(client, "https://githive.app", "ghv_x"))).not.toContain("<token>");
+	});
+});
+
+describe("what someone signed out sees", () => {
+	it("a public repo they're reading, until they ask to sign in or a sign-in fails; then the sign-in screen", () => {
+		expect(signedOutScreen({ reading: true, signingIn: false, failed: false })).toBe("repo");
+		expect(signedOutScreen({ reading: true, signingIn: true, failed: false })).toBe("sign-in");
+		expect(signedOutScreen({ reading: true, signingIn: false, failed: true })).toBe("sign-in");
+		expect(signedOutScreen({ reading: false, signingIn: false, failed: false })).toBe("sign-in");
 	});
 });
