@@ -17,7 +17,8 @@ export function usageRoutes(app: Hono<AppEnv>) {
 		const range = (c.req.query("range") ?? "24h") as UsageRange;
 		if (!RANGES.includes(range)) fail(400, "range is 24h or 7d");
 		const env = c.env as unknown as UsageEnv;
-		if (!canReadUsage(env) || !c.env.DB) fail(503, "usage isn't set up on this GitHive");
+		if (!canReadUsage(env) || !c.env.DB)
+			fail(503, "Usage isn't set up on this GitHive yet: it needs a Cloudflare analytics token.");
 		const [use, owned] = await Promise.all([
 			workerUse(env, range),
 			new OrgStore(c.env.DB).ownedRepos(principal.user.id),
