@@ -93,7 +93,15 @@ export async function landBatch(
 		const attempts = attemptsOf(input, batch);
 		const firstPassing = landFirstPassing(input, landing, holding, baseHead, tested, attempts);
 		let failures: Settled[] = [];
-		if (tested) failures = await checkAndPutOut(input, landing, baseHead, batch, holding, place, firstPassing.found);
+		// A part that passed may be landing while the rest is still checked: if the checks throw, it lands all the same.
+		let checksThrew: { error: unknown } | undefined;
+		if (tested)
+			failures = await checkAndPutOut(input, landing, baseHead, batch, holding, place, firstPassing.found).catch(
+				(error: unknown) => {
+					checksThrew = { error };
+					return [];
+				},
+			);
 		else firstPassing.found(batch);
 		const checkedAt = Date.now();
 		const done = await firstPassing.outcome();
@@ -109,6 +117,7 @@ export async function landBatch(
 		);
 		await landing.settle(failures);
 		await landing.checking(null);
+		if (checksThrew) return landedDespite(checksThrew.error, done);
 		if (done.landed === null) {
 			// A merge from outside the batch moved the branch, so what passed was checked on another main.
 			if (attempt < ATTEMPTS) continue;
@@ -122,6 +131,17 @@ export async function landBatch(
 		}
 		return { ok: true, settled: [...failures, ...done.landed.settled], release: done.landed.release };
 	}
+}
+
+/**
+ * What landed though the batch's checks then threw: the part that passed settles, and its claims are released like
+ * any other, so its paths free up now rather than when its claims go stale. The rest waits for the next batch. With
+ * nothing landed, the checks' error stands.
+ */
+function landedDespite(error: unknown, done: PartLanded): { ok: true } & Landed {
+	if (!done.landed?.settled.length) throw error;
+	console.error("a batch's checks threw after a part of it landed", String(error));
+	return { ok: true, settled: done.landed.settled, release: done.landed.release };
 }
 
 // Starts the batch's first check container and the repo's Gate now, while the batch is read.

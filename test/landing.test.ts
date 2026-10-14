@@ -281,6 +281,27 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(runs.length).toBe(before);
 	});
 
+	it("releases a landed half's claims though the other half's checks then throw", async () => {
+		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const checks = runner(new Set(["b-1"]));
+		let thrown = false;
+		// The half holding the failure throws once, after the other half has passed and begun landing.
+		const throwing: CheckRunner = async (input) => {
+			const half = input.changes.map((c) => c.change).join();
+			if (thrown || half !== "a-1,b-1") return checks(input);
+			thrown = true;
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			throw new Error("the check container didn't answer");
+		};
+		await merge("a-1", throwing).catch(() => undefined);
+		expect(thrown).toBe(true);
+		expect(landed()).toEqual(expect.arrayContaining(["c-1", "d-1"]));
+		// Their paths are free at once: their claims went with their landing, not 30 minutes later.
+		const held = (await store().read()).claims.map((c) => c.change);
+		expect(held).not.toContain("c-1");
+		expect(held).not.toContain("d-1");
+	});
+
 	it("asks Clef which change failed a batch, keeps its guess beside what the search found, and searches the same", async () => {
 		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const asked: { state: string; questions: Record<string, ClefQuestion> }[] = [];
