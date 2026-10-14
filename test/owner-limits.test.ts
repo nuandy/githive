@@ -275,4 +275,25 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 		expect(await bob.call("reviews", { agent: "bob-agent" }, "bob-agent")).toMatchObject({ reviews: [] });
 		await expect(bob.call("vote", { ...approve, reviewer: "bob-agent" }, "bob-agent")).rejects.toThrow(/review/);
 	});
+
+	it("let a lone agent, at the default of never, review and approve its own change as status says", async () => {
+		const key = await generateStampKey();
+		const { limits, agent: lone } = await ownedAgent();
+		const ada = toolCalls(() => server, {
+			identity: "person:ada",
+			reviews: soakReviews(server),
+			ownerLimits: limits.ownerLimits(lone.id),
+			stamper: (name?: string) => makeStamper(key.privateKey, name ? `person:ada/${name}` : "person:ada"),
+		});
+		await ada.call("settings", { required: 1 });
+		await ada.register("ada-solo");
+		await ada.call("claim", claim("ada-solo", "c1"), "ada-solo");
+		const head = await pushChange(server.url, work, "ada-solo", "c1", { "src/c1/x.js": "1\n" });
+		const status = () => ada.call("status", { change: "c1", agent: "ada-solo" }, "ada-solo");
+		expect(await status()).toMatchObject({ reviewYourself: true, next: expect.stringMatching(/review it yourself/) });
+		const approve = { commit: head, change: "c1", reviewer: "ada-solo", role: "review", verdict: "approve" };
+		expect(await ada.call("vote", { ...approve, evidence: "ran its tests" }, "ada-solo")).toMatchObject({ ok: true });
+		expect(await status()).toMatchObject({ approval: { approved: true }, next: "Call `merge`." });
+		expect(await limits.countsToday([lone.id])).toEqual({ [lone.id]: { build: 0, review: 0 } });
+	});
 });
