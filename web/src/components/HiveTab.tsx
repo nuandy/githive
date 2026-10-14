@@ -59,7 +59,8 @@ export function HiveTab({
 	const loadDemo = api.demoRun;
 	const [query, setQuery] = useAddressQuery();
 	return (
-		<>
+		// The demo's banner sits above the hive as its parts sit apart from one another.
+		<div className="grid gap-4">
 			{loadDemo ? <DemoBanner repo={repo} load={loadDemo} changed={snapshot.claims} /> : null}
 			<Hive
 				repo={repo}
@@ -80,7 +81,7 @@ export function HiveTab({
 				showsLanding={!!load}
 				showsFeed={!!loadEvents}
 			/>
-		</>
+		</div>
 	);
 }
 
