@@ -14,6 +14,8 @@ export interface GateResult {
 	baseHead: string;
 	mergeConflict?: string[];
 	results: CheckResult[];
+	/** The checks couldn't run (a fetch or the container failed), which says nothing of the changes. */
+	setupFailed?: true;
 	at: string;
 }
 

@@ -12,7 +12,7 @@ const claim = z.looseObject({ change: z.string(), agent: z.string(), paths: stri
 const release = z.looseObject({ change: z.string(), agent: z.string() });
 const claimsState = z.looseObject({ claims: z.array(claim), released: z.array(release) });
 
-const changeIndex = z.looseObject({ shards: strings, agent: z.string().optional() });
+const changeIndex = z.looseObject({ shards: strings, agent: z.string().optional(), at: z.string().optional() });
 
 const vote = z.looseObject({
 	commit: z.string(),

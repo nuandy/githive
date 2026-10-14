@@ -318,6 +318,29 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect((await landing.view()).recent[0]).not.toHaveProperty("suspect");
 	});
 
+	it("puts out no change when the checks couldn't run, and lands them once they can", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const runs: string[][] = [];
+		let broken = 3;
+		const flakyGate: CheckRunner = async ({ changes }) => {
+			runs.push(changes.map((c) => c.change));
+			if (broken-- > 0) {
+				const results = [{ command: "(gate setup)", exitCode: 1, output: "fetching the project failed" }];
+				return { passed: false, results, setupFailed: true };
+			}
+			return { passed: true, results: [] };
+		};
+		expect(await merge("a-1", flakyGate)).toMatchObject({ ok: true });
+		expect(await checksRejections()).toEqual([]);
+		expect(landed().sort()).toEqual(["a-1", "b-1"]);
+		// Each failed setup was the whole batch's, never split to blame one change.
+		expect(runs.slice(0, 3)).toEqual([
+			["a-1", "b-1"],
+			["a-1", "b-1"],
+			["a-1", "b-1"],
+		]);
+	});
+
 	it("checks a lone failure once more: a flaky run doesn't put a change out", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const runs: string[][] = [];

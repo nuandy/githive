@@ -519,7 +519,8 @@ function checksRunner(env: Env, repo: string): CheckRunner {
 			exitCode: check.exitCode,
 			output: check.output,
 		}));
-		return { passed: result.passed, results: [...merging, ...checks], ...(conflict ? { conflict } : {}) };
+		const found = { passed: result.passed, results: [...merging, ...checks], ...(conflict ? { conflict } : {}) };
+		return result.setupFailed ? { ...found, setupFailed: true } : found;
 	};
 }
 

@@ -253,6 +253,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(lost).toMatchObject({
 			passed: false,
 			results: [{ command: "(gate setup)", output: expect.stringContaining("fetch of a change in the batch failed") }],
+			setupFailed: true,
 		});
 	});
 

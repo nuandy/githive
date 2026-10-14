@@ -93,6 +93,7 @@ export class Gate extends DurableObject<Env> {
 					head: input.head,
 					baseHead: input.baseHead,
 					results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }],
+					setupFailed: true,
 					at: new Date().toISOString(),
 				} satisfies GateResult;
 			}

@@ -43,7 +43,7 @@ export type CheckRunner = (input: {
 	changes: BatchChange[];
 	commands: string[];
 	gate?: string;
-}) => Promise<{ passed: boolean; results: CheckResult[]; conflict?: Conflict }>;
+}) => Promise<{ passed: boolean; results: CheckResult[]; conflict?: Conflict; setupFailed?: boolean }>;
 
 /** A change in a batch before its head is read, and the head it was last seen at, if any. */
 export type BatchSource = Omit<BatchChange, "head"> & { seen?: string };

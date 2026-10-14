@@ -153,7 +153,9 @@ function nameTaken(input: ClaimInput, first: ClaimRecord): Conflict {
 const MAX_SPREAD = 4;
 
 type Entry = { shard: string; tip: string; state: Registry };
-type ChangeIndex = { shards: string[]; agent?: string };
+type ChangeIndex = { shards: string[]; agent?: string; at?: string };
+/** How long an index naming an agent whose claim isn't written yet stays that agent's: it claims a moment after. */
+const CLAIMING_MS = 2 * 60_000;
 type Written = { shard: string; previous: string[] | null };
 
 // The shard containing all of `shards`, or ROOT if they share no first segment.
@@ -454,29 +456,35 @@ class Claims implements ClaimStore {
 			input.agent,
 			() => ({ shards: [] }),
 			async (state) => {
+				const shards = [...new Set([...state.shards, ...below])].sort();
+				const at = new Date(input.now ?? Date.now()).toISOString();
 				if (state.agent && state.agent !== input.agent) {
-					await this.takeOver(input, state.agent, stamper);
-					return {
-						state: { shards: below, agent: input.agent },
-						text: `${input.agent} takes over ${input.change} (released by ${state.agent}), in ${below.join(", ")}`,
-					};
+					const why = await this.takeOver(input, state, stamper);
+					return { state: { shards, agent: input.agent, at }, text: `${input.agent} ${why}, in ${below.join(", ")}` };
 				}
 				if (state.agent && below.every((shard) => state.shards.includes(shard))) return { refused: "known" };
 				return {
-					state: { shards: [...new Set([...state.shards, ...below])].sort(), agent: state.agent ?? input.agent },
+					state: { shards, agent: state.agent ?? input.agent, at },
 					text: `${input.change} claims in ${below.join(", ")}`,
 				};
 			},
 		);
 	}
 
-	// Another agent's name is on the change. Refuse while that agent holds a claim under it; once the claim is
-	// released, the name and its paths are free again.
-	private async takeOver(input: ClaimInput, owner: string, stamper?: Stamper) {
+	// Another agent's name is on the change's index, but the claims say whose it is. The caller's own claim means the
+	// index lost a race to it. An index with no claim yet may be its agent's claim on its way; an older one was left
+	// by a claim that was released or refused. Refuse while the other agent holds a claim that isn't stale.
+	private async takeOver(input: ClaimInput, index: ChangeIndex, stamper?: Stamper): Promise<string> {
+		const owner = index.agent!;
 		const held = await this.holding(input.change);
-		if (!held) return;
+		if (held?.own.agent === input.agent) return `holds ${input.change}, which its index named ${owner}'s`;
+		if (!held) {
+			const sinceNamed = (input.now ?? Date.now()) - Date.parse(index.at ?? "");
+			if (sinceNamed < CLAIMING_MS) throw new Error(changeTaken(input.change, owner));
+			return `takes over ${input.change} (released by ${owner})`;
+		}
 		// Still held and not abandoned, so the change is that agent's.
-		if (!(await staleFor(input, held.own))) throw new Error(changeTaken(input.change, owner));
+		if (!(await staleFor(input, held.own))) throw new Error(changeTaken(input.change, held.own.agent));
 		// Abandoned: release it in every shard it holds, not only those this claim reaches.
 		await this.releaseStale(
 			{
@@ -487,6 +495,7 @@ class Claims implements ClaimStore {
 			},
 			stamper,
 		);
+		return `takes over ${input.change} (released by ${held.own.agent})`;
 	}
 
 	// Undoes each written part, retrying a few times. A part left behind holds paths the agent is told it doesn't

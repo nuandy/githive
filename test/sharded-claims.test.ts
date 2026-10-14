@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/toolkit/claim-store";
 import { claim, type Registry } from "../src/toolkit/claims";
-import { recordsRepoOf, shardsPrefix } from "../src/toolkit/shards";
+import { appendRecord } from "../src/toolkit/records";
+import { changeRef, recordsRepoOf, shardsPrefix } from "../src/toolkit/shards";
 import { entriesOverlap } from "../src/claim-paths";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -136,6 +137,48 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		expect(await store().claim({ ...want("y-1", ["a/x/f.ts"]), agent: "agent-y" })).toMatchObject({ ok: false });
 		expect(await store().claim({ ...want("z-1", ["a/"]), agent: "agent-z" })).toMatchObject({ ok: false });
 		expect(await active()).toEqual([["x-1", ["a/x/f.ts", "b/y/g.ts"]]]);
+	});
+
+	it("lets the claims, not a change's index, say whose the change is", async () => {
+		// Two agents claiming one name at once: the index names the one whose claim then lost.
+		type Index = { shards: string[]; agent?: string; at?: string };
+		const index = new GitCasLog<Index>(remote, "p", changeRef("p", "x-1"));
+		const nameIn = (agent: string, at: number) =>
+			appendRecord(
+				index,
+				agent,
+				() => ({ shards: [] }),
+				(state) => ({
+					state: { shards: [...state.shards, "a/x"], agent, at: new Date(at).toISOString() },
+					text: `${agent} names x-1`,
+				}),
+			);
+		await store().claim(want("x-1", ["a/x/f.ts"]));
+		await nameIn("agent-other", Date.now());
+		// Its holder still extends it, and anyone else is told it's that holder's.
+		expect(await store().claim(want("x-1", ["b/y/g.ts"]))).toMatchObject({ ok: true });
+		await expect(store().claim({ ...want("x-1", ["c/z/h.ts"]), agent: "agent-c" })).rejects.toThrow(/agent-x-1/);
+		expect(await active()).toEqual([["x-1", ["a/x/f.ts", "b/y/g.ts"]]]);
+	});
+
+	it("holds a name its index just gave another agent, whose claim is on its way, and frees it after", async () => {
+		type Index = { shards: string[]; agent?: string; at?: string };
+		const index = new GitCasLog<Index>(remote, "p", changeRef("p", "y-1"));
+		const nameIn = (agent: string, at: number) =>
+			appendRecord(
+				index,
+				agent,
+				() => ({ shards: [] }),
+				(state) => ({
+					state: { shards: [...state.shards, "a/x"], agent, at: new Date(at).toISOString() },
+					text: `${agent} names y-1`,
+				}),
+			);
+		await nameIn("agent-first", Date.now());
+		await expect(store().claim(want("y-1", ["a/x/f.ts"]))).rejects.toThrow(/agent-first/);
+		// An index left by a claim that never got written frees the name after a while.
+		await nameIn("agent-first", Date.now() - 3 * 60_000);
+		expect(await store().claim(want("y-1", ["a/x/f.ts"]))).toMatchObject({ ok: true });
 	});
 
 	it("frees a claim idle in every shard from all of them at once", async () => {

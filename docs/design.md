@@ -805,6 +805,9 @@ checked once more (a flaky run isn't a verdict), then put out:
 evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
+Checks that couldn't run at all (a fetch failed, or the container didn't
+start) say nothing of the changes, so that run puts none out and isn't split
+to find one: the changes wait for the next batch.
 A change that doesn't merge while its batch lands (with no checks, or in a
 batch that only touches files they skip) is put out the same way: its
 rejection names the conflict (a few files, then how many more, within 2,000
@@ -1723,7 +1726,11 @@ name, so shards in different repos are written side by side.
 
 **Each change has an index**: the shards it has claimed in, written before the
 shards and only ever added to. It names the change's agent, so another agent
-claiming under the same name is refused there too. Reading one change
+claiming under the same name is refused there too. Two agents claiming one name
+at once can leave the index naming the one whose claim then lost, so the claims
+records decide: the agent holding the claim keeps it and its index names it
+again, and a name in an index with no claim behind it is held for two minutes
+(its claim may be on its way) and then free. Reading one change
 (`status`, `credentials`, `release`) reads the registry and the
 shards its index names, not every shard. A change with no index has claimed
 only in the registry.

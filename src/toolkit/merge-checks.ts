@@ -139,10 +139,12 @@ async function checkBatch(
 		found(batch);
 		return [];
 	}
+	if (first.setupFailed) return unchecked(batch, first.results);
 	firstFailed?.(first.results);
 	const [only] = batch;
 	if (only && batch.length === 1) {
 		const again = await run();
+		if (again.setupFailed) return unchecked(batch, again.results);
 		if (!again.passed) {
 			const conflict = again.conflict ? { conflict: again.conflict } : {};
 			return [{ ready: only, failure: { results: again.results, ...conflict } }];
@@ -158,6 +160,13 @@ async function checkBatch(
 		checkBatch(input, baseHead, batch.slice(half), holding, second, found),
 	]);
 	return [...firstFailures, ...secondFailures];
+}
+
+// Checks that couldn't run say nothing of the changes, so none is put out: they wait for the next batch.
+function unchecked(batch: Ready[], results: CheckResult[]): [] {
+	const why = results[0]?.output.split("\n")[0] ?? "";
+	console.error(`checks for ${batch.map((ready) => ready.change).join(", ")} couldn't run: ${why}`);
+	return [];
 }
 
 /**
