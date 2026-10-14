@@ -18,6 +18,9 @@ export function StateMark({
 	glyph?: string;
 }) {
 	const look = state ? STATES[state] : undefined;
+	// Overpass has no ✓ or ●, so they come from a fallback face, standing on Overpass's baseline, which sits lower
+	// than the fallback's own would: raised by as much, they're in the square's middle, as ! and × are.
+	const fallback = look?.glyph === "✓" || look?.glyph === "●";
 	return (
 		<span
 			data-state={state}
@@ -29,7 +32,7 @@ export function StateMark({
 				className,
 			)}
 		>
-			{look?.glyph ? <span className={glyph}>{look.glyph}</span> : null}
+			{look?.glyph ? <span className={cn(glyph, fallback && "relative -top-[0.15em]")}>{look.glyph}</span> : null}
 		</span>
 	);
 }
