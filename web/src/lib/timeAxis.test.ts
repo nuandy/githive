@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, NOW } from "../test/fixtures";
 import type { Goal } from "./goals";
-import { type AxisPiece, chooseRange, goalBar, RANGES, ticksThatFit, timeAxis } from "./timeAxis";
+import { type AxisPiece, chooseRange, goalBar, RANGES, clockThatFits, timeAxis } from "./timeAxis";
 
 const MINUTE = 60_000;
 const [QUARTER, HALF, HOUR, SIX_HOURS] = RANGES as [number, number, number, number, number];
@@ -110,18 +110,27 @@ describe("the time axis's labels", () => {
 	const labels = (ticks: { label: string }[]) => ticks.map((tick) => tick.label);
 
 	it("leaves out those that would touch another, the fold's mark or now, on a narrow axis", () => {
-		expect(labels(ticksThatFit(crowded, 130))).toEqual(["07:17", "now"]);
+		expect(labels(clockThatFits(crowded, 130).ticks)).toEqual(["07:17", "now"]);
 	});
 
 	it("keeps them all where there's room", () => {
-		expect(labels(ticksThatFit(crowded, 1000))).toEqual(["07:17", "17:31", "17:35", "now"]);
+		expect(labels(clockThatFits(crowded, 1000).ticks)).toEqual(["07:17", "17:31", "17:35", "now"]);
+	});
+
+	it("leaves out a fold's mark that would touch now, and says only now until it knows its width", () => {
+		const atNow: AxisPiece = { kind: "quiet", from: 0, to: 1, x0: 0.94, x1: 0.99 };
+		const clock = clockThatFits({ pieces: [quiet, atNow], ticks: crowded.ticks }, 400);
+		expect(clock.marks).toEqual([quiet]);
+		// On a narrow axis, the earlier fold's mark would touch now too.
+		expect(clockThatFits({ pieces: [quiet, atNow], ticks: crowded.ticks }, 130).marks).toEqual([]);
+		expect(clockThatFits(crowded, undefined)).toEqual({ ticks: [{ x: 1, label: "now" }], marks: [] });
 	});
 
 	it("never draws two labels over each other, however narrow, and always says now", () => {
 		const burst = goal(400, { state: "landed", finished: ago(390) });
 		const axis = timeAxis([burst, goal(6), goal(2)], QUARTER, NOW);
 		for (const width of [90, 130, 200, 400, 800]) {
-			const ticks = ticksThatFit(axis, width);
+			const { ticks } = clockThatFits(axis, width);
 			expect(ticks.at(-1)).toEqual({ x: 1, label: "now" });
 			const spans = ticks.map((tick, index) => {
 				const wide = tick.label.length * 6.2;

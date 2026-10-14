@@ -19,7 +19,7 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `web/src/components/ThemeMenu.tsx` |
 | Motion hooks (`useLingering`, `useChanged`, `useArrivals`, …) and `useAnnouncer` | `web/src/hooks/` |
 | An element's drawn width, as it changes (`useWidth`) | `web/src/hooks/useWidth.ts` |
-| A time axis's labels that fit its width (`ticksThatFit`) | `web/src/lib/timeAxis.ts` |
+| A time axis's labels and fold marks that fit its width (`clockThatFits`) | `web/src/lib/timeAxis.ts` |
 | Whether JavaScript motion should move (`reducedMotion`, `motionMs`) | `web/src/lib/motion.ts` |
 | The visual regression check | `web/visual/` |
 
