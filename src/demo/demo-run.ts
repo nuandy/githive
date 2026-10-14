@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { statusOf } from "../errors";
-import type { HostedAgent } from "../hosted-agents";
+import type { HostedAgent, HostedAgentState } from "../hosted-agents";
 import { callTool } from "../toolkit/mcp";
+import { BACKLOG } from "./backlog";
 import { DEMO_AGENT, demoContext, gatesOf, setUpRun } from "./demo-repo";
 import {
 	type Gates,
@@ -13,6 +14,7 @@ import {
 	RESET_WATCH_MS,
 	WATCH_MS,
 	ended,
+	landedPieces,
 	nextRun,
 	refusal,
 	runEnding,
@@ -26,6 +28,9 @@ import {
 //   them what to do. A run that starts with a reset (see demo-repo.ts) merges it first, puts the repo's approvals
 //   back, and only then starts them. All of it happens here, on the run's own alarm, not in the request that asked
 //   for the run, so a request cut short leaves nothing half done.
+
+/** A run as the dashboard reads it: its agents' own accounts, and how many of its pieces landed, when that's known. */
+type RunView = RunState & { agents: HostedAgentState[]; landed?: number };
 
 const EMPTY_REGISTRY: Registry = { day: { date: "", started: 0 }, recent: [] };
 /** How long a new slot is held for its run to begin, which the request that took it does at once. */
@@ -140,14 +145,27 @@ export class DemoRun extends DurableObject<Env> {
 		return run.reset ? RESET_WATCH_MS : WATCH_MS;
 	}
 
-	/** Where the run stands, with each agent's own account, for the dashboard. */
-	async status() {
+	/** Where the run stands, with each agent's own account and how many pieces landed, for the dashboard. */
+	async status(): Promise<RunView | null> {
 		const run = await this.ctx.storage.get<RunState>("run");
 		if (!run) return null;
 		const agentsStarted = !run.settingUp && !run.reset;
 		if (!agentsStarted) return { ...run, agents: [] };
-		const hive = await this.hiveOf(run.repo).status();
-		return { ...run, agents: hive?.agents ?? [] };
+		const [hive, settled] = await Promise.all([
+			this.hiveOf(run.repo).status(),
+			this.landings(run.repo).catch((err: unknown) => {
+				console.error(`demo ${run.id}: reading its landings failed`, statusOf(err).message);
+				return undefined;
+			}),
+		]);
+		const agents = hive?.agents ?? [];
+		if (!settled) return { ...run, agents };
+		return { ...run, agents, landed: landedPieces(BACKLOG, run.number, settled) };
+	}
+
+	/** What landed on the demo repo's main lately (tests answer it instead). */
+	protected async landings(repo: string): Promise<{ change: string; how: string }[]> {
+		return (await this.env.REPO_CACHE.getByName(`repo:${repo}`).landingView("main")).recent;
 	}
 
 	/** Begins the repo's stretch of work now (tests note it instead). */

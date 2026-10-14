@@ -122,6 +122,16 @@ export function runBacklog(pieces: DemoPiece[], number: number) {
 	}));
 }
 
+/**
+ * How many of the run's pieces landed, by the landings the repo keeps. An agent's own account can miss one it
+ * lost track of, though its builder still landed it, so the count comes from what landed.
+ */
+export function landedPieces(pieces: DemoPiece[], number: number, settled: { change: string; how: string }[]) {
+	const ours = new Set(pieces.map(({ id }) => `${id}-${number}`));
+	const landed = settled.filter((outcome) => outcome.how === "landed" && ours.has(outcome.change));
+	return new Set(landed.map((outcome) => outcome.change)).size;
+}
+
 /** How a run ends, if it has: done once every agent it started has stopped, stopped once it's long past its time. */
 export function runEnding(run: RunState, agents: { done: boolean }[], now: number): "done" | "stopped" | null {
 	// Until it's set up and its reset lands, its agents haven't started, and the hive still lists the last run's.

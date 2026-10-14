@@ -740,6 +740,8 @@ export interface DemoRunStatus {
 	agents: HostedAgentAccount[];
 	/** How many pieces the backlog has. */
 	pieces: number;
+	/** How many of them landed, by the repo's landings (newer servers). */
+	landed?: number;
 	endedAt?: number;
 }
 

@@ -196,10 +196,17 @@ export function DemoCard({ api, compact = false }: { api: DemoApi; compact?: boo
  * Whether a run built the whole game: it finished with every piece landed. While a run is going, or after one was
  * stopped, the repo holds part of a game, so there's nothing to play.
  */
-export function gameLanded(run: Pick<DemoRunStatus, "status" | "agents" | "pieces">) {
+export function gameLanded(run: Pick<DemoRunStatus, "status" | "agents" | "pieces" | "landed">) {
 	if (run.status !== "done") return false;
-	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
-	return finished >= run.pieces;
+	return piecesLanded(run) >= run.pieces;
+}
+
+/**
+ * How many of a run's pieces landed. The server counts them from what landed; an older one only from its agents'
+ * accounts, which miss a piece an agent lost track of though its builder landed it.
+ */
+export function piecesLanded(run: Pick<DemoRunStatus, "agents" | "landed">) {
+	return run.landed ?? run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
 }
 
 const SETUP_POLL_MS = 2_000;
@@ -226,8 +233,7 @@ export async function setUpOf(
 
 /** What a demo run is doing, in a sentence, for the banner. */
 export function runWords(run: DemoRunStatus, now = Date.now()): string {
-	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
-	const done = `${finished} of ${counted(run.pieces, "piece")} finished`;
+	const done = `${piecesLanded(run)} of ${counted(run.pieces, "piece")} finished`;
 	if (run.status === "running") {
 		const started = `Demo run ${run.number}, started by ${run.by} ${timeAgo(new Date(run.startedAt).toISOString(), now)}`;
 		if (run.settingUp) return `${started}: setting the repo up for its agents.`;

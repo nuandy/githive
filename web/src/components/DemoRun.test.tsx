@@ -59,6 +59,12 @@ describe("a demo run on the dashboard", () => {
 		);
 	});
 
+	it("counts what landed, which an agent that lost track of its piece doesn't miss", () => {
+		const done = run({ status: "done", endedAt: NOW - 60_000, pieces: 2, landed: 2 });
+		expect(runWords(done, NOW)).toBe("Demo run 3 finished 1 minute ago: 2 of 2 pieces finished.");
+		expect(gameLanded(done)).toBe(true);
+	});
+
 	it("says when a run is setting up, and when one couldn't start", () => {
 		expect(runWords(run({ settingUp: true }), NOW)).toBe(
 			"Demo run 3, started by ada 10 minutes ago: setting the repo up for its agents.",

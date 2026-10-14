@@ -1586,7 +1586,9 @@ repo up on its alarm, so a request cut short leaves nothing half done, and a run
 that can't be set up fails and frees the slot. A slot whose run never began, its
 request having failed first, is free to the next once a minute has passed, so a
 second request (a double click) can't take it while the first is beginning its
-run. The registry takes one reservation at a time.
+run. The registry takes one reservation at a time. A run's status counts its
+pieces that landed from the repo's landings, not from its agents' own accounts,
+which can miss a piece an agent lost track of though its builder landed it.
 
 **The builder.** A hosted agent starts one on each piece it claims, and `build`
 claims the given paths as `githive-builder`, under a change id made from the

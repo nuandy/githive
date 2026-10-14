@@ -88,7 +88,11 @@ function demo(
 	const reset = { claimed: true, merges: 0, settings: [] as unknown[] };
 	const env = { DEMO_RUN: { getByName: () => ({ release: async (id: string) => void released.push(id) }) } };
 	const stretches: string[] = [];
+	const landings: { change: string; how: string }[] = [];
 	class TestRun extends DemoRun {
+		protected override async landings() {
+			return landings;
+		}
 		protected override async startStretch(repo: string) {
 			stretches.push(`${repo} after ${started.length} starts`);
 		}
@@ -119,7 +123,7 @@ function demo(
 	}
 	const run = new TestRun({ storage: new FakeStorage() } as never, env as never);
 	const storage = (run as unknown as { ctx: { storage: FakeStorage } }).ctx.storage;
-	return { run, storage, agents, started, released, reset, stretches, stopped: () => stopped };
+	return { run, storage, agents, started, released, reset, stretches, landings, stopped: () => stopped };
 }
 
 /** Begins run 1 and lets its first alarm set it up. */
@@ -129,6 +133,21 @@ async function begin(run: InstanceType<typeof DemoRun>) {
 }
 
 describe("a demo run", () => {
+	it("counts its pieces that landed, whatever its agents' own accounts say", async () => {
+		const { run, landings } = demo();
+		await begin(run);
+		await run.alarm();
+		// This run's pieces once each, not the reset, another run's or one put out.
+		landings.push(
+			{ change: "reset-1", how: "landed" },
+			{ change: "storage-1", how: "landed" },
+			{ change: "storage-1", how: "landed" },
+			{ change: "scoring-1", how: "failed" },
+			{ change: "storage-7", how: "landed" },
+		);
+		expect(await run.status()).toMatchObject({ landed: 1 });
+	});
+
 	it("sets itself up on its own alarm, not in the request, then starts its agents", async () => {
 		const { run, started } = demo();
 		await run.begin({ id: "run-1", number: 1, repo: "ada--honeycomb", fullName: "ada/honeycomb", by: "ada" });
