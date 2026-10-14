@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { BACKLOG } from "../demo/backlog";
 import { repoIdFor } from "../auth/orgs";
 import { demoRepoName } from "../demo/demo-repo";
+import { DEMO_AGENTS } from "../demo/run";
 import { fail, statusOf } from "../errors";
 import { rpc } from "../rpc";
 import type { AppEnv } from "./shared";
@@ -35,7 +36,9 @@ export function demoRoutes(app: Hono<AppEnv>) {
 		const newest = registry.recent[0];
 		const run = newest ? await rpc(c.env.DEMO_RUN.getByName(`run:${newest.id}`).status()) : null;
 		const newestRun = run ? { ...run, pieces: BACKLOG.length } : null;
-		return c.json({ running: registry.running ?? null, recent: registry.recent, newest: newestRun });
+		// How many agents a run starts, so the dashboard says so before any run has.
+		const body = { running: registry.running ?? null, recent: registry.recent, newest: newestRun };
+		return c.json({ ...body, agentsPerRun: DEMO_AGENTS });
 	});
 
 	// The latest run on a repo, for its Hive tab's banner: none unless it's the demo repo and a run has started.

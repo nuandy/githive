@@ -3,7 +3,7 @@ import type { DemoRunStatus } from "../api";
 import { useChanged } from "../hooks/useChanged";
 import { usePoll } from "../hooks/usePoll";
 import { messageOf, sentence } from "../lib/errors";
-import { counted } from "../lib/plural";
+import { counted, inWords } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -16,10 +16,23 @@ import { Button } from "./ui/button";
 
 export interface DemoApi {
 	start(): Promise<{ id: string; repo: string }>;
-	runs(): Promise<{ running: { fullName: string } | null; newest?: DemoRunStatus | null }>;
+	runs(): Promise<{
+		running: { fullName: string } | null;
+		newest?: DemoRunStatus | null;
+		/** How many agents a run starts. Older servers leave it out. */
+		agentsPerRun?: number;
+	}>;
 }
 
 const STRIP_DISMISSED = "githive:demo-strip-dismissed";
+
+/** "Eleven of GitHive's agents", from the count the server sends; without one, "GitHive's agents". */
+export function agentsOf(count: number | undefined, own?: "own") {
+	const whose = own ? "GitHive's own agents" : "GitHive's agents";
+	if (!count) return whose;
+	const word = inWords(count);
+	return `${word[0]!.toUpperCase()}${word.slice(1)} of ${whose}`;
+}
 
 function readStripDismissed(): boolean {
 	try {
@@ -120,7 +133,7 @@ export function DemoCard({ api, compact = false }: { api: DemoApi; compact?: boo
 				<p className="m-0 min-w-0 flex-[1_1_320px] text-ui">
 					<strong id="demo-card-title">Watch a hive build a game.</strong>{" "}
 					<span className="text-muted-foreground">
-						Thirteen of GitHive's agents build Honeycomb, a word game, in about 10 minutes.
+						{agentsOf(runs.data?.agentsPerRun)} build Honeycomb, a word game, in about 10 minutes.
 					</span>
 				</p>
 				<div className="flex flex-wrap items-center gap-2">
@@ -163,9 +176,10 @@ export function DemoCard({ api, compact = false }: { api: DemoApi; compact?: boo
 					Watch a hive build Honeycomb (Demo Game)
 				</h2>
 				<p className="m-0 text-muted-foreground">
-					Eleven of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
-					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
-					it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game when it's done.
+					{agentsOf(runs.data?.agentsPerRun, "own")} build a small word game in GitHive's public demo repo, starting
+					over from its first files. Nothing assigns the work: each takes a piece from the backlog, claims its files,
+					builds it, gets it reviewed and tested, and lands it. It takes about 10 minutes, and you can play the game
+					when it's done.
 				</p>
 				{problem}
 			</div>
@@ -254,8 +268,8 @@ export function DemoBanner({
 	if (!run.data) return null;
 	return (
 		<p className={cn(calloutVariants(), "m-0 animate-appear")} role="status">
-			{runWords(run.data)} Eleven of GitHive's agents, each named for a job in a hive, work on their own: they review
-			one another's changes and take pieces of the backlog, and nothing assigns the work.{" "}
+			{runWords(run.data)} {agentsOf(run.data.agents.length || run.data.pieces)}, each named for a job in a hive, work
+			on their own: they review one another's changes and take pieces of the backlog, and nothing assigns the work.{" "}
 			{gameLanded(run.data) ? <PlayLink repo={repo} /> : null}
 		</p>
 	);

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DemoRunStatus } from "../api";
 import { NOW, visibleText } from "../test/fixtures";
-import { DemoCard, gameLanded, runWords, setUpOf } from "./DemoRun";
+import { agentsOf, DemoCard, gameLanded, runWords, setUpOf } from "./DemoRun";
 
 // Honeycomb demo runs on the dashboard: the card that starts one, and the words its Hive tab's banner says.
 
@@ -43,6 +43,8 @@ describe("a demo run on the dashboard", () => {
 		const html = renderToStaticMarkup(<DemoCard api={api} compact />);
 		const text = visibleText(html);
 		expect(text).toContain("Watch a hive build a game.");
+		// Before the runs are read, it doesn't guess how many agents there are.
+		expect(text).toMatch(/GitHive.s agents build Honeycomb, a word game/);
 		expect(text).toContain("Start a demo run");
 		expect(html).toContain('aria-label="Dismiss the demo"');
 		expect(text).not.toContain("Nothing assigns the work");
@@ -98,5 +100,13 @@ describe("a demo run on the dashboard", () => {
 		const other = { runs: async () => ({ running: null, newest: run({ id: "run-3" }) }) };
 		expect(await setUpOf(other, "run-4", wait)).toBeUndefined();
 		expect(waited).toHaveLength(60);
+	});
+
+	it("says how many agents a run starts, as the server counts them", () => {
+		expect(agentsOf(11)).toBe("Eleven of GitHive's agents");
+		expect(agentsOf(13, "own")).toBe("Thirteen of GitHive's own agents");
+		expect(agentsOf(25)).toBe("25 of GitHive's agents");
+		expect(agentsOf(undefined)).toBe("GitHive's agents");
+		expect(agentsOf(0, "own")).toBe("GitHive's own agents");
 	});
 });
