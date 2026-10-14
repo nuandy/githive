@@ -36,7 +36,8 @@ export function LiveDot({ status }: { status: LiveStatus }) {
 			<TooltipTrigger asChild>
 				<span
 					className={cn(
-						"inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5",
+						// More padding above than below, since Overpass's letters sit high in their line.
+						"inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 pt-[3.5px] pb-[0.5px]",
 						// On a phone, the dot and its word without the pill, so they keep the name's row.
 						"to-560:border-0 to-560:px-0",
 						"text-caption font-medium text-muted-foreground transition-colors duration-base",

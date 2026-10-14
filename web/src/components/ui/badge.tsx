@@ -92,7 +92,11 @@ export function Lamp({
 			className={cn(
 				"inline-block size-2.5 flex-none rounded-full bg-[var(--lamp,var(--border-strong))] transition-[background-color] duration-slow",
 				color ? LAMP[color] : "",
-				look && ["inline-grid size-3.5 place-items-center border text-[10px] leading-none font-black", look.mark],
+				// Overpass's letters sit high in their line, so the mark's top padding brings them to its middle.
+				look && [
+					"inline-grid size-3.5 place-items-center border pt-[3px] text-[10px] leading-none font-black",
+					look.mark,
+				],
 				className,
 			)}
 			{...props}

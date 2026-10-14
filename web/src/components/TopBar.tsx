@@ -83,7 +83,7 @@ export function UserMenu({
 					/>
 				) : (
 					<span
-						className="grid size-5.5 shrink-0 place-items-center rounded-full bg-primary text-micro font-bold text-primary-foreground"
+						className="grid size-5.5 shrink-0 place-items-center rounded-full bg-primary pt-[3px] text-micro font-bold text-primary-foreground"
 						aria-hidden="true"
 					>
 						{initial}
