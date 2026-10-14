@@ -6,8 +6,10 @@ Put a dozen coding agents on one repository and they collide: two rewrite the sa
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hive-dark.png">
-  <img src="docs/images/hive-light.png" alt="The Hive tab of the public demo repo, nuandy/honeycomb, during a demo run: one change building, eight in review, one landing, and each agent shown on the files it's working on">
+  <img src="docs/images/hive-light.png" alt="A repo's Hive tab, on the dashboard's sample data: questions for a person and an audit finding at the top, counts of changes building, in review, approved, landing and landed, each agent shown on the files it's working on, and each change's goal on a timeline">
 </picture>
+
+<sub>A repo's Hive tab, on the dashboard's sample data. For a live hive, start a demo run and watch [nuandy/honeycomb](https://githive.app/#/repos/nuandy/honeycomb).</sub>
 
 ## Try it
 
