@@ -22,6 +22,14 @@ import { releaseLanded } from "./merge-tools";
 
 // Tools agents use to choose their work: reviews, backlog, add_work, and status.
 
+/**
+ * How long after landing a change's claim counts as stuck. Until then its batch is still releasing its claims, and a
+ * release from status would be a second write on the same records at their busiest.
+ */
+export const LANDED_CLAIM_STUCK_MS = 2 * 60_000;
+
+const stuckSince = (landedAt: string) => Date.now() - Date.parse(landedAt) > LANDED_CLAIM_STUCK_MS;
+
 export const workTools: ToolHandlers = {
 	async reviews({ ctx, repo, votes, registered, actAs, openWork }) {
 		const agent = actAs("agent");
@@ -128,9 +136,10 @@ export const workTools: ToolHandlers = {
 				(outcome) => outcome.change === change && outcome.head === status.head && outcome.how === "landed",
 			);
 		}
-		if (landed?.commit) {
-			// Landed but still claimed: the batch's release didn't get through, so this finishes it.
-			if (held) await releaseLanded(call, change, landed.commit);
+		// Landed but still claimed long after: the batch's release didn't get through, so this finishes it.
+		const stillClaimed = held ? landed : undefined;
+		if (stillClaimed?.commit) {
+			if (stuckSince(stillClaimed.at)) await releaseLanded(call, change, stillClaimed.commit);
 		}
 		const reply: Record<string, unknown> = { change, claim: held };
 		if (released) reply.released = released;

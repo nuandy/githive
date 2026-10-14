@@ -1063,8 +1063,12 @@ batch takes its change up again: the branch's recent outcomes (in the
 RepoCache) say it landed at that head. A release a busy record fails is tried
 three times. A merge asked again meanwhile finds it landed, and releases its
 claim, naming the merge, if it's still held, and so does its `status`, which an
-outside agent reads to see it landed: a release cut short would otherwise leave
-the claim held, and changes that land after it waiting. Each batch asks
+outside agent reads to see it landed, once the landing is 2 minutes old: a
+release cut short would otherwise leave the claim held, and changes that land
+after it waiting. Sooner, the batch is still releasing its claims, and a second
+release on the same records at their busiest only adds load: a 1,000-agent run
+that released from `status` at once got 380 "Artifacts is busy" refusals on
+`merge`, though Artifacts was busier that day too. Each batch asks
 for its forks' read access 6 at a time: a Worker request holds 6 connections
 open.
 

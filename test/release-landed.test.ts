@@ -6,6 +6,7 @@ import { type Landing, memoryLanding } from "../src/toolkit/landing";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
+import { LANDED_CLAIM_STUCK_MS } from "../src/toolkit/tools/work-tools";
 
 // A claim can outlast its change's landing (demo run 17's did, until the next run released it). Released then, it
 // names the merge, as merge's own release does, so the audit doesn't read it as given up before the merge.
@@ -40,13 +41,20 @@ it("names no merge for a landing from before the claim, an earlier change under 
 	expect((await call("status", { change: "x" })).released).not.toHaveProperty("mergedAs");
 });
 
-it("releases a claim whose change landed at its head when the change's status is read", async () => {
+it("releases a claim still held long after its change landed when the change's status is read", async () => {
 	const work = mkdtempSync(join(tmpdir(), "githive-release-landed-"));
 	try {
 		const head = await pushChange(server.url, work, "a", "x", { "src/x/a.txt": "x\n" });
-		await landing.settle([
-			{ change: "x", head, agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
-		]);
+		const landedAgo = (ms: number) =>
+			landing.settle([
+				{ change: "x", head, agent: "a", how: "landed", at: new Date(Date.now() - ms).toISOString(), commit: "m1" },
+			]);
+		// Just landed, its batch is still releasing its claims: status leaves that to the batch.
+		await landedAgo(0);
+		expect(await call("status", { change: "x", agent: "a" }, "a")).toMatchObject({ landed: { commit: "m1" } });
+		expect(await call("claims", {})).toEqual([expect.objectContaining({ change: "x" })]);
+		// Still held minutes after it landed, it's stuck: status releases it.
+		await landedAgo(LANDED_CLAIM_STUCK_MS + 1_000);
 		expect(await call("status", { change: "x", agent: "a" }, "a")).toMatchObject({ landed: { commit: "m1" } });
 		expect(await call("claims", {})).toEqual([]);
 		expect((await call("status", { change: "x" })).released).toMatchObject({ reason: "merged", mergedAs: "m1" });
