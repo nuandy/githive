@@ -858,8 +858,8 @@ export interface UsageReport {
 	from: string;
 	to: string;
 	repos: RepoUsage[];
-	/** Their share of the Worker's requests, CPU and stored data, which aren't reported per repo. */
-	shared: { share: number; workerRequests: number; cpuMs: number; storedBytes: number; cost: number };
+	/** The price of their share of the Worker's requests, CPU and stored data, which aren't reported per repo. */
+	shared: { cost: number };
 	total: number;
 }
 

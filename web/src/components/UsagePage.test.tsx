@@ -20,7 +20,7 @@ const report: UsageReport = {
 			cost: 0.0331,
 		},
 	],
-	shared: { share: 0.62, workerRequests: 12_900, cpuMs: 380_000, storedBytes: 9_100_000, cost: 0.0042 },
+	shared: { cost: 0.0042 },
 	total: 0.0373,
 };
 
@@ -31,13 +31,13 @@ describe("the Usage page", () => {
 		expect(text).toContain("43K");
 		expect(text).toContain("3.5 h");
 		expect(text).toContain("$0.03");
-		expect(text).toContain("Your share of the Worker (62%, estimated): 12.9K requests, 380 s of CPU, 9.1 MB stored");
+		expect(text).toContain("requests, CPU and storage, estimated");
 		expect(text).toMatch(/Total\s*\$0\.04/);
 		expect(text).toContain("Priced at list prices before the Workers Paid plan");
 	});
 
 	it("says when your repos used nothing", () => {
-		const none = { ...report, repos: [], total: 0, shared: { ...report.shared, share: 0, cost: 0 } };
+		const none = { ...report, repos: [], total: 0, shared: { cost: 0 } };
 		expect(visibleText(renderToStaticMarkup(<UsageTable usage={none} />))).toContain(
 			"Your repos used nothing in this range.",
 		);

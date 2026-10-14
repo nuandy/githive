@@ -40,8 +40,11 @@ export interface OwnUsage {
 	from: string;
 	to: string;
 	repos: RepoUse[];
-	/** Their share of what isn't reported per repo, as a fraction of the Worker's object requests. */
-	shared: { share: number; workerRequests: number; cpuMs: number; storedBytes: number; cost: number };
+	/**
+	 * The priced part of what isn't reported per repo that's theirs, by their share of the Worker's object requests.
+	 * Only the price: the share with the amounts it was taken of would give away the whole Worker's totals.
+	 */
+	shared: { cost: number };
 	total: number;
 	prices: typeof PRICES;
 }
@@ -113,7 +116,7 @@ function sharedPart(use: WorkerUse, share: number) {
 		(workerRequests / 1e6) * PRICES.workerRequestsPerMillion +
 		(cpuMs / 1e6) * PRICES.cpuPerMillionMs +
 		(storedBytes / 1e9) * PRICES.storedGbMonth * months;
-	return { share: Math.round(share * 1000) / 1000, workerRequests, cpuMs, storedBytes, cost: rounded(cost) };
+	return { cost: rounded(cost) };
 }
 
 /** Dollars to a hundredth of a cent. */

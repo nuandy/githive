@@ -42,8 +42,6 @@ export function duration(seconds: number) {
 	return `${(seconds / 3600).toFixed(1)} h`;
 }
 
-const bytes = (amount: number) => `${(amount / 1e6).toFixed(1)} MB`;
-
 export function UsagePage({ load }: { load: (range: Range) => Promise<UsageReport> }) {
 	const [range, setRange] = useState<Range>("24h");
 	const usage = usePoll(`usage:${range}`, () => load(range), 600_000);
@@ -100,9 +98,7 @@ export function UsageTable({ usage }: { usage: UsageReport }) {
 							))}
 							<tr>
 								<th scope="row" className="font-normal whitespace-normal text-muted-foreground">
-									Your share of the Worker ({Math.round(shared.share * 100)}%, estimated):{" "}
-									{compact.format(shared.workerRequests)} requests, {count.format(Math.round(shared.cpuMs / 1000))} s of
-									CPU, {bytes(shared.storedBytes)} stored
+									Your share of the Worker's requests, CPU and storage, estimated
 								</th>
 								<td colSpan={4} />
 								<td>{dollars(shared.cost)}</td>

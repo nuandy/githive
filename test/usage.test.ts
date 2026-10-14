@@ -71,7 +71,8 @@ describe("a person's own usage", () => {
 			1 * PRICES.neuronsPerThousand;
 		expect(usage.repos[0]!.cost).toBeCloseTo(expected, 4);
 		// 5 of the Worker's 10 million object requests are theirs.
-		expect(usage.shared).toMatchObject({ share: 0.5, workerRequests: 10_000_000, cpuMs: 5_000_000, storedBytes: 5e9 });
+		// Only its price is sent: with the share and the amounts, anyone could work out the Worker's totals.
+		expect(Object.keys(usage.shared)).toEqual(["cost"]);
 		const storage = 5 * PRICES.storedGbMonth * (1 / 30);
 		const shared = 10 * PRICES.workerRequestsPerMillion + 5 * PRICES.cpuPerMillionMs + storage;
 		expect(usage.shared.cost).toBeCloseTo(shared, 4);
@@ -81,7 +82,7 @@ describe("a person's own usage", () => {
 	it("shows nothing used for someone with no repos, and no share", () => {
 		const usage = ownUsage(use, "blueprint", []);
 		expect(usage.repos).toEqual([]);
-		expect(usage.shared).toMatchObject({ share: 0, cost: 0 });
+		expect(usage.shared).toEqual({ cost: 0 });
 		expect(usage.total).toBe(0);
 	});
 });
