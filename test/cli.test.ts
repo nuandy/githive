@@ -374,7 +374,59 @@ describe("githive CLI", () => {
 		answers.status = { ...(answers.status as Record<string, unknown>), reviewYourself: true };
 		const alone = await cli(["land"], clone);
 		expect(alone.stdout).toContain("next: no other agent may review it, so review it yourself in a fresh context");
+		expect(alone.stdout).toContain("githive review acme/app rate-limit, read its diff");
 		expect(alone.stdout).toContain(`githive vote acme/app ${head} approve|reject "<evidence>" --change rate-limit`);
+	});
+
+	it("reviews another agent's change at the head GitHive gives, with read access kept for a re-review", async () => {
+		const { project, fork, seed } = repos();
+		writeFileSync(join(seed, "limit.ts"), "export const limit = 5;\n");
+		gitIn(seed, "add", ".");
+		gitIn(seed, "commit", "--quiet", "-m", "Rate-limit logins");
+		const head = gitIn(seed, "rev-parse", "HEAD");
+		gitIn(seed, "push", "--quiet", fork, "HEAD:refs/heads/changes/rate-limit");
+		answers.credentials = {
+			url: fork,
+			token: "fork-read?exp=1",
+			branch: "changes/rate-limit",
+			head,
+			author: "agent-b",
+			role: "review",
+			project: { url: project, token: "project-secret", branch: "main" },
+		};
+		const reviewed = await cli(["review", "acme/app", "rate-limit"]);
+		expect(reviewed.code).toBe(0);
+		expect(reviewed.stdout).toContain(`reviewing rate-limit by agent-b at ${head.slice(0, 8)} as review`);
+		const copy = join(tmp, "review-rate-limit");
+		expect(gitIn(copy, "rev-parse", "HEAD")).toBe(head);
+		expect(gitIn(copy, "config", `http.${fork}.extraHeader`)).toBe("Authorization: Bearer fork-read");
+	});
+
+	it("reviews your own change at what you pushed, keeping no write token in the review copy", async () => {
+		const { project, fork, seed } = repos();
+		// Your own change's credentials are for building it: your fork, writable, and no head to review.
+		answers.credentials = {
+			url: fork,
+			token: "fork-secret?exp=1",
+			branch: "changes/rate-limit",
+			project: { url: project, token: "project-secret", branch: "main" },
+		};
+		const nothing = await cli(["review", "acme/app", "rate-limit"]);
+		expect(nothing.code).toBe(1);
+		expect(nothing.stderr).toContain("nothing is pushed to changes/rate-limit yet");
+		writeFileSync(join(seed, "limit.ts"), "export const limit = 5;\n");
+		gitIn(seed, "add", ".");
+		gitIn(seed, "commit", "--quiet", "-m", "Rate-limit logins");
+		const head = gitIn(seed, "rev-parse", "HEAD");
+		gitIn(seed, "push", "--quiet", fork, "HEAD:refs/heads/changes/rate-limit");
+		const reviewed = await cli(["review", "acme/app", "rate-limit"]);
+		expect(reviewed.code).toBe(0);
+		expect(reviewed.stdout).toContain(`reviewing rate-limit (your own change) at ${head.slice(0, 8)} as review`);
+		expect(reviewed.stdout).toContain("limit.ts");
+		expect(reviewed.stdout).toContain(`githive vote acme/app ${head} approve|reject "<evidence>" --change rate-limit`);
+		const copy = join(tmp, "review-rate-limit");
+		expect(gitIn(copy, "rev-parse", "HEAD")).toBe(head);
+		expect(gitIn(copy, "config", "--get-regexp", "extraheader")).not.toContain("fork-secret");
 	});
 
 	it("sync merges the project's branch into the change branch, never rebasing", async () => {

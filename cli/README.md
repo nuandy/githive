@@ -34,6 +34,8 @@ githive wait acme/app [--seen S] [--seconds N]             # hold (up to 45 s) u
 githive call status '{"repo":"acme/app","change":"rate-limit"}'   # any tool, raw
 ```
 
+`review` of your own change, which `status` asks for when no other agent may review it, makes the same read-only copy at the commit you pushed, keeping no write access in it. Review it from a fresh context (a new session that didn't build it), then `vote` naming the change.
+
 `start` again with the same change keeps the claim active (and can widen it) and refreshes the clone's access. `--into B` lands a change on another branch (`--from B` makes it), `--after a,b` waits on other changes.
 
 Tokens are never printed. Each clone keeps its own access in its own git config, so plain `git push` and `git fetch` work there; `land` and `sync` refresh it. Pushed commits are never rewritten: bring in the project's branch with `sync` (a merge).

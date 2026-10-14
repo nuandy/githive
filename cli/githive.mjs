@@ -271,8 +271,8 @@ function statusStep(status, repo) {
 	if (status.reviewYourself && status.head)
 		return (
 			"no other agent may review it, so review it yourself in a fresh context (a new session that hasn't seen it " +
-			`built): read its diff and run its tests, then githive vote ${repo} ${status.head} approve|reject ` +
-			`"<evidence>" --change ${status.change}`
+			`built): githive review ${repo} ${status.change}, read its diff and run its tests, then githive vote ` +
+			`${repo} ${status.head} approve|reject "<evidence>" --change ${status.change}`
 		);
 	const needed = Math.max(0, (approval.required ?? 0) - (approval.approvals ?? 0));
 	const plural = needed === 1 ? "" : "s";
@@ -628,8 +628,11 @@ async function listClaims() {
 	next(`claim paths nobody holds: githive start ${repo} <change> "<intent>" <path>..., or githive backlog ${repo}`);
 }
 
-/** Clones or refreshes the review copy and checks out the change's head, detached. */
-function fetchForReview(dir, access, base) {
+/**
+ * Clones or refreshes the review copy and checks out the change's head, detached, returning it. Your own change's
+ * access writes to your fork, so it's used for the fetch alone and never kept in the copy; its head is what you pushed.
+ */
+function fetchForReview(dir, access, base, own) {
 	// Deep enough to diff against the project's branch. Read-only tokens go in this clone's config.
 	const again = existsSync(join(dir, ".git"));
 	if (!again)
@@ -644,12 +647,23 @@ function fetchForReview(dir, access, base) {
 	if (gitOk(["-C", dir, "remote", "get-url", "change"]) === undefined)
 		git(["-C", dir, "remote", "add", "change", access.url]);
 	else git(["-C", dir, "remote", "set-url", "change", access.url]);
-	keepAccess(dir, access.url, access.token);
+	if (!own) keepAccess(dir, access.url, access.token);
+	const fetchChange = (args) => (own ? gitWith([access], ["-C", dir, ...args]) : git(["-C", dir, ...args]));
 	const into = `${access.branch}:refs/remotes/change/${access.branch}`;
 	// Artifacts rejects some shallow fetches of a fork's branch, so fall back to a full fetch.
-	if (gitOk(["-C", dir, "fetch", "--quiet", "--depth", "50", "change", into]) === undefined)
-		git(["-C", dir, "fetch", "--quiet", "change", into]);
-	git(["-C", dir, "checkout", "--quiet", "--detach", access.head]);
+	try {
+		fetchChange(["fetch", "--quiet", "--depth", "50", "change", into]);
+	} catch {
+		try {
+			fetchChange(["fetch", "--quiet", "change", into]);
+		} catch (err) {
+			if (!own) throw err;
+			throw new Error(`nothing is pushed to ${access.branch} yet: push it (githive land), then review it`);
+		}
+	}
+	const head = access.head ?? git(["-C", dir, "rev-parse", `refs/remotes/change/${access.branch}`]);
+	git(["-C", dir, "checkout", "--quiet", "--detach", head]);
+	return head;
 }
 
 function diffStat(dir, base, head) {
@@ -667,10 +681,14 @@ async function reviewChange() {
 	const access = await tool("credentials", { ...accessArgs, ...as("agent") });
 	const dir = flags.dir ?? `review-${change}`;
 	const base = `origin/${access.project.branch}`;
-	const { head, role } = access;
-	fetchForReview(dir, access, base);
+	// Credentials for your own change are for building it, with no head to review: you review what you pushed.
+	const own = !access.head;
+	const head = fetchForReview(dir, access, base, own);
+	const role = access.role ?? flags.role ?? "review";
 	const stat = diffStat(dir, base, head);
-	say(`reviewing ${change} by ${access.author} at ${short(head)} as ${role}, in ${dir}`, stat || "(no changes)");
+	const whose = own ? " (your own change)" : ` by ${access.author}`;
+	say(`reviewing ${change}${whose} at ${short(head)} as ${role}, in ${dir}`, stat || "(no changes)");
+	if (own) say("review it as if someone else wrote it: run the tests, and read every line of the diff");
 	// A revision of a change you rejected: what you found then, and what changed since.
 	if (access.earlier) {
 		say(`you rejected ${short(access.earlier.commit)} with: ${access.earlier.findings}`);
