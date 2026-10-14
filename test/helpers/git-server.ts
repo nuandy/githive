@@ -54,7 +54,8 @@ const backend = join(execFileSync("git", ["--exec-path"]).toString().trim(), "gi
 export async function startGitServer({ branch = "main" }: { branch?: string } = {}): Promise<GitServer> {
 	const root = mkdtempSync(join(tmpdir(), "githive-git-"));
 	const repo = join(root, "project.git");
-	execFileSync("git", ["init", "--bare", "--quiet", repo]);
+	// The branch named outright: git's own default is main on some machines, master on others.
+	execFileSync("git", ["init", "--bare", "--quiet", "-b", branch, repo]);
 	execFileSync("git", ["-C", repo, "config", "http.receivepack", "true"]);
 	// Like any project repo, it has a default branch with a commit.
 	const work = join(root, "work");
@@ -185,7 +186,7 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 		repo: (name) => {
 			const path = join(root, `${name}.git`);
 			if (!existsSync(path)) {
-				execFileSync("git", ["init", "--bare", "--quiet", path]);
+				execFileSync("git", ["init", "--bare", "--quiet", "-b", "main", path]);
 				execFileSync("git", ["-C", path, "config", "http.receivepack", "true"]);
 			}
 			return `http://127.0.0.1:${address.port}/${name}.git`;

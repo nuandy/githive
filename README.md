@@ -238,7 +238,7 @@ npm run ci:status   # whether the full suite passed on GitHub Actions for this c
 ```
 
 While working on a change, run the tests it touches (`test:changed`, `test:related`): seconds, where the full suite
-takes minutes. The full suite runs on GitHub Actions for every push to `dev` and `main`
+takes minutes. The full suite runs on GitHub Actions for every push to `dev`
 ([`.github/workflows/test.yml`](.github/workflows/test.yml)), so it's run once a commit rather than once a fix, and
 two people's runs never slow each other down. Deploy a commit once its run has passed (`npm run ci:status`).
 

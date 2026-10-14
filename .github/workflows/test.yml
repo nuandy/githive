@@ -1,10 +1,10 @@
-# The full suite, on every push to dev and main and on pull requests, so no one waits for it locally: a deploy goes
-# ahead once its commit has passed here (`npm run ci:status`).
+# The full suite, on every push to dev and on pull requests, so no one waits for it locally: a deploy goes ahead once
+# its commit has passed here (`npm run ci:status`). main is only ever moved to a commit dev has, so it isn't run again.
 name: Tests
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev]
   pull_request:
 
 # A newer push to the same branch makes an older run's result moot.
