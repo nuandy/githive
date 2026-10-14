@@ -86,9 +86,9 @@ export function BranchRulesSection({ repo, branch, snapshot, save, onSaved, draf
 				id="settings-branch-rules"
 				title="Branch rules"
 				description={
-					`Settings for branches other than ${branch}, by name: feature/* for every feature branch, say. A field ` +
-					`left blank keeps the repo's setting, and follows it when it changes. The first rule that matches a ` +
-					`branch is its rule; ${branch} always has the repo's own.`
+					`Rules for branches other than ${branch}, matched by name: feature/*, for example, covers every feature ` +
+					`branch. A field left blank uses the repo's setting, and follows it when that changes. A branch follows ` +
+					`the first rule that matches it; ${branch} always uses the repo's own settings.`
 				}
 			>
 				<div className={cn(SETTINGS_FIELDS, "px-0.5 py-4")}>
