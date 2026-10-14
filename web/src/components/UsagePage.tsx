@@ -6,6 +6,7 @@ import { LoadingLine } from "./Lazy";
 import { Page, PageHeader } from "./Page";
 import { Box, Callout } from "./ui/box";
 import { Segmented } from "./ui/segmented";
+import { UsageChart } from "./UsageChart";
 
 // Usage: what the reader's own repos used on Cloudflare, read by the server from Cloudflare's analytics, and what it
 // costs at list prices. Their repos' Durable Objects and Clef calls are counted per repo; the Worker's requests, CPU
@@ -57,7 +58,10 @@ export function UsagePage({ load }: { load: (range: Range) => Promise<UsageRepor
 					<p>{usage.error}</p>
 				</Callout>
 			) : usage.data ? (
-				<UsageTable usage={usage.data} />
+				<div className="grid gap-6">
+					{usage.data.repos.length ? <UsageChart usage={usage.data} /> : null}
+					<UsageTable usage={usage.data} />
+				</div>
 			) : (
 				<LoadingLine />
 			)}

@@ -2210,6 +2210,15 @@ and $12.50 per million GB-s (at 128 MB), SQLite $0.001 per million rows read, $1
 per GB-month stored; Workers AI $0.011 per 1,000 neurons. The hosted agents' model calls (OpenAI) aren't on
 Cloudflare and aren't counted.
 
+Above the table, a chart shows the same costs over time as columns of comb cells: a column an hour over a day, every
+six hours (by the reader's clock) over a week. Each cell is one round amount ($0.001, $0.002, $0.005, ...) chosen
+so the busiest column has at most 10; ink cells are the person's repos, grey ones their share, and an outline marks
+use under one cell. Its hours come from a second read (`src/usage/own-hours.ts`) of only that person's objects (by
+name, within the Worker's classes) and Clef tags, grouped by `datetimeHour` over the same window as the table's
+read, so the hours add up to its total; the Worker's own hourly requests and CPU spread their share, and stored data
+costs the same each hour. It's kept 10 minutes per person. If that read fails, the table still shows, and the
+chart's box says why.
+
 **Sites.** A public repo's static site is served from its files at `/site/<owner>/<repo>/`, its default branch,
 and a change's latest push at `/site/<owner>/<repo>/@<change>/` (`routes/site.ts`). Each file is read through the
 Artifacts API (`readFile`, 10 MB at most) and typed by its extension; nothing is built or run on GitHive's side, so

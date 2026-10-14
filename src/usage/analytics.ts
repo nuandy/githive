@@ -37,6 +37,8 @@ export interface WorkerUse {
 	storedBytes: number;
 	/** Workers AI neurons by tag; untagged calls under "". */
 	neurons: Record<string, number>;
+	/** The Worker's Durable Object classes, which the periodic metrics are filtered by. */
+	namespaces: string[];
 }
 
 /** This Worker's name, as the analytics know it. */
@@ -73,9 +75,10 @@ const BY_NAMESPACE = `query($account: String!, $start: Time!, $end: Time!, $name
 }`;
 
 type Sum = Record<string, number>;
-type Group = { sum?: Sum; max?: Sum; dimensions?: Record<string, string> };
+export type Group = { sum?: Sum; max?: Sum; dimensions?: Record<string, string> };
 
-async function query(env: UsageEnv, text: string, variables: Record<string, unknown>) {
+/** One query of the account's analytics, with the account filled in. */
+export async function query(env: UsageEnv, text: string, variables: Record<string, unknown>) {
 	const response = await fetch(GRAPHQL, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${env.CF_ANALYTICS_TOKEN}`, "Content-Type": "application/json" },
@@ -119,6 +122,7 @@ async function readWorkerUse(env: UsageEnv, range: UsageRange): Promise<WorkerUs
 		cpuMs: Math.round((worker.cpuTimeUs ?? 0) / 1000),
 		storedBytes: (second.storage ?? []).reduce((total, group) => total + (group.max?.storedBytes ?? 0), 0),
 		neurons: neuronsByTag(first.ai ?? []),
+		namespaces,
 	};
 }
 

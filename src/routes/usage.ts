@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { OrgStore } from "../auth/orgs";
 import { fail } from "../errors";
 import { canReadUsage, type UsageEnv, type UsageRange, workerName, workerUse } from "../usage/analytics";
+import { ownHours } from "../usage/own-hours";
 import { ownUsage } from "../usage/own-usage";
 import type { AppEnv } from "./shared";
 
@@ -24,6 +25,11 @@ export function usageRoutes(app: Hono<AppEnv>) {
 			new OrgStore(c.env.DB).ownedRepos(principal.user.id),
 		]);
 		const repos = owned.map((repo) => ({ id: repo.id, fullName: repo.fullName }));
-		return c.json({ range, ...ownUsage(use, workerName(env), repos) });
+		// The chart is extra: if its hours can't be read, the table still shows, with the reason in the chart's place.
+		const hours = await ownHours(env, use, repos, principal.user.id).then(
+			(list) => ({ hours: list }),
+			(error: Error) => ({ hoursError: error.message }),
+		);
+		return c.json({ range, ...ownUsage(use, workerName(env), repos), ...hours });
 	});
 }

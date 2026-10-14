@@ -29,6 +29,7 @@ import { sha } from "./fixtures/ids.ts";
 import type { RepoFixture } from "./fixtures/repo.ts";
 import { DOCS_REPO, NEW_THING, NOTES_REPO, TINY_LIB } from "./fixtures/small-repos.ts";
 import { STOREFRONT } from "./fixtures/storefront.ts";
+import { usageReport } from "./fixtures/usage.ts";
 
 export { FIXED_NOW } from "./fixtures/clock.ts";
 
@@ -86,6 +87,10 @@ export function answer(method: string, url: URL, who: Who): Answer | null {
 			return ORGS[second] ? ok(ORGS[second]) : fail(404, `no org ${second}`);
 		case "admin":
 			return adminAnswer(second, rest, who);
+		case "usage":
+			if (second !== undefined) return null;
+			if (who !== "admin") return fail(403, "usage is shown to a person, signed in to GitHive");
+			return ok(usageReport(url.searchParams.get("range") === "7d" ? "7d" : "24h"));
 		case "demo":
 			if (second !== "runs") return null;
 			if (!rest.length) return ok({ running: null, recent: [], newest: null });

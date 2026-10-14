@@ -842,7 +842,6 @@ export async function fetchMe(): Promise<Me | null> {
 	return (await response.json()) as Me;
 }
 
-/** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
 /** One of a person's repos: what its Durable Objects and Clef calls used, and what that costs at list prices. */
 export interface RepoUsage {
 	repo: string;
@@ -863,8 +862,20 @@ export interface UsageReport {
 	/** The price of their share of the Worker's requests, CPU and stored data, which aren't reported per repo. */
 	shared: { cost: number };
 	total: number;
+	/** Every hour of the range, oldest first, priced: their repos' part and their estimated share. */
+	hours?: HourCost[];
+	/** Why the hours couldn't be read, when they couldn't; the rest of the report still holds. */
+	hoursError?: string;
 }
 
+export interface HourCost {
+	/** The hour's start, as an ISO time. */
+	hour: string;
+	own: number;
+	shared: number;
+}
+
+/** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
 export const account = {
 	/** What the reader's own repos used on Cloudflare (GET /usage). */
 	usage: (range: UsageReport["range"]) => call<UsageReport>("GET", `/usage?range=${range}`),

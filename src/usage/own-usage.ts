@@ -23,7 +23,7 @@ export const PRICES = {
 };
 
 const GB_PER_ACTIVE_SECOND = 0.125;
-const MONTH_MS = 30 * 24 * 3_600_000;
+export const MONTH_MS = 30 * 24 * 3_600_000;
 
 export interface RepoUse {
 	repo: string;
@@ -67,9 +67,7 @@ export function repoOfObject(name: string, ids: Set<string>): string | undefined
 export function ownUsage(use: WorkerUse, worker: string, repos: OwnedRepo[]): OwnUsage {
 	const ids = new Set(repos.map((repo) => repo.id));
 	const byId = new Map(repos.map((repo) => [repo.id, emptyUse(repo.fullName)]));
-	let allRequests = 0;
 	for (const object of use.objects) {
-		allRequests += object.requests;
 		const id = repoOfObject(object.name, ids);
 		if (!id) continue;
 		const row = byId.get(id)!;
@@ -80,11 +78,21 @@ export function ownUsage(use: WorkerUse, worker: string, repos: OwnedRepo[]): Ow
 	}
 	for (const repo of repos) byId.get(repo.id)!.clefNeurons = use.neurons[repoTag(worker, repo.id)] ?? 0;
 	const rows = [...byId.values()].map((row) => ({ ...row, cost: repoCost(row) }));
-	const theirs = rows.reduce((total, row) => total + row.objectRequests, 0);
-	const shared = sharedPart(use, allRequests ? theirs / allRequests : 0);
+	const shared = sharedPart(use, requestShare(use, ids));
 	const used = rows.filter((row) => row.objectRequests || row.clefNeurons).sort((a, b) => b.cost - a.cost);
 	const total = rounded(used.reduce((sum, row) => sum + row.cost, 0) + shared.cost);
 	return { from: use.from, to: use.to, repos: used, shared, total, prices: PRICES };
+}
+
+/** The part of the Worker's object requests that went to objects of the repos `ids`, from 0 to 1. */
+export function requestShare(use: WorkerUse, ids: Set<string>) {
+	let all = 0;
+	let theirs = 0;
+	for (const object of use.objects) {
+		all += object.requests;
+		if (repoOfObject(object.name, ids)) theirs += object.requests;
+	}
+	return all ? theirs / all : 0;
 }
 
 const emptyUse = (repo: string): RepoUse => ({
@@ -97,7 +105,8 @@ const emptyUse = (repo: string): RepoUse => ({
 	cost: 0,
 });
 
-function repoCost(row: RepoUse) {
+/** What a repo's objects and Clef calls cost at list prices. */
+export function repoCost(row: Omit<RepoUse, "repo" | "cost">) {
 	const requests = (row.objectRequests / 1e6) * PRICES.objectRequestsPerMillion;
 	const duration = ((row.activeSeconds * GB_PER_ACTIVE_SECOND) / 1e6) * PRICES.gbSecondsPerMillion;
 	const reads = (row.rowsRead / 1e6) * PRICES.rowsReadPerMillion;
@@ -120,4 +129,4 @@ function sharedPart(use: WorkerUse, share: number) {
 }
 
 /** Dollars to a hundredth of a cent. */
-const rounded = (dollars: number) => Math.round(dollars * 10_000) / 10_000;
+export const rounded = (dollars: number) => Math.round(dollars * 10_000) / 10_000;

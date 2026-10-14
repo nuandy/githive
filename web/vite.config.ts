@@ -12,7 +12,7 @@ const api = process.env.GITHIVE_API ?? "https://githive.app";
 
 const src = fileURLToPath(new URL("./src", import.meta.url));
 
-const API_PATHS = ["/repos", "/api", "/summaries", "/live", "/me", "/auth", "/orgs", "/admin", "/demo"];
+const API_PATHS = ["/repos", "/api", "/summaries", "/live", "/me", "/auth", "/orgs", "/admin", "/demo", "/usage"];
 
 // GITHIVE_API=fixtures: no Worker at all. The API answers from the visual check's synthetic fixtures (web/visual),
 // signed in as their admin (GITHIVE_AS=visitor or operator for the others), with their times moved up to now. Writes

@@ -373,6 +373,8 @@ const APP: Scene[] = [
 		act: steps(fill(/^Name/, "x".repeat(104)), async (p) => p.getByLabel(/^Name/).first().blur()),
 	}),
 	page("inbox", "/inbox"),
+	page("usage", "/usage"),
+	page("usage-7d", "/usage", { act: click("7 days") }),
 	page("orgs", "/orgs"),
 	page("orgs-new", "/orgs", { act: fill("Name in URLs", "acme-labs") }),
 	page("orgs-bad-slug", "/orgs", { act: fill("Name in URLs", "-acme") }),
