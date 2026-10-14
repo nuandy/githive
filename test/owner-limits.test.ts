@@ -10,6 +10,7 @@ import { fakeD1 } from "./fakes/d1";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { soakReviews } from "./helpers/soak";
 import { toolCalls } from "./helpers/tool-calls";
+import { holdKey } from "../src/toolkit/work";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 
 // An agent's owner sets how much of other people's work it does: building their backlog pieces and reviewing their
@@ -242,6 +243,51 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 		expect(await refusal("vote", vote(head2))).toBe("403 limit of 1 reviews reached");
 	});
 
+	it("judge a vote on the change its commit is the head of, never on the change it names", async () => {
+		const { alice, bob, bobs, refusal } = await twoOwners(limitsOf({ build: null, review: 0 }));
+		await alice.call("claim", claim("alice-agent", "c1"), "alice-agent");
+		const alices = await pushChange(server.url, work, "alice-agent", "c1", { "src/c1/x.js": "1\n" });
+		await bob.call("claim", claim("bob-agent", "b1"), "bob-agent");
+		await pushChange(server.url, work, "bob-agent", "b1", { "src/b1/x.js": "1\n" });
+		// Naming its own change beside Alice's commit doesn't pass the vote off as a review of its own owner's work.
+		expect(await refusal("vote", { ...approve(alices), change: "b1" })).toMatch(/^409 [0-9a-f]{8} isn't b1's head/);
+		// Naming none, the vote is on Alice's change, so it counts against the limit and is refused.
+		expect(await refusal("vote", approve(alices))).toMatch(/^403 /);
+		expect(bobs.done.review).toBe(0);
+		const status = await alice.call("status", { change: "c1", agent: "alice-agent" }, "alice-agent");
+		expect(status).toMatchObject({ approval: { approved: false, approvals: 0 } });
+	});
+
+	it("move a review taken on a stale head to the head read, charging the limit once", async () => {
+		const bobs = limitsOf({ build: 0, review: 1 });
+		const reviews = soakReviews(server);
+		const known: Record<string, { head: string; at: number }> = {};
+		const alice = toolCalls(() => server, { identity: "person:alice", reviews });
+		const bob = toolCalls(() => server, {
+			identity: "person:bob",
+			ownerLimits: bobs,
+			reviews,
+			knownHeads: async () => known,
+		});
+		await alice.call("settings", { required: 1 });
+		await alice.register("alice-agent");
+		await bob.register("bob-agent");
+		await alice.call("claim", claim("alice-agent", "c1"), "alice-agent");
+		const first = await pushChange(server.url, work, "alice-agent", "c1", { "src/c1/x.js": "1\n" });
+		known.c1 = { head: first, at: Date.now() };
+		// Alice pushes again; what GitHive knows is still the first head.
+		const files = { "src/c1/x.js": "2\n" };
+		const second = await pushChange(server.url, work, "alice-agent", "c1", files, "origin/changes/c1");
+		const access = await bob.call("credentials", { change: "c1", agent: "bob-agent" }, "bob-agent");
+		expect(access).toMatchObject({ head: second });
+		const held = await reviews.held("p", [first, second]);
+		expect(held[holdKey(first, "review")] ?? []).not.toContain("bob-agent");
+		expect(held[holdKey(second, "review")]).toContain("bob-agent");
+		// Its one review a day was charged once, so its vote on the head it reviewed goes through.
+		expect(await bob.call("vote", { ...approve(second), change: "c1" }, "bob-agent")).toMatchObject({ ok: true });
+		expect(bobs.done.review).toBe(1);
+	});
+
 	it("count none of an agent's reviews of its own owner's changes, at the default of never", async () => {
 		// Ada's two agents and Bob's, all at the defaults, stamped as the Worker stamps them.
 		const key = await generateStampKey();
@@ -294,6 +340,24 @@ describe("GitHive's tools, within an owner's limits", { timeout: 60_000 }, () =>
 		const approve = { commit: head, change: "c1", reviewer: "ada-solo", role: "review", verdict: "approve" };
 		expect(await ada.call("vote", { ...approve, evidence: "ran its tests" }, "ada-solo")).toMatchObject({ ok: true });
 		expect(await status()).toMatchObject({ approval: { approved: true }, next: "Call `merge`." });
+		expect(await limits.countsToday([lone.id])).toEqual({ [lone.id]: { build: 0, review: 0 } });
+	});
+
+	it("know a vote naming no change is on its own owner's change, by its commit", async () => {
+		const key = await generateStampKey();
+		const { limits, agent: lone } = await ownedAgent();
+		const ada = toolCalls(() => server, {
+			identity: "person:ada",
+			reviews: soakReviews(server),
+			ownerLimits: limits.ownerLimits(lone.id),
+			stamper: (name?: string) => makeStamper(key.privateKey, name ? `person:ada/${name}` : "person:ada"),
+		});
+		await ada.call("settings", { required: 1 });
+		await ada.register("ada-solo");
+		await ada.call("claim", claim("ada-solo", "c1"), "ada-solo");
+		const head = await pushChange(server.url, work, "ada-solo", "c1", { "src/c1/x.js": "1\n" });
+		const approve = { commit: head, reviewer: "ada-solo", role: "review", verdict: "approve", evidence: "ran it" };
+		expect(await ada.call("vote", approve, "ada-solo")).toMatchObject({ ok: true });
 		expect(await limits.countsToday([lone.id])).toEqual({ [lone.id]: { build: 0, review: 0 } });
 	});
 });

@@ -1,8 +1,8 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { keepSteering, questionHints, steeringReply, voteHints } from "../clef-hints";
 import { effectivePolicy, ownPersonsWork } from "../votes";
-import { holds } from "./merge-tools";
 import { holdKey } from "../work";
+import type { ClaimRecord } from "../claims";
 import type { ToolCall, ToolHandlers } from "./context";
 import { agentsAtWorkIn, siblingsOf } from "./no-reviewer";
 import { branchSettings, claimPolicy, hostedRoles, shardVotesIfBusy, votesFor } from "./repo";
@@ -26,6 +26,44 @@ async function refuseOwnApprovalBesideSiblings(call: ToolCall, change: string, r
 	);
 }
 
+const sameCommit = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+
+/**
+ * The change a vote's commit is the head of. Approvals count by commit, so whose change it is, and whose siblings
+ * may not approve it, are judged on that change, never on a name the caller gives: a named change whose head isn't
+ * `commit` is refused. With none named (older votes don't name one), the open change pushed at `commit`, if any.
+ */
+async function changeAt(call: ToolCall, commit: string, named: string | undefined): Promise<ClaimRecord | undefined> {
+	if (named) {
+		const held = await call.claimOf(named);
+		// A released change's votes count toward nothing open.
+		if (!held) return undefined;
+		const head = (await call.openHeads([held], () => true))(held);
+		if (head && !sameCommit(head, commit))
+			fail(
+				409,
+				`${commit.slice(0, 8)} isn't ${named}'s head, ${head.slice(0, 8)}: a vote is on the commit you reviewed`,
+				"call `credentials` on it again for its head, review that, and vote on it",
+			);
+		return held;
+	}
+	const { claims } = await call.store.read();
+	const headOf = await call.openHeads(claims);
+	return claims.find((claim) => {
+		const head = headOf(claim);
+		return !!head && sameCommit(head, commit);
+	});
+}
+
+/** The roles `reviewer` holds a review of `commit` as: taken with credentials, perhaps as a role it doesn't vote as. */
+async function heldRoles(call: ToolCall, commit: string, reviewer: string) {
+	const held: Record<string, string[]> = (await call.ctx.reviews?.held(call.repo, [commit]).catch(() => ({}))) ?? {};
+	const prefix = holdKey(commit, "");
+	return Object.entries(held)
+		.filter(([key, holders]) => key.startsWith(prefix) && holders.includes(reviewer))
+		.map(([key]) => key.slice(prefix.length));
+}
+
 // When GitHive's reviewers won't review a change, a refused review says who else can: another agent, the change's
 // own in a fresh context when none may, or a person.
 function askAPersonInstead(args: Record<string, unknown>) {
@@ -46,16 +84,17 @@ export const reviewTools: ToolHandlers = {
 		// If one record would hold reviewers up, shard the votes first.
 		const commit = requiredString(args, "commit");
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
-		const change = optionalString(args, "change");
 		const evidence = requiredString(args, "evidence");
 		const role = requiredString(args, "role");
-		if (verdict === "approve" && change) await refuseOwnApprovalBesideSiblings(call, change, reviewer);
-		// A vote on another person's change without a review taken first (credentials) still counts against the
-		// owner's limit; one on the owner's own change doesn't.
+		const voted = await changeAt(call, commit, optionalString(args, "change"));
+		const change = voted?.change ?? optionalString(args, "change");
+		if (verdict === "approve" && voted) await refuseOwnApprovalBesideSiblings(call, voted.change, reviewer);
+		// A vote on another person's change without a review taken first (credentials), as any role, still counts
+		// against the owner's limit; one on the owner's own change doesn't.
+		const taken = await heldRoles(call, commit, reviewer);
 		if (ctx.ownerLimits) {
-			const own = change ? ownPersonsWork(ctx.identity, (await call.claimOf(change))?.by) : false;
-			const counted = own || (await holds({ ctx, repo }, commit, role, reviewer));
-			const refused = counted ? null : await ctx.ownerLimits.take("review");
+			const own = voted ? ownPersonsWork(ctx.identity, voted.by) : false;
+			const refused = own || taken.length ? null : await ctx.ownerLimits.take("review");
 			if (refused) fail(403, refused);
 		}
 		const { vague, thin, steers } = await voteHints(ctx, { verdict, evidence });
@@ -72,8 +111,9 @@ export const reviewTools: ToolHandlers = {
 			},
 			stamper,
 		);
-		// The review is done, so drop the hold credentials placed when the review began.
-		await ctx.reviews?.release(repo, holdKey(commit, role), reviewer).catch(() => undefined);
+		// The review is done, so drop the holds credentials placed when the review began, whatever role they took.
+		for (const each of new Set([role, ...taken]))
+			await ctx.reviews?.release(repo, holdKey(commit, each), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
 		// The change's agent reads the evidence, so its flag is kept with the change.
 		const flagged = steers !== undefined && change;

@@ -280,7 +280,9 @@ async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord)
  * Read-only access to another agent's change, to review it, and to the project to diff against. It takes the
  * reviewer's place among the change's reviewers first, on the head GitHive already knows, while the slower reads
  * run; when as many others already review it as it needs, it refuses, so agents whose list of reviews was a few
- * seconds old don't all review the same change. The place moves to the head read if that differs.
+ * seconds old don't all review the same change. If the head read differs, the place moves to it: the known head's
+ * hold is given back, what it was charged against the owner's limit carries over, and a refusal on the known head
+ * counts for nothing.
  */
 async function reviewAccess(
 	call: ToolCall,
@@ -291,23 +293,26 @@ async function reviewAccess(
 ) {
 	const { args, ctx, repo, branch, changeSource } = call;
 	const role = optionalString(args, "role") ?? "review";
-	// A released change can't land, so reading it takes no reviewer's place.
-	const take = async (head: string) => {
-		if (held && reviewer) await takeReview(call, held, head, role, reviewer);
-	};
+	// A released change can't land, so reading it takes no reviewer's place. Whether it charged the owner's limit.
+	const take = async (head: string, charged = false) =>
+		held && reviewer ? takeReview(call, held, head, role, reviewer, charged) : false;
 	const known = ctx.knownHeads
 		? await ctx.knownHeads(repo, [{ change, agent: author }]).catch(() => undefined)
 		: undefined;
 	const knownHead = known?.[change]?.head ?? undefined;
-	const taking = knownHead ? take(knownHead) : undefined;
-	const [fork, project] = await Promise.all([
+	const taking = knownHead ? tried(take(knownHead)) : undefined;
+	const [fork, project, early] = await Promise.all([
 		changeSource(author, "read", change, held?.since),
 		ctx.remote(repo, "read"),
 		taking,
 	]);
 	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
+	if (head === knownHead && early && "error" in early) throw early.error;
 	if (!head) fail(409, `${change} has nothing pushed to review yet`, "choose another review from `reviews`");
-	if (head !== knownHead) await take(head);
+	if (head !== knownHead) {
+		const carried = !!early && "charged" in early && early.charged;
+		await moveReview(call, { knownHead, early, role, reviewer }, () => take(head, carried));
+	}
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
 	const into = held?.into ?? branch;
@@ -349,9 +354,39 @@ async function reviewAccess(
  * Takes `reviewer`'s place among the reviewers `head` still needs in `role`, by compare-and-swap, or refuses when
  * that many others already hold it. A hold that can't be written (the record busy) doesn't stop the review.
  */
-async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role: string, reviewer: string) {
+/** A promise's outcome, kept rather than thrown, to decide on once more is known. */
+const tried = <T>(promise: Promise<T>) =>
+	promise.then(
+		(charged) => ({ charged }),
+		(error: unknown) => ({ error }),
+	);
+
+/** Gives back a hold taken on a head that turned out stale, then takes the reviewer's place on the head read. */
+async function moveReview(
+	call: ToolCall,
+	stale: { knownHead?: string; early?: { charged: boolean } | { error: unknown }; role: string; reviewer?: string },
+	takeOnHead: () => Promise<boolean>,
+) {
+	const { knownHead, early, role, reviewer } = stale;
+	if (knownHead && reviewer && early && !("error" in early))
+		await call.ctx.reviews?.release(call.repo, holdKey(knownHead, role), reviewer, true).catch(() => undefined);
+	await takeOnHead();
+}
+
+/**
+ * Takes `reviewer`'s place among those `head` still needs in `role`, charging the owner's limit for a new review
+ * unless `charged` (a place moved from a stale head). Whether this review is charged against the limit.
+ */
+async function takeReview(
+	call: ToolCall,
+	claim: ClaimRecord,
+	head: string,
+	role: string,
+	reviewer: string,
+	charged = false,
+): Promise<boolean> {
 	const { ctx, repo, registered, votes } = call;
-	if (!ctx.reviews) return;
+	if (!ctx.reviews) return charged;
 	const policy = claimPolicy(registered, claim);
 	const cast = (await votes.readFor([head])).votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(cast, registered?.stampKey);
@@ -365,8 +400,9 @@ async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role
 	const already = limited ? await holds(call, head, role, reviewer) : true;
 	const taken = await ctx.reviews.hold(repo, key, reviewer, needed).catch(() => true);
 	if (taken) {
-		if (!already) await reviewWithinLimit(call, key, reviewer);
-		return;
+		if (already || charged) return charged;
+		await reviewWithinLimit(call, key, reviewer);
+		return limited;
 	}
 	const held: Record<string, string[]> = await ctx.reviews.held(repo, [head]).catch(() => ({}));
 	const holders = held[key] ?? [];

@@ -101,7 +101,12 @@ what Git said.
   without a change, read access to the project. With a change, `git` holds
   the commands to set up the clone.
 - `vote`: a verdict, approve or reject, with evidence, on one commit, naming
-  its change. Once revised, a change you rejected comes early in your
+  its change. Approvals count by commit, so the vote is judged on the open
+  change pushed at that commit: a named change whose head isn't the commit is
+  refused, and with none named the change is found by its commit. Whose change
+  it is (for the owner's review limit) and whether its agent's siblings work
+  here are read from that change, never from the name given. Once revised, a
+  change you rejected comes early in your
   `reviews` (after any review you've already started), and `credentials` gives
   you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
@@ -1388,7 +1393,11 @@ change and picks another.
 the change (in the role it names), so others looking at `reviews` see it taken.
 The mark is written first, on the head GitHive already knows from push events,
 before the reads that take seconds; written last, it left those seconds in which
-every agent looking was offered the same review. Holds are kept by commit and
+every agent looking was offered the same review. If the head read turns out
+newer, the mark moves to it: the stale one is given back, a review charged
+against its owner's limit isn't charged again, and a refusal on the stale head
+(it needed no more reviews) doesn't refuse the new one. A vote releases the
+voter's holds on its commit in whatever role they were taken. Holds are kept by commit and
 role in records in Git, split by commit into 16 buckets
 (`refs/notes/githive-review-holds/<repo>/<bucket>`, `review-holds.ts`): every
 review handed out writes a hold and every vote shortens one, and in one record
