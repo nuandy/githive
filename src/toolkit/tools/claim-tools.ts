@@ -24,69 +24,7 @@ export const claimTools: ToolHandlers = {
 	async claims({ adviceView }) {
 		return (await adviceView()).claims;
 	},
-	async claim(call) {
-		const { args, ctx, repo, claims, votes, registered, actAs, stamper, store, branch, changeSource, warmChecks } =
-			call;
-		const change = requiredString(args, "change");
-		const agent = actAs("agent");
-		// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
-		const source = optionalString(args, "source");
-		refuseGitHubBranches(args, agent);
-		refuseGitHubChangeName(change, agent);
-		const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
-		const reserved = given.find(isReservedPath);
-		if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
-		const { into, made } = await landingBranch(call, change, agent);
-		const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
-		const paths = merging ? merging.paths : given;
-		const after = changeList(args.after, "after");
-		if (after.includes(change)) fail(400, `${change} can't wait on itself`);
-		// Refuse a dependency loop, which would leave every change in it waiting forever.
-		const afterOf = async (dependency: string) => (await call.claimOf(dependency))?.after ?? [];
-		const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
-		if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
-		const intent = requiredString(args, "intent");
-		const { similar, steers } = await asClefSees(call, { change, agent, intent, paths });
-		const input = {
-			change,
-			agent,
-			paths: scopePaths(paths, into, branch),
-			intent,
-			...(after.length ? { after } : {}),
-			...(source ? { source } : {}),
-			staleAfterMs: STALE_AFTER_MS,
-			abandoned: abandonedRule(ctx, repo, registered, votes),
-		};
-		// If one record would hold agents up, shard first, then claim in the shards.
-		const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
-		// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
-		const claimedAt = Date.now();
-		// Asked before claiming: claiming again renews what was counted then.
-		const renewing = (await call.claimOf(change))?.agent === agent;
-		const claimStore = sharded ? storeFor(ctx, repo, sharded) : store;
-		const giveBack = (reason: string) => giveBackPartClaim(call, claimStore, { change, agent, reason });
-		const written = await claimStore.claim(input, stamper).catch(async (err) => {
-			// A store can answer an error after the claim is written; a new claim is given back, so it doesn't sit
-			// in the agent's name unbuilt. A renewal stays: the change was the agent's already.
-			if (!renewing) await giveBack("its claim failed partway");
-			throw err;
-		});
-		const outcome = await withoutLeftovers(written, renewing, giveBack);
-		if (outcome.ok) await keepToOwnerLimit(call, claimStore, { change, agent, renewing });
-		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
-		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
-		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
-		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
-		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-		const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
-		if (!outcome.ok) return reply;
-		if (steers !== undefined) await keepSteering(ctx, repo, change, { in: "intent", by: agent, likelihood: steers });
-		return {
-			...reply,
-			...(similar ? { similar } : {}),
-			...(steers === undefined ? {} : { steering: steeringReply(steers) }),
-		};
-	},
+	claim: (call) => claimChange(call),
 	async release(call) {
 		const { args, ctx, repo, votes, registered, actAs, stamper, store, claimOf } = call;
 		const change = requiredString(args, "change");
@@ -139,6 +77,76 @@ export const claimTools: ToolHandlers = {
 		return { ...(await ctx.startBuilder({ repo, change })), steering: steeringReply(steers) };
 	},
 };
+
+/**
+ * Claims a change. From claim_work, `piece` is the backlog piece taken: its intent is the text its author wrote, so a
+ * steering flag on it names them.
+ */
+export async function claimChange(call: ToolCall, piece?: { by: string }) {
+	const { args, ctx, repo, claims, votes, registered, actAs, stamper, store, branch, changeSource, warmChecks } = call;
+	const change = requiredString(args, "change");
+	const agent = actAs("agent");
+	// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
+	const source = optionalString(args, "source");
+	refuseGitHubBranches(args, agent);
+	refuseGitHubChangeName(change, agent);
+	const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
+	const reserved = given.find(isReservedPath);
+	if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
+	const { into, made } = await landingBranch(call, change, agent);
+	const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
+	const paths = merging ? merging.paths : given;
+	const after = changeList(args.after, "after");
+	if (after.includes(change)) fail(400, `${change} can't wait on itself`);
+	// Refuse a dependency loop, which would leave every change in it waiting forever.
+	const afterOf = async (dependency: string) => (await call.claimOf(dependency))?.after ?? [];
+	const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
+	if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
+	const intent = requiredString(args, "intent");
+	const { similar, steers } = await asClefSees(call, { change, agent, intent, paths });
+	const input = {
+		change,
+		agent,
+		paths: scopePaths(paths, into, branch),
+		intent,
+		...(after.length ? { after } : {}),
+		...(source ? { source } : {}),
+		staleAfterMs: STALE_AFTER_MS,
+		abandoned: abandonedRule(ctx, repo, registered, votes),
+	};
+	// If one record would hold agents up, shard first, then claim in the shards.
+	const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
+	// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
+	const claimedAt = Date.now();
+	// Asked before claiming: claiming again renews what was counted then.
+	const renewing = (await call.claimOf(change))?.agent === agent;
+	const claimStore = sharded ? storeFor(ctx, repo, sharded) : store;
+	const giveBack = (reason: string) => giveBackPartClaim(call, claimStore, { change, agent, reason });
+	const written = await claimStore.claim(input, stamper).catch(async (err) => {
+		// A store can answer an error after the claim is written; a new claim is given back, so it doesn't sit
+		// in the agent's name unbuilt. A renewal stays: the change was the agent's already.
+		if (!renewing) await giveBack("its claim failed partway");
+		throw err;
+	});
+	const outcome = await withoutLeftovers(written, renewing, giveBack);
+	if (outcome.ok) await keepToOwnerLimit(call, claimStore, { change, agent, renewing });
+	// Once claimed, the source's tip becomes the change's branch in the agent's fork.
+	if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
+	// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
+	// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
+	if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
+	const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
+	if (!outcome.ok) return reply;
+	if (steers !== undefined) {
+		const written = piece ? { in: "backlog piece", by: piece.by } : { in: "intent", by: agent };
+		await keepSteering(ctx, repo, change, { ...written, likelihood: steers });
+	}
+	return {
+		...reply,
+		...(similar ? { similar } : {}),
+		...(steers === undefined ? {} : { steering: steeringReply(steers) }),
+	};
+}
 
 /**
  * What Clef sees in a new claim, as advice, since the claim still goes ahead: an open change that may already do what

@@ -1,7 +1,7 @@
 import { fail, statusOf } from "../../errors";
 import { type BacklogView, backlogFor } from "../work";
 import { changeList } from "./claim-input";
-import { claimTools } from "./claim-tools";
+import { claimChange } from "./claim-tools";
 import { type Args, openCall, type ToolCall, type ToolHandlers } from "./context";
 import { LISTED_AT_MOST } from "./repo";
 
@@ -49,7 +49,7 @@ function notFree(piece: string, waiting: BacklogView["waiting"]) {
 /** Claims one free piece as `claim` would; a refusal says why rather than failing the call. */
 async function claimPiece(call: ToolCall, piece: FreePiece) {
 	const args = claimArgs(call.args, piece);
-	const reply = (await claimTools.claim!({ ...call, args }).catch((err) => {
+	const reply = (await claimChange({ ...call, args }, { by: piece.by }).catch((err) => {
 		if (statusOf(err).status !== 409) throw err;
 		return { ok: false, refused: statusOf(err).message };
 	})) as Record<string, unknown> & { ok?: boolean; refused?: string; conflicts?: { change: string; agent: string }[] };
