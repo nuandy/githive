@@ -154,7 +154,11 @@ describe("views read at a feed number", () => {
 		const waiting: Promise<unknown>[] = [];
 		const c = {
 			env: { REPO_CACHE: { getByName: () => cache } },
-			req: { header: (name: string) => headers[name], query: (name: string) => query[name] },
+			req: {
+				url: "https://githive.test/repos/acme/web",
+				header: (name: string) => headers[name],
+				query: (name: string) => query[name],
+			},
 			executionCtx: { waitUntil: (promise: Promise<unknown>) => waiting.push(promise) },
 			body: (json: string, status: number) => new Response(json, { status }),
 		};

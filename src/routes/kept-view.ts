@@ -26,7 +26,7 @@ export async function keptView(
 ) {
 	// "Cache-Control: no-cache" asks for a fresh build, for example right after the reader's own write.
 	const wantsFresh = /no-cache/.test(c.req.header("Cache-Control") ?? "");
-	const shared = wantsFresh ? null : sharedKey(key, name, c.req.query("seq"));
+	const shared = wantsFresh ? null : sharedKey(new URL(c.req.url).origin, key, name, c.req.query("seq"));
 	const hit = shared ? await sharedCache()?.match(shared) : undefined;
 	if (hit) return hit;
 	const cache = c.env.REPO_CACHE.getByName(key);
@@ -59,10 +59,13 @@ export async function keptView(
 	return send(json, `view;desc=built, ${timing.header()}`);
 }
 
-/** Where a view read at feed number `seq` is shared, or null when the reader named none. */
-function sharedKey(key: string, name: string, seq: string | undefined) {
+/**
+ * Where a view read at feed number `seq` is shared, or null when the reader named none. The cache keeps keys on the
+ * Worker's own host only, so the key is a path there that no route answers.
+ */
+function sharedKey(origin: string, key: string, name: string, seq: string | undefined) {
 	if (!seq || !/^\d+$/.test(seq)) return null;
-	return new Request(`https://views.githive.internal/${encodeURIComponent(key)}/${encodeURIComponent(name)}/${seq}`);
+	return new Request(`${origin}/_shared-views/${encodeURIComponent(key)}/${encodeURIComponent(name)}/${seq}`);
 }
 
 // The Worker's cache, where there is one (not in tests).
