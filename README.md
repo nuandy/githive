@@ -138,7 +138,7 @@ The checks install dependencies before a repo's `verify` commands run, and skip 
 
 ## Benchmarks
 
-Measured on a bench Worker on 11 Oct, with fake agents (`scripts/bench.mjs`), scripted ones (`scripts/swarm.mjs`) and real Claude Code agents (`scripts/claude-agents.mjs`), each on its own copy of Express. Every run's plan and log is in [`bench-results/`](bench-results/README.md), with earlier runs and what changed between them.
+Measured on a bench Worker on 11 Oct, with fake agents (`scripts/bench.mjs`), scripted ones (`scripts/swarm.mjs`) and real Claude Code agents (`scripts/claude-agents.mjs`), each on its own copy of Express; the demo run, on githive.app. Bench gets no Artifacts push events (an account has one subscription, and githive.app has it), so it notices each push by reading the agent's fork, a little later: githive.app is faster, most where many small changes land in a few minutes, as in the demo. Every run's plan and log is in [`bench-results/`](bench-results/README.md), with earlier runs and what changed between them.
 
 | Run | Agents | Result | Work time |
 |---|---|---|---|
@@ -150,7 +150,7 @@ Measured on a bench Worker on 11 Oct, with fake agents (`scripts/bench.mjs`), sc
 | Real agents, reviews and the same checks ([`run-agents-20-1011`](bench-results/agents)) | 20 | 27 of 27 tasks landed, audit clean | 10 min 42 s |
 | Real agents, choosing work from `reviews` and `backlog`, with reviews ([`run-agents-reviews-1011`](bench-results/agents)) | 5 | 27 of 27 landed (and one fix an agent added), audit clean | 22 min 42 s |
 | The same, without reviews ([`run-agents-free-1011b`](bench-results/agents)) | 5 | 27 of 27 landed, audit clean | 13 min 56 s |
-| GitHive's own hosted agents building Honeycomb from the dashboard's demo button, with reviews and `npm test` on every landing (bench, 13 Oct, run 13) | 13 | 13 of 13 pieces landed, one rejection | 9 min 24 s (10 min with setup) |
+| GitHive's own hosted agents building Honeycomb from the dashboard's demo button, with reviews and `npm test` on every landing (githive.app, 14 Oct, runs 3 and 4) | 11 | 11 of 11 pieces landed in each, audit clean | 5.6 min each, with setup |
 
 **Clef's hints** (bench, 13 Oct, [`scripts/clef-probe.mjs`](scripts/clef-probe.mjs), logs `probe-1013.log` and `probe-1013b.log` in [`bench-results/clef/`](bench-results/clef)): every case below drew the answer it was meant to, twice over. Those logs also show steering text refused, by a guard that has since been taken out. Push hints need push events, which only production gets: there ([`scripts/clef-push-probe.mjs`](scripts/clef-push-probe.mjs), `push-probe-prod-1013.log`), a blank page's preview was named broken (0.98), a steering code comment was caught (0.94) but a steering commit message wasn't, and a typo fix that also deleted every user was named off its intent (0.95).
 
