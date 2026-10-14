@@ -16,7 +16,8 @@ export const LONGEST_WAIT_SECONDS = 45;
 /**
  * What `seen` is made of, in order: one value per part (a digest, or for notices a time), so a reply can say which
  * part changed. `notices` is last, so a `seen` from before it was added still compares part by part. After the parts
- * comes the doorbell's count when they were read, so a call can tell whether anything rang for it since.
+ * come the doorbell's count when they were read, so a call can tell whether anything rang for it since, and when
+ * they were read.
  */
 export const WAIT_PARTS = ["yours", "reviews", "backlog", "notices"] as const;
 
@@ -25,6 +26,12 @@ export const WAIT_PARTS = ["yours", "reviews", "backlog", "notices"] as const;
  * quarter of the hold.
  */
 const FIRST_LOOK_MS = 1_000;
+
+/**
+ * How old a look may be before a call looks again though nothing rang. Some things change with time alone, which
+ * rings nothing: a review's hold running out frees the review, and a claim gone quiet frees its piece.
+ */
+export const LOOK_AGAIN_MS = 5 * 60_000;
 
 interface YourChange {
 	change: string;
@@ -53,11 +60,12 @@ export const waitTools: ToolHandlers = {
 		// Read the count before looking, so a ring during the look still wakes the hold.
 		let mark = await doorbell.rings();
 		let look: Look | undefined;
+		let lookedAt = given?.lookedAt;
 		let lookMs = Math.min(FIRST_LOOK_MS, holdMs / 4);
-		if (!(await quietSince(doorbell, agent, given?.rings))) {
-			const looked = Date.now();
+		if (!(await stillHolds(doorbell, agent, given))) {
+			lookedAt = Date.now();
 			look = await lookFor(call, agent, known);
-			lookMs = Date.now() - looked;
+			lookMs = Date.now() - lookedAt;
 		}
 		const before = given?.state ?? look!.state;
 		while (!look || !changedParts(before, look.state).length) {
@@ -66,12 +74,12 @@ export const waitTools: ToolHandlers = {
 			const rung = left > 0 ? await doorbell.ringAfter(mark, left, agent) : null;
 			if (rung === null) break;
 			mark = rung.rings;
-			const looked = Date.now();
+			lookedAt = Date.now();
 			// A fresh call, since one call reads the claims only once.
 			look = await lookFor(await openCall(args, ctx, call.run), agent, known);
-			lookMs = Date.now() - looked;
+			lookMs = Date.now() - lookedAt;
 		}
-		return look ? answer(look, before, mark) : { changed: false, seen: seenAt(before, mark) };
+		return look ? answer(look, before, mark, lookedAt) : { changed: false, seen: seenAt(before, mark, lookedAt) };
 	},
 };
 
@@ -87,28 +95,50 @@ function holdSeconds(value: unknown) {
 
 const NOTICES = WAIT_PARTS.indexOf("notices");
 
-/** A `seen` split into its parts' values and the doorbell's count after them, which older ones lack. */
-function seenOf(seen: string | undefined) {
-	if (!seen) return undefined;
-	const values = seen.split(".");
-	if (values.length <= WAIT_PARTS.length) return { state: seen, rings: undefined };
-	const rings = parseInt(values[WAIT_PARTS.length]!, 36);
-	return { state: values.slice(0, WAIT_PARTS.length).join("."), rings: Number.isNaN(rings) ? undefined : rings };
+interface Seen {
+	state: string;
+	rings?: number;
+	/** When its parts were read, in ms. */
+	lookedAt?: number;
 }
 
-const seenAt = (state: string, rings: number) => `${state}.${rings.toString(36)}`;
+/** A `seen` split into its parts' values, the doorbell's count after them and when they were read; older lack those. */
+function seenOf(seen: string | undefined): Seen | undefined {
+	if (!seen) return undefined;
+	const values = seen.split(".");
+	const state = values.slice(0, WAIT_PARTS.length).join(".");
+	const number = (value: string | undefined) => {
+		const parsed = value === undefined ? NaN : parseInt(value, 36);
+		return Number.isNaN(parsed) ? undefined : parsed;
+	};
+	const rings = number(values[WAIT_PARTS.length]);
+	const seconds = number(values[WAIT_PARTS.length + 1]);
+	return {
+		state,
+		...(rings !== undefined ? { rings } : {}),
+		...(seconds !== undefined ? { lookedAt: seconds * 1000 } : {}),
+	};
+}
+
+/** A `seen`: the parts' values, the doorbell's count, and when the parts were read, in seconds (base 36 all). */
+function seenAt(state: string, rings: number, lookedAt: number | undefined) {
+	const at = lookedAt === undefined ? "" : `.${Math.floor(lookedAt / 1000).toString(36)}`;
+	return `${state}.${rings.toString(36)}${at}`;
+}
 
 /** The doorbell's count a `seen` was read at, if it carries one. */
 export const seenRings = (seen: unknown) => (typeof seen === "string" ? seenOf(seen)?.rings : undefined);
 
 /**
- * Whether nothing that concerns `agent` rang since `rings`, the count its `seen` was read at. Then what it saw still
- * holds, and the call holds without reading anything first. Unknown (no count, or one older than the doorbell's log)
- * isn't quiet.
+ * Whether what `agent` saw still holds, so the call holds without reading anything first: nothing that concerns it
+ * rang since its `seen` was read, and that was lately (see LOOK_AGAIN_MS). Unknown (no count, one older than the
+ * doorbell's log, or no time) doesn't hold.
  */
-async function quietSince(doorbell: Doorbell, agent: string, rings: number | undefined) {
-	if (rings === undefined || !doorbell.rungFor) return false;
-	const reasons = await doorbell.rungFor(agent, rings);
+async function stillHolds(doorbell: Doorbell, agent: string, seen: Seen | undefined) {
+	if (seen?.rings === undefined || !doorbell.rungFor) return false;
+	if (seen.lookedAt === undefined) return false;
+	if (Date.now() - seen.lookedAt > LOOK_AGAIN_MS) return false;
+	const reasons = await doorbell.rungFor(agent, seen.rings);
 	return reasons !== null && reasons.length === 0;
 }
 
@@ -166,7 +196,7 @@ async function digestOf(part: unknown[]) {
 	return (await sha256Hex(lines.join("\n"))).slice(0, 12);
 }
 
-function answer(look: Look, before: string, rings: number) {
+function answer(look: Look, before: string, rings: number, lookedAt: number | undefined) {
 	const what = changedParts(before, look.state);
 	return {
 		changed: what.length > 0,
@@ -174,6 +204,6 @@ function answer(look: Look, before: string, rings: number) {
 		yours: look.yours,
 		reviews: look.reviews,
 		backlog: look.backlog,
-		seen: seenAt(look.state, rings),
+		seen: seenAt(look.state, rings, lookedAt),
 	};
 }

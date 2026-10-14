@@ -1529,7 +1529,11 @@ tells; a `seen` from before the part was added still compares by its three.
 After the parts, `seen` carries the ring count they were read at: when the log
 shows nothing rang for the caller since, the call holds without reading anything
 first, and answers with the same `seen` if nothing rings for it, so an agent
-waiting in a quiet repo costs a hold and no reads. RepoCache counts its rings,
+waiting in a quiet repo costs a hold and no reads. Last comes when the parts
+were read: one read more than five minutes ago is read again though nothing
+rang, since some things change with time alone and write nothing (a review's
+hold runs out, a claim gone quiet frees its piece), so a quiet repo costs a read
+every five minutes. RepoCache counts its rings,
 and a call reads the count before it looks, so a ring during the look isn't
 missed. It only wakes the agent, which then looks and chooses as always. Before
 rings, each agent took a turn every 10 seconds, reading its change, the reviews

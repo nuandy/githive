@@ -221,6 +221,24 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		expect(looks.count).toBe(0);
 	});
 
+	it("looks again once its seen is a few minutes old, though nothing rang: some things change with time alone", async () => {
+		const { call, looks } = await setUpCache();
+		const { LOOK_AGAIN_MS, WAIT_PARTS } = await import("../src/toolkit/tools/wait-tool");
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		const parts = String(quiet.seen).split(".");
+		// The parts, the doorbell's count, and when they were read.
+		expect(parts).toHaveLength(WAIT_PARTS.length + 2);
+		const readAgo = (ms: number) => [...parts.slice(0, -1), Math.floor((Date.now() - ms) / 1000).toString(36)];
+		looks.count = 0;
+		await call("wait", { agent: "author", seen: readAgo(60_000).join("."), seconds: 1 }, "author");
+		expect(looks.count).toBe(0);
+		await call("wait", { agent: "author", seen: readAgo(LOOK_AGAIN_MS + 60_000).join("."), seconds: 1 }, "author");
+		expect(looks.count).toBe(1);
+		// A seen from before it carried a time is looked at too.
+		await call("wait", { agent: "author", seen: parts.slice(0, -1).join("."), seconds: 1 }, "author");
+		expect(looks.count).toBe(2);
+	});
+
 	it("still compares a seen from before notices were part of it", async () => {
 		const { call, cache } = await setUpCache();
 		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
