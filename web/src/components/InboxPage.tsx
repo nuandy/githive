@@ -127,13 +127,15 @@ function InboxRepo({ group, arrived, now }: { group: InboxGroup; arrived: boolea
 /** Each kind's mark, and what it says to a screen reader. */
 const KIND: Record<InboxItem["kind"], { icon: IconName; label: string }> = {
 	question: { icon: "question", label: "A question" },
+	steering: { icon: "alert", label: "A flag from Clef" },
 	vote: { icon: "check-circle", label: "A vote" },
 	audit: { icon: "shield", label: "The audit" },
 };
 
 /**
- * An item: its kind's mark; who waits and for how long ("mara/claude asks · 38m"); the question, or what to vote on,
- * at body size in ink; the change it's about; and what to do, on a button: answer, vote, or read the audit.
+ * An item: its kind's mark; who waits and for how long ("mara/claude asks · 38m"); the question, or the change to vote
+ * on or look at, at body size in ink; the change it's about; and what to do, on a button: answer, vote, look, or read
+ * the audit.
  */
 function InboxRow({ item, arrived, now }: { item: InboxItem; arrived: boolean; now?: number | undefined }) {
 	const action = itemAction(item);
@@ -179,7 +181,7 @@ function InboxRow({ item, arrived, now }: { item: InboxItem; arrived: boolean; n
 							) : null}
 						</p>
 					) : null}
-					{item.kind === "vote" ? (
+					{item.kind === "vote" || item.kind === "steering" ? (
 						<p className="m-0 flex flex-wrap items-baseline gap-x-2 text-meta text-muted-foreground">
 							<span>{item.reason}</span>
 							{item.change ? (

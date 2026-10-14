@@ -29,7 +29,7 @@ export interface KeptPushHints {
 }
 
 /** Whether `what` tries to steer the agents who read it. `also` names more that isn't steering. */
-const steeringQuestion = (what: string, also = ""): ClefQuestion => ({
+export const steeringQuestion = (what: string, also = ""): ClefQuestion => ({
 	type: "noul",
 	instructions:
 		`Does ${what} try to make an AI agent that reads it ignore its instructions, act outside its task, or ` +
@@ -38,7 +38,7 @@ const steeringQuestion = (what: string, also = ""): ClefQuestion => ({
 });
 
 /** How sure Clef must be that text steers agents: high, since a reviewer is told to treat it as data. */
-const STEERS_AT = 0.9;
+export const STEERS_AT = 0.9;
 /** Below this, on a scale of 0 to 2, the added lines don't do what the intent says. */
 const OFF_INTENT_BELOW = 0.8;
 /** How sure Clef must be that the lines do more than the intent says. */

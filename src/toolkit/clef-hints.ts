@@ -1,10 +1,13 @@
 import type { ClefAnswer, ClefModel, ClefQuestion } from "../clef";
+import { STEERS_AT, steeringQuestion } from "../push-hints";
+import { isToolText, STEERING_SAYS, type SteeringFlag } from "../steering";
 import type { ToolContext } from "./tools/context";
 
 // What GitHive asks Clef about the text one agent writes for others: an intent, a piece of the backlog, a review's
 // evidence, a question to people. Each tool asks once, all its questions together, and every answer is a hint the
 // reply carries and the agent weighs: work that may duplicate an open change, evidence its author may not be able to
-// act on, how urgent a question is. Nothing is refused on Clef's word.
+// act on, how urgent a question is, and text that tries to steer the agents who will read it (other agents read
+// intents, evidence and backlog pieces as part of their own work). Nothing is refused on Clef's word.
 
 /** How sure Clef must be that two pieces of work are the same before the reply says so. */
 const SAME_WORK_AT = 0.6;
@@ -12,12 +15,18 @@ const SAME_WORK_AT = 0.6;
 const COMPARED_AT_MOST = 100;
 /** The most of each intent sent, so a hundred of them fit clef-flash's context. */
 const INTENT_CHARS = 300;
-/** The most new pieces in one ask: three questions each, within Clef's 64. */
-const PIECES_PER_ASK = 21;
+/** The most new pieces in one ask: four questions each, within Clef's 64. */
+const PIECES_PER_ASK = 16;
 /** From this place on the size scale (0 to 2), a piece seems too big for one change. */
 const TOO_BIG_AT = 1.5;
 /** How sure Clef must be that a piece needs another first before the reply suggests declaring it. */
 const NEEDS_AT = 0.6;
+
+/** A new backlog piece Clef found steering the agents who will read it, and how sure it is, from 0 to 1. */
+export interface PieceSteers {
+	piece: string;
+	likelihood: number;
+}
 
 export interface SameWork {
 	/** The open change or backlog piece it may duplicate. */
@@ -62,6 +71,33 @@ async function consult(ctx: ToolContext, model: ClefModel, state: string, questi
 	return ctx.clef.ask(model, state, questions);
 }
 
+/** Keeps a steering flag with the change it's about. A failed write loses only the hint. */
+export async function keepSteering(ctx: ToolContext, repo: string, change: string, flag: Omit<SteeringFlag, "at">) {
+	const at = new Date().toISOString();
+	await ctx.steering?.flag(repo, change, { ...flag, at }).catch((err) => {
+		console.error(`keeping ${change}'s steering flag failed`, String(err));
+	});
+}
+
+/**
+ * What Clef found steering agents in text written about a change through the tools: its intent, its backlog piece,
+ * reviews' evidence. A push's own flags are in its hints.
+ */
+export async function writtenSteering(ctx: ToolContext, repo: string, change: string) {
+	const flags = await ctx.steering?.of(repo, [change]).catch(() => undefined);
+	return (flags?.[change] ?? []).filter(isToolText);
+}
+
+/** A steering flag as a reply carries it to the agent that wrote the text. */
+export const steeringReply = (likelihood: number) => ({ likelihood, says: STEERING_SAYS });
+
+/** How sure Clef is that the text steers agents, when sure enough to say so. */
+function steersOf(answer: ClefAnswer | undefined): number | undefined {
+	if (answer?.type !== "noul") return undefined;
+	if (answer.noul < STEERS_AT) return undefined;
+	return Math.round(answer.noul * 100) / 100;
+}
+
 /** Asks which of `others` does the same work as `what`. Options are numbered, as ids may not suit Clef's keys. */
 function sameWorkQuestion(what: string, others: Comparable[]): ClefQuestion {
 	const criteria: Record<string, string> = { none: "Different work from every other option" };
@@ -87,24 +123,36 @@ function pickOf(answer: ClefAnswer | undefined, options: Comparable[], sureAt: n
 	return { id: picked.id, likelihood: Math.round(likelihood * 100) / 100 };
 }
 
-/** Finds an open change that may already do a new claim's work. `open` is the other changes in force, oldest first. */
+/**
+ * Finds an open change that may already do a new claim's work, and whether its intent steers the agents who will
+ * read it. `open` is the other changes in force, oldest first.
+ */
 export async function claimHints(
 	ctx: ToolContext,
 	claim: { intent: string; paths: string[] },
 	open: Comparable[],
-): Promise<SameWork | undefined> {
+): Promise<{ same?: SameWork; steers?: number }> {
 	const others = open.slice(-COMPARED_AT_MOST);
-	if (!others.length) return undefined;
-	const questions = { same: sameWorkQuestion("the new change", others) };
+	const questions: Record<string, ClefQuestion> = { steers: steeringQuestion("the new change's intent") };
+	if (others.length) questions.same = sameWorkQuestion("the new change", others);
 	const state = `A new change's intent:\n${claim.intent}\n\nThe paths it claims: ${claim.paths.join(", ")}`;
 	const answers = await consult(ctx, "clef-flash", state, questions);
-	return sameWorkOf(answers?.same, others);
+	const same = sameWorkOf(answers?.same, others);
+	const steers = steersOf(answers?.steers);
+	return { ...(same ? { same } : {}), ...(steers === undefined ? {} : { steers }) };
+}
+
+/** Whether a brief for GitHive's builder steers it: the builder works from the brief as written. */
+export async function briefSteers(ctx: ToolContext, intent: string): Promise<number | undefined> {
+	const questions = { steers: steeringQuestion("this brief for a coding agent") };
+	const answers = await consult(ctx, "clef-flash", intent, questions);
+	return steersOf(answers?.steers);
 }
 
 /**
  * For each new backlog piece, finds the open change or piece it may duplicate, one it may need first that it doesn't
- * declare, and whether it seems too big for one change. `existing` is what's in the backlog and in progress, oldest
- * first.
+ * declare, whether it seems too big for one change, and whether it steers the agents who will take it. `existing` is
+ * what's in the backlog and in progress, oldest first.
  */
 export async function pieceHints(ctx: ToolContext, pieces: NewPiece[], existing: Comparable[]) {
 	const asks: Promise<PieceHints>[] = [];
@@ -115,6 +163,7 @@ export async function pieceHints(ctx: ToolContext, pieces: NewPiece[], existing:
 		similar: answered.flatMap((answer) => answer.similar),
 		mayNeed: answered.flatMap((answer) => answer.mayNeed),
 		big: answered.flatMap((answer) => answer.big),
+		steering: answered.flatMap((answer) => answer.steering),
 	};
 }
 
@@ -123,6 +172,7 @@ interface PieceHints {
 	mayNeed: PieceNeed[];
 	/** The pieces that seem too big for one change. */
 	big: string[];
+	steering: PieceSteers[];
 }
 
 /** Sizes of a piece of work, as one change would hold it. */
@@ -164,6 +214,7 @@ async function askAboutPieces(
 	const questions: Record<string, ClefQuestion> = {};
 	pieces.forEach((_, index) => {
 		const what = `new piece ${index + 1}`;
+		questions[`steers${index}`] = steeringQuestion(what);
 		if (others.length) questions[`same${index}`] = sameWorkQuestion(what, others);
 		if (candidates[index]!.length) questions[`needs${index}`] = needsQuestion(what, candidates[index]!);
 		questions[`size${index}`] = {
@@ -179,7 +230,10 @@ async function askAboutPieces(
 	const similar: PieceLike[] = [];
 	const mayNeed: PieceNeed[] = [];
 	const big: string[] = [];
+	const steering: PieceSteers[] = [];
 	pieces.forEach((piece, index) => {
+		const steers = steersOf(answers?.[`steers${index}`]);
+		if (steers !== undefined) steering.push({ piece: piece.id, likelihood: steers });
 		const same = sameWorkOf(answers?.[`same${index}`], others);
 		if (same) similar.push({ piece: piece.id, like: same.id, likelihood: same.likelihood });
 		const needed = pickOf(answers?.[`needs${index}`], candidates[index]!, NEEDS_AT);
@@ -187,7 +241,7 @@ async function askAboutPieces(
 		const size = answers?.[`size${index}`];
 		if (size?.type === "score" && size.score >= TOO_BIG_AT) big.push(piece.id);
 	});
-	return { similar, mayNeed, big };
+	return { similar, mayNeed, big, steering };
 }
 
 /** Levels of review evidence, as its author can act on it. */
@@ -206,10 +260,10 @@ const CHECKED_LEVELS = [
 
 /**
  * Says whether a rejection's evidence is too vague for its author to act on, or an approval's too thin to show what
- * was checked: an approval that checked nothing lets a bug land.
+ * was checked (an approval that checked nothing lets a bug land), and whether it steers the agents who will read it.
  */
 export async function voteHints(ctx: ToolContext, vote: { verdict: string; evidence: string }) {
-	const questions: Record<string, ClefQuestion> = {};
+	const questions: Record<string, ClefQuestion> = { steers: steeringQuestion("this review evidence") };
 	if (vote.verdict === "reject")
 		questions.specific = {
 			type: "score",
@@ -223,7 +277,12 @@ export async function voteHints(ctx: ToolContext, vote: { verdict: string; evide
 			criteria: CHECKED_LEVELS,
 		};
 	const answers = await consult(ctx, "clef-flash", vote.evidence, questions);
-	return { vague: scoredBelow(answers?.specific, 1), thin: scoredBelow(answers?.checked, 1) };
+	const steers = steersOf(answers?.steers);
+	return {
+		vague: scoredBelow(answers?.specific, 1),
+		thin: scoredBelow(answers?.checked, 1),
+		...(steers === undefined ? {} : { steers }),
+	};
 }
 
 const scoredBelow = (answer: ClefAnswer | undefined, level: number) => answer?.type === "score" && answer.score < level;

@@ -31,6 +31,7 @@ import { type ChangeEnding, DecisionBox, type PageTarget } from "./DecisionBox";
 import { Icon } from "./Icon";
 import { Lazy, lazyPart } from "./Lazy";
 import { SiteLink } from "./SiteLink";
+import { SteeringCallout } from "./SteeringCallout";
 import { Tabs } from "./Tabs";
 import { Timeline, TimelineEntry, TimelineList } from "./Timeline";
 import { VoteForm, type VoteApi } from "./VoteForm";
@@ -447,6 +448,7 @@ export function ChangePage({
 					onActed={onActed}
 				/>
 			) : null}
+			{claim?.steering?.length ? <SteeringCallout flags={claim.steering} className={INDENT} /> : null}
 			<OpeningComment agent={agent} record={record} />
 			{history === undefined ? (
 				<p className="m-0 ml-11 text-ui text-muted-foreground to-720:ml-0">Loading history…</p>

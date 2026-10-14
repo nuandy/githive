@@ -2,6 +2,7 @@ import type { Level } from "../../auth/orgs";
 import type { OwnerLimits } from "../../auth/agent-limits";
 import type { Clef } from "../../clef";
 import type { KeptPushHints } from "../../push-hints";
+import type { SteeringFlag } from "../../steering";
 import { requiredString, statusOf } from "../../errors";
 import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
@@ -155,6 +156,11 @@ export interface ToolContext {
 	};
 	/** What Clef made of a change's latest push, by the head it was asked about (see push-hints.ts). */
 	pushHints?: (repo: string, change: string) => Promise<KeptPushHints | null>;
+	/** What Clef found steering agents, kept with the change it's about (see steering.ts). Hints, never a gate. */
+	steering?: {
+		flag: (repo: string, change: string, flag: SteeringFlag) => Promise<void>;
+		of: (repo: string, changes: string[]) => Promise<Record<string, SteeringFlag[]>>;
+	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/**
@@ -242,7 +248,7 @@ export interface WaitingItem {
 	reason: string;
 	/** How urgent Clef found an agent's question, from 0 to 2. */
 	urgency?: number;
-	kind?: "question" | "vote";
+	kind?: "question" | "vote" | "steering";
 	role?: string;
 	/** Who asked, or whose change waits on the vote (newer summaries). */
 	agent?: string;

@@ -14,6 +14,7 @@ import {
 } from "./news-log";
 import { keepPageMessage, PAGE_PREFIXES, pageMessagesSince } from "./page-feed";
 import type { KeptPushHints } from "./push-hints";
+import { pushFlags, type SteeringFlag, withFlag } from "./steering";
 import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
@@ -387,6 +388,32 @@ export class RepoCache extends DurableObject<Env> {
 
 	async keepPushHints(change: string, kept: KeptPushHints) {
 		await this.ctx.storage.put(`push-hints:${change}`, kept);
+	}
+
+	/** Keeps what Clef found steering agents in text written about `change` (see steering.ts). */
+	async flagSteering(change: string, flag: SteeringFlag) {
+		const key = `steering:${change}`;
+		const kept = (await this.ctx.storage.get<SteeringFlag[]>(key)) ?? [];
+		await this.ctx.storage.put(key, withFlag(kept, flag));
+	}
+
+	/** Each change's steering flags: from what was written about it, and from its latest push. Unflagged, left out. */
+	async steeringOf(changes: string[]) {
+		const flags: Record<string, SteeringFlag[]> = {};
+		// Two keys a change: half a batch of changes at a time.
+		const step = Math.floor(STORAGE_BATCH / 2);
+		for (let i = 0; i < changes.length; i += step) {
+			const some = changes.slice(i, i + step);
+			const keys = some.flatMap((change) => [`steering:${change}`, `push-hints:${change}`]);
+			const got = await this.ctx.storage.get<SteeringFlag[] | KeptPushHints>(keys);
+			for (const change of some) {
+				const written = (got.get(`steering:${change}`) as SteeringFlag[] | undefined) ?? [];
+				const pushed = got.get(`push-hints:${change}`) as KeptPushHints | undefined;
+				const all = [...written, ...pushFlags(pushed?.hints ?? [])];
+				if (all.length) flags[change] = all;
+			}
+		}
+		return flags;
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */

@@ -2,7 +2,7 @@ import { changeId, normalizeClaim } from "../../claim-paths";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
-import { claimHints } from "../clef-hints";
+import { briefSteers, claimHints, keepSteering, steeringReply } from "../clef-hints";
 import { giveBackPartClaim, withoutLeftovers } from "./claim-leftovers";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
@@ -46,7 +46,7 @@ export const claimTools: ToolHandlers = {
 		const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
 		if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
 		const intent = requiredString(args, "intent");
-		const similar = await sameWorkAs(call, { change, agent, intent, paths });
+		const { similar, steers } = await asClefSees(call, { change, agent, intent, paths });
 		const input = {
 			change,
 			agent,
@@ -80,7 +80,12 @@ export const claimTools: ToolHandlers = {
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
 		const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
 		if (!outcome.ok) return reply;
-		return similar ? { ...reply, similar } : reply;
+		if (steers !== undefined) await keepSteering(ctx, repo, change, { in: "intent", by: agent, likelihood: steers });
+		return {
+			...reply,
+			...(similar ? { similar } : {}),
+			...(steers === undefined ? {} : { steering: steeringReply(steers) }),
+		};
 	},
 	async release(call) {
 		const { args, ctx, repo, votes, registered, actAs, stamper, store, claimOf } = call;
@@ -115,6 +120,7 @@ export const claimTools: ToolHandlers = {
 			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
 		const intent = requiredString(args, "intent");
 		const change = changeId(intent);
+		const steers = await briefSteers(ctx, intent);
 		const claimed = await store.claim(
 			{
 				change,
@@ -127,25 +133,28 @@ export const claimTools: ToolHandlers = {
 			stamper,
 		);
 		if (!claimed.ok) return claimed;
-		return ctx.startBuilder({ repo, change });
+		if (steers === undefined) return ctx.startBuilder({ repo, change });
+		// The builder still starts: its reviewers and the people watching hear of the flag.
+		await keepSteering(ctx, repo, change, { in: "intent", likelihood: steers });
+		return { ...(await ctx.startBuilder({ repo, change })), steering: steeringReply(steers) };
 	},
 };
 
 /**
- * An open change that may already do what a new claim's intent says, as Clef sees it: advice, since the claim still
- * goes ahead. Asked of a new claim only; claiming again renews what was asked about then.
+ * What Clef sees in a new claim, as advice, since the claim still goes ahead: an open change that may already do what
+ * its intent says, and how sure it is that the intent steers the agents who will read it. Asked of a new claim only;
+ * claiming again renews what was asked about then.
  */
-async function sameWorkAs(call: ToolCall, claim: { change: string; agent: string; intent: string; paths: string[] }) {
+async function asClefSees(call: ToolCall, claim: { change: string; agent: string; intent: string; paths: string[] }) {
 	const held = await call.claimOf(claim.change);
-	if (held?.agent === claim.agent) return undefined;
+	if (held?.agent === claim.agent) return {};
 	const open = (await call.adviceView()).claims.filter((other) => other.change !== claim.change);
 	const comparable = open.map((other) => ({ id: other.change, intent: other.intent }));
-	const same = await claimHints(call.ctx, claim, comparable);
-	if (!same) return undefined;
-	const match = open.find((other) => other.change === same.id);
-	if (!match) return undefined;
+	const { same, steers } = await claimHints(call.ctx, claim, comparable);
+	const match = same && open.find((other) => other.change === same.id);
+	if (!match) return { steers };
 	const intent = match.intent.split("\n")[0] ?? "";
-	return { change: match.change, agent: match.agent, intent, likelihood: same.likelihood };
+	return { similar: { change: match.change, agent: match.agent, intent, likelihood: same.likelihood }, steers };
 }
 
 /**

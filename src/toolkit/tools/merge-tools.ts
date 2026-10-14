@@ -9,6 +9,7 @@ import type { ClaimRecord, Registry } from "../claims";
 import { pushToGitHub } from "../github-outbound";
 import { bringsGitHubBack, type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
+import { writtenSteering } from "../clef-hints";
 import { countedVotes } from "../votes";
 import { earlierRejection, holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
@@ -310,12 +311,16 @@ async function reviewAccess(
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
 	const into = held?.into ?? branch;
-	const [earlier, pushed] = await Promise.all([
+	const [earlier, pushed, steering] = await Promise.all([
 		reviewer ? yourRejection(call, reviewer, change, head) : undefined,
 		ctx.pushHints?.(repo, change).catch(() => null),
+		writtenSteering(ctx, repo, change),
 	]);
-	// What Clef made of the head's push, so a reviewer knows before reading it.
-	const hints = pushed?.head === head && pushed.hints.length ? { hints: pushed.hints } : {};
+	// What Clef made of the head's push and of what was written about the change, so a reviewer knows before reading.
+	const hints = {
+		...(pushed?.head === head && pushed.hints.length ? { hints: pushed.hints } : {}),
+		...(steering.length ? { steering } : {}),
+	};
 	return {
 		change,
 		author,

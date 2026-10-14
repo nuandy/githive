@@ -191,6 +191,37 @@ describe("the inbox", () => {
 		expect(itemWho({ kind: "question", key: "x", title: "x", reason: "?", href: "" })).toBe("An agent asks");
 	});
 
+	it("shows a change Clef flags, linked to its page, between questions and votes", () => {
+		const { groups, count } = buildInbox({
+			repos: [
+				{
+					repo: "acme/shop",
+					since: "",
+					summary: {
+						waiting: [
+							{ kind: "vote", role: "qa", change: "vote", title: "", reason: "" },
+							{
+								kind: "steering",
+								change: "flagged",
+								title: "Add a footer",
+								reason: "Clef found its intent reading as instructions to the agents who will read it.",
+								agent: "sam/codex",
+							},
+							{ kind: "question", change: "ask", title: "", reason: "?" },
+						],
+					},
+				},
+			],
+		});
+		expect(count).toBe(3);
+		const items = groups[0]!.items;
+		expect(items.map((item) => item.kind)).toEqual(["question", "steering", "vote"]);
+		const flagged = items[1]!;
+		expect(itemWho(flagged)).toBe("Clef flags");
+		expect(flagged.reason).toMatch(/instructions to the agents who will read it\. Nothing waits on it/);
+		expect(itemAction(flagged)).toEqual({ label: "Look", href: "#/repos/acme/shop/changes/flagged" });
+	});
+
 	it("finds what arrived since the page last looked, once it has looked", () => {
 		const item = (key: string) => ({ kind: "question" as const, key, title: key, reason: "?", href: "" });
 		const group = (repo: string, keys: string[]) => ({ repo, repoHref: "", items: keys.map(item), count: keys.length });

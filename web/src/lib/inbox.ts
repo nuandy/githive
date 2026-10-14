@@ -5,12 +5,13 @@ import { type Summaries, waitingIn, type WaitingItem } from "./repos";
 import { href, withQuery } from "./routes";
 import { timeOf } from "./model";
 
-// The Inbox: everything, across repos, that waits on a person, with why: agents' questions, changes waiting on a vote
-// only a person may give, and merges the audit flags. Failed checks aren't here: they're the agent's own work. Each
-// repo counts as on the Repositories list and in the Hive (waitingIn, needsYou.ts).
+// The Inbox: everything, across repos, that waits on a person, with why: agents' questions, text Clef flags as
+// steering agents, changes waiting on a vote only a person may give, and merges the audit flags. Failed checks aren't
+// here: they're the agent's own work. Each repo counts as on the Repositories list and in the Hive (waitingIn,
+// needsYou.ts).
 
 export interface InboxItem {
-	kind: "question" | "vote" | "audit";
+	kind: "question" | "steering" | "vote" | "audit";
 	/** Unique in its repo: the change, or "audit". */
 	key: string;
 	/** The change a question or a vote is about. */
@@ -79,14 +80,16 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
  */
 export function itemWho(item: InboxItem): string {
 	if (item.kind === "audit") return "The audit flags";
+	if (item.kind === "steering") return "Clef flags";
 	const who = item.agent ? whoWaits(item.agent) : item.kind === "vote" ? "A change" : "An agent";
 	if (item.kind === "vote") return `${who} waits on a ${item.role} vote`;
 	return `${who} ${who === "GitHive" ? "says" : "asks"}`;
 }
 
-/** What the reader does about an item, on its button: answer, vote, or read the audit. */
+/** What the reader does about an item, on its button: answer, vote, look at a flagged change, or read the audit. */
 export function itemAction(item: InboxItem): { label: string; href: string } {
 	if (item.kind === "audit") return { label: "See the audit", href: item.href };
+	if (item.kind === "steering") return { label: "Look", href: item.href };
 	// The change's page, opened at its decision.
 	const decide = withQuery(item.href, { decide: true });
 	return { label: item.kind === "vote" ? `Vote as ${item.role}` : "Answer", href: decide };
@@ -106,7 +109,10 @@ export function inboxArrivals(
 	return { fresh, seen: new Set([...(seen ?? []), ...all.map(keyOf)]) };
 }
 
-/** A change waiting on a person, as a row: a vote only a person may give, or (as older summaries are) a question. */
+/**
+ * A change waiting on a person, as a row: a vote only a person may give, text Clef flags, or (as older summaries are)
+ * a question.
+ */
 function waitingItem(repo: string, item: WaitingItem): InboxItem {
 	const shared = {
 		key: item.change,
@@ -118,6 +124,8 @@ function waitingItem(repo: string, item: WaitingItem): InboxItem {
 	};
 	if (item.kind === "vote" && item.role)
 		return { kind: "vote", ...shared, role: item.role, reason: `Only a person can vote as ${item.role}.` };
+	if (item.kind === "steering")
+		return { kind: "steering", ...shared, reason: `${item.reason} Nothing waits on it: look before it lands.` };
 	return {
 		kind: "question",
 		...shared,

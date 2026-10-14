@@ -35,7 +35,7 @@ export interface WaitingItem {
 	reason: string;
 	/** How urgent Clef found an agent's question, from 0 (can wait) to 2 (urgent). */
 	urgency?: number;
-	kind?: "question" | "vote";
+	kind?: "question" | "vote" | "steering";
 	role?: string;
 	/** Who asked, or whose change waits on the vote (newer summaries). */
 	agent?: string;

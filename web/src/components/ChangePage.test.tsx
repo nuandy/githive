@@ -62,6 +62,15 @@ const box = (html: string) => html.match(/<section id="decide"[\s\S]*?<\/section
 const LAND = /Land now/;
 
 describe("landing a change", () => {
+	it("shows what Clef flags as instructions to agents, and still offers Land now", () => {
+		const steering = [{ in: "review evidence", by: "rev-1", likelihood: 0.95 }];
+		const text = page({ claim: { ...approved, steering } });
+		expect(text).toContain("Clef reads text here as instructions to agents");
+		expect(text).toContain("review evidence by rev-1 (95% sure)");
+		expect(text).toContain("Land now");
+		expect(page({})).not.toContain("Clef reads text here");
+	});
+
 	it("offers no Land now for a change whose checks failed on its head, and shows what failed", () => {
 		const html = render({ history: withVotes([vote({})]) });
 		expect(visibleText(html)).toContain("Checks failed");

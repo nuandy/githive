@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RepoSnapshot } from "../api";
 import { needsYou } from "./needsYou";
+import { changeState } from "./status";
 
 type Claim = RepoSnapshot["claims"][number];
 
@@ -31,6 +32,22 @@ describe("what needs you in a repo", () => {
 			{ kind: "vote", change: "votes", role: "security" },
 		]);
 		expect(result).toMatchObject({ violations: 2, count: 4 });
+	});
+
+	it("asks a person to look at a change Clef flags, after questions and before votes, without holding it up", () => {
+		const flags = [{ in: "review evidence", by: "rev-1", likelihood: 0.95 }];
+		const flagged = claim("flagged", { steering: flags });
+		const asks = claim("asks", { attention: { reason: "which cache size?", agent: "agent-asks", at: "" } });
+		const result = needsYou(snapshot([claim("votes"), flagged, asks]));
+		expect(result.changes.map((each) => each.kind)).toEqual(["question", "steering", "vote"]);
+		expect(result.changes[1]).toEqual({ kind: "steering", change: "flagged", flags });
+		// A question is what the change waits on: the flag shows on its page.
+		const both = claim("both", { steering: flags, attention: { reason: "?", agent: "a", at: "" } });
+		expect(needsYou(snapshot([both])).changes.map((each) => each.kind)).toEqual(["question"]);
+		// Its state stays as it was: it's in review, not waiting on a person.
+		expect(changeState(claim("flagged", { steering: flags, approval: { ...flagged.approval, awaiting: [] } }))).toBe(
+			"in-review",
+		);
 	});
 
 	it("leaves out failed checks and changes sent back: they're their agents' to fix", () => {

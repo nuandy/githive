@@ -3,6 +3,7 @@ import { diffCommits } from "../../change-diff";
 import { type Remote, Workspace } from "../../git";
 import { fetchCommits } from "../../git-fetch";
 import { projectBranch } from "../../project-branch";
+import type { SteeringFlag } from "../../steering";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
@@ -459,7 +460,9 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			),
 		),
 	);
-	const waiting = claims
+	const flagged = await timing.time("steering", () => steeringOf(ctx, repo, claims));
+	const shown = claims.map((claim) => (flagged[claim.change] ? { ...claim, steering: flagged[claim.change] } : claim));
+	const waiting = shown
 		.flatMap((claim) => waitingOnPerson(claim, votes.votes, claimPolicy(state, claim)) ?? [])
 		.sort(inboxOrder);
 	await ctx
@@ -492,7 +495,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		sharding: shardingOf(state).sharding,
 		/** "never" (one record), "on demand" (buckets once the load calls for them), or bucketed since `since`. */
 		votesSharding: votes.sharded ?? (state.autoShard || state.shardDepth ? "on demand" : "never"),
-		claims,
+		claims: shown,
 		votes: votes.votes.slice(-20).reverse(),
 		...(state.github ? { github: await githubView(ctx, repo, state) } : {}),
 	};
@@ -541,6 +544,22 @@ interface ClaimSnapshot extends ClaimRecord {
 	attention?: Attention;
 	waitsOn?: string[];
 	lease?: ReturnType<typeof leaseFor>;
+	/** What Clef found steering agents in what was written about it, or in its latest push (see steering.ts). */
+	steering?: SteeringFlag[];
+}
+
+/** The claims' steering flags. A failed read shows none: they're hints. */
+async function steeringOf(ctx: ToolContext, repo: string, claims: ClaimSnapshot[]) {
+	if (!ctx.steering || !claims.length) return {};
+	return ctx.steering
+		.of(
+			repo,
+			claims.map((claim) => claim.change),
+		)
+		.catch((err: unknown) => {
+			console.error(`reading ${repo}'s steering flags failed`, String(err));
+			return {} as Record<string, SteeringFlag[]>;
+		});
 }
 
 /**
@@ -670,6 +689,8 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 			at: attention.at,
 			...(attention.urgency === undefined ? {} : { urgency: attention.urgency }),
 		};
+	// A flag holds nothing up; it asks a person to look before the change lands. A vote it waits on shows there too.
+	if (claim.steering?.length) return steeringItem(claim, claim.steering, title);
 	if (!head || approval.approved || approval.vetoedBy.length) return null;
 	const sentBack = votes.some(
 		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
@@ -689,12 +710,32 @@ function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: Revi
 	};
 }
 
+/** A change Clef flagged, for the Inbox: which texts, and since the newest flag. */
+function steeringItem(claim: ClaimSnapshot, flags: SteeringFlag[], title: string): WaitingItem {
+	const kinds = [...new Set(flags.map((flag) => flag.in))];
+	const newest = flags
+		.flatMap((flag) => flag.at ?? [])
+		.sort()
+		.at(-1);
+	return {
+		kind: "steering",
+		change: claim.change,
+		title,
+		reason: `Clef found its ${kinds.join(", ")} reading as instructions to the agents who will read it.`,
+		agent: claim.agent,
+		at: newest ?? claim.active,
+	};
+}
+
+/** Questions first, then what Clef flagged, then votes. */
+const INBOX_RANK = { question: 0, steering: 1, vote: 2 } as const;
+
 /**
- * The Inbox's order, so the 20 a summary keeps are what matters most: questions before votes, the most urgent first,
- * then the oldest. The dashboard sorts by urgency too (web/src/lib/inbox.ts).
+ * The Inbox's order, so the 20 a summary keeps are what matters most: questions, then Clef's flags, then votes; the
+ * most urgent first, then the oldest. The dashboard sorts the same way (web/src/lib/needsYou.ts, byWaiting).
  */
 function inboxOrder(a: WaitingItem, b: WaitingItem) {
-	const rank = (item: WaitingItem) => (item.kind === "vote" ? 1 : 0);
+	const rank = (item: WaitingItem) => INBOX_RANK[item.kind ?? "question"];
 	return rank(a) - rank(b) || (b.urgency ?? 0) - (a.urgency ?? 0) || (a.at ?? "").localeCompare(b.at ?? "");
 }
 

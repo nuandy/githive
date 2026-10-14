@@ -9,6 +9,7 @@ import { connectSteps } from "../lib/session";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { type ChangeState, STATES } from "../lib/status";
+import { steeringTexts } from "../lib/steering";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
 import { cn } from "../lib/utils";
@@ -152,8 +153,9 @@ interface NeedsRow {
 }
 
 /**
- * What needs a person, as the banner's rows (see needsYou.ts): agents' questions first, then votes only people may
- * give, then the audit's open violations. Failed checks aren't here: the goal's row says its agent is fixing them.
+ * What needs a person, as the banner's rows (see needsYou.ts): agents' questions first, then text Clef flags, then
+ * votes only people may give, then the audit's open violations. Failed checks aren't here: the goal's row says its
+ * agent is fixing them.
  */
 export function needsRows(
 	repo: string,
@@ -181,10 +183,20 @@ export function needsRows(
 			};
 		}
 		const since = activeOf.get(waiting.change);
+		const lead = `${titleOf.get(waiting.change) ?? waiting.change}${since ? ` · ${shortAge(since, now)}` : ""}`;
+		if (waiting.kind === "steering")
+			return {
+				key: `steering:${waiting.change}`,
+				icon: "shield",
+				lead,
+				text: `Clef reads its ${steeringTexts(waiting.flags)} as instructions to agents: look before it lands`,
+				verb: "Look",
+				href: href.change(repo, waiting.change),
+			};
 		return {
 			key: `vote:${waiting.change}`,
 			icon: "user",
-			lead: `${titleOf.get(waiting.change) ?? waiting.change}${since ? ` · ${shortAge(since, now)}` : ""}`,
+			lead,
 			text: `waits for a ${waiting.role} vote, which only people may give`,
 			verb: `Vote as ${waiting.role}`,
 			href: decide(waiting.change),

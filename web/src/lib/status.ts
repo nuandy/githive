@@ -1,4 +1,4 @@
-import type { RepoLanding, RepoSnapshot } from "../api";
+import type { RepoLanding, RepoSnapshot, SteeringFlag } from "../api";
 import { settingsForBranch } from "../../../src/toolkit/branch-rules";
 import { abandoned } from "../../../src/toolkit/staleness";
 import type { Tone } from "./changeStatus";
@@ -227,16 +227,19 @@ export function rejectionsOnHead(claim: Claim, votes: Vote[]): Vote[] {
 }
 
 /** What a change waits on a person for: its agent's question (or a failed builder), or a vote only people give. */
-export type Waiting =
+export type HeldFor =
 	| { kind: "question"; change: string; agent: string; reason: string; at: string; urgency?: number }
 	| { kind: "vote"; change: string; role: string };
+
+/** What a person is asked to look at: what a change waits on them for, or text Clef flags (steeringOn). */
+export type Waiting = HeldFor | { kind: "steering"; change: string; flags: SteeringFlag[] };
 
 /**
  * What, if anything, a change needs a person for: what its agent asks (GitHive's failed builder asks too), or, once
  * pushed and not sent back, a vote as a role only people may vote as under the policy it's held to. Failed checks are
  * its agent's to fix. The server's repo summaries count the same (dashboard.ts, waitingOnPerson).
  */
-export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "settings"> = {}): Waiting | undefined {
+export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "settings"> = {}): HeldFor | undefined {
 	const { attention, change } = claim;
 	if (attention)
 		return {
@@ -263,6 +266,14 @@ export function waitingOn(claim: Claim, context: Pick<StateContext, "votes" | "s
 	const policy = context.settings && claimPolicy(claim, context.settings);
 	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
 	return role ? { kind: "vote", change, role } : undefined;
+}
+
+/**
+ * Text about a change Clef found steering the agents who read it, for a person to look at. Unlike what waitingOn
+ * finds, it holds nothing up, so a change's state doesn't change with it.
+ */
+export function steeringOn(claim: Claim): Waiting | undefined {
+	return claim.steering?.length ? { kind: "steering", change: claim.change, flags: claim.steering } : undefined;
 }
 
 /** What GitHub's change is held to while the repo trusts GitHub's changes: no review (the server's TRUSTED_POLICY). */

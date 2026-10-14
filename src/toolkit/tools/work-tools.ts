@@ -8,7 +8,8 @@ import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
-import { pieceHints } from "../clef-hints";
+import { keepSteering, pieceHints, writtenSteering } from "../clef-hints";
+import { STEERING_SAYS } from "../../steering";
 import { addDependencies, addWork, addWorks } from "../backlog-records";
 import { type BacklogView, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
@@ -71,6 +72,7 @@ export const workTools: ToolHandlers = {
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
 			const hints = await piecesLikeOpenWork(call, items);
 			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, sized(items, hints.big));
+			await keepPieceSteering(call, by, hints.steering);
 			const reply = { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
 			return withPieceHints(reply, hints);
 		}
@@ -80,6 +82,7 @@ export const workTools: ToolHandlers = {
 		const piece = { ...sized([item], hints.big)[0]!, by, ...owner };
 		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), piece);
 		if (!added.ok) return { ok: false, reason: added.refused };
+		await keepPieceSteering(call, by, hints.steering);
 		return withPieceHints({ ok: true, id: item.id }, hints);
 	},
 	async status(call) {
@@ -143,6 +146,8 @@ export const workTools: ToolHandlers = {
 			const kept = await ctx.pushHints?.(repo, change).catch(() => null);
 			if (kept?.head === status.head && kept.hints.length) reply.hints = kept.hints;
 		}
+		const steering = await writtenSteering(ctx, repo, change);
+		if (steering.length) reply.steering = steering;
 		// Whether it merges cleanly and stays inside its claim: worth knowing before asking for review.
 		if (held && status.head && !landed) {
 			const checked = await mergeCheck(call, change, held, status.head).catch((err) => ({
@@ -171,13 +176,22 @@ async function piecesLikeOpenWork(call: ToolCall, pieces: Parameters<typeof piec
 }
 
 function withPieceHints<R extends object>(reply: R, hints: Awaited<ReturnType<typeof pieceHints>>) {
-	const { similar, mayNeed, big } = hints;
+	const { similar, mayNeed, big, steering } = hints;
 	return {
 		...reply,
 		...(similar.length ? { similar } : {}),
 		...(mayNeed.length ? { mayNeed } : {}),
 		...(big.length ? { tooBig: big } : {}),
+		...(steering.length ? { steering: steering.map((each) => ({ ...each, says: STEERING_SAYS })) } : {}),
 	};
+}
+
+/** Keeps each flagged piece's flag under its id, which is its change's id once claimed. */
+async function keepPieceSteering(call: ToolCall, by: string, flagged: { piece: string; likelihood: number }[]) {
+	const keeps = flagged.map(({ piece, likelihood }) =>
+		keepSteering(call.ctx, call.repo, piece, { in: "backlog piece", by, likelihood }),
+	);
+	await Promise.all(keeps);
 }
 
 /** Marks the pieces Clef found too big for one change, for whoever takes them from the backlog. */

@@ -153,6 +153,8 @@ export interface RepoSnapshot {
 		};
 		/** How long the claim lasts if its agent goes quiet (newer servers). */
 		lease?: ClaimLease;
+		/** Text about it Clef found steering the agents who read it (newer servers). A hint: nothing waits on it. */
+		steering?: SteeringFlag[];
 	}[];
 	votes: {
 		commit: string;
@@ -175,6 +177,17 @@ export interface RepoSnapshot {
  * How long a claim lasts if its agent goes quiet (see the server's toolkit/staleness.ts): whose turn its change is on,
  * and on its agent's turn the time after which anyone may take its paths. Waiting on anyone else, it never frees.
  */
+/** Text Clef found steering the agents who read it. */
+export interface SteeringFlag {
+	/** "intent", "backlog piece", "review evidence", "commit messages" or "added lines". */
+	in: string;
+	/** Who wrote it, when known. */
+	by?: string;
+	/** How sure Clef is, from 0 to 1. */
+	likelihood: number;
+	at?: string;
+}
+
 export interface ClaimLease {
 	waitingOn: "agent" | "reviewers" | "landing" | "person";
 	freeAfter?: string;

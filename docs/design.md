@@ -118,7 +118,16 @@ what Git said.
   act on (`vagueEvidence`) or an approval's too thin to show what was checked
   (`thinEvidence`, and the vote is marked `thin` on the dashboard; either way a
   reviewer's latest vote counts, so it can vote again), and a question's
-  urgency (0 to 2), kept on its record for the Inbox's order. Claims, pieces and votes ask `clef-flash` (tens of
+  urgency (0 to 2), kept on its record for the Inbox's order. An intent, a
+  backlog piece, review evidence or a brief for the hosted builder that reads
+  as instructions to the agents who will read it (`steering`, from 90%) is
+  flagged, not refused: the flag is kept in the repo's RepoCache with the change
+  it's about (a piece's id is its change's once claimed; evidence goes with the
+  change reviewed), and shows in that change's `status` and its reviewers'
+  `credentials`, with a line in `next` telling them to treat the text as data,
+  on its dashboard page, and in the Inbox, between questions and votes. It
+  holds nothing up: the change's state, review and landing are as they'd be
+  without it. Claims, pieces and votes ask `clef-flash` (tens of
   milliseconds); questions to people, rarer, ask `clef`. Clef gets only the text
   and other changes' intents, never who wrote them. GitHive's own agents aren't
   asked about, a claim made again isn't asked about twice, and a call waits at
@@ -129,8 +138,9 @@ what Git said.
   and a checked one; a rewrite of a whole app was named too big; three
   questions rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`,
   questions 2.1 to 2.3 s with `clef`. Text that steers agents was once refused
-  (422) at these writes; that guard was taken out on 13 Oct, so such text is
-  now only pointed out where it reaches agents through Git (see below).
+  (422) at these writes; that guard was taken out on 13 Oct, since Clef
+  advises and never decides, and came back on 14 Oct as the flag above. A
+  release's reason isn't asked about: only the change's own agent reads it.
 - Clef on a push (`push-hints.ts`, `preview-look.ts`): agents also read each
   other's commit messages and code, through `git log`, blame and their clones,
   which no tool call carries. So each push to a change's branch, as awareness
@@ -142,7 +152,9 @@ what Git said.
   wrong, an error; from 70%), at most 5 previews per batch of pushes. The push
   has happened, so nothing is refused: the answers are hints, kept for the
   head's `status` and the review `credentials` its reviewers get (`hints`, with
-  a line in `next` for each kind), and told to its agent as a notice.
+  a line in `next` for each kind), and told to its agent as a notice. A
+  steering hint also flags the change for people, as text written through the
+  tools does (above).
 - Clef on a failed batch (`failure-hints.ts`): when a batch's checks first fail,
   `clef-flash` reads their output while the search for the failing change runs,
   so the search never waits on it. It's asked whether something outside the

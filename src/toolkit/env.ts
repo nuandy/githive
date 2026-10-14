@@ -290,6 +290,10 @@ function repoCacheParts(env: Env) {
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
 		pushHints: (repo, change) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).keptPushHints(change)),
+		steering: {
+			flag: (repo, change, flag) => env.REPO_CACHE.getByName(`repo:${repo}`).flagSteering(change, flag),
+			of: (repo, changes) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).steeringOf(changes)),
+		},
 		news: (repo, branch, agent, delivery) =>
 			rpc(env.REPO_CACHE.getByName(`repo:${repo}`).newsFor(branch, agent, delivery)),
 		notify: (repo, branch, notices) =>
