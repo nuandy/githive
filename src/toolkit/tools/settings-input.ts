@@ -57,12 +57,40 @@ export function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	const independent = typeof args.independent === "boolean" ? args.independent : base.independent;
 	return {
 		required,
-		vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : base.vetoes,
-		escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : base.escalate,
+		vetoes: args.vetoes !== undefined ? roleList(args.vetoes, "vetoes") : base.vetoes,
+		escalate: args.escalate !== undefined ? escalationsFrom(args.escalate) : base.escalate,
 		// Without grants, every role keeps its default holders.
 		...(grants && Object.keys(grants).length ? { grants } : {}),
 		...(independent ? { independent: true } : {}),
 	};
+}
+
+const isText = (item: unknown) => typeof item === "string" && item.trim() !== "";
+const isCount = (value: unknown) => Number.isInteger(value) && (value as number) >= 0;
+
+function roleList(value: unknown, field: string): string[] {
+	if (!Array.isArray(value) || !value.every(isText)) fail(400, `${field} is a list of role names ([] for none)`);
+	return [...new Set((value as string[]).map((role) => role.trim()))];
+}
+
+// Each escalation is checked here, since the review rules read its paths and numbers as they are.
+function escalationsFrom(value: unknown): NonNullable<ReviewPolicy["escalate"]> {
+	if (!Array.isArray(value)) fail(400, "escalate is a list of rules: each paths, with required or vetoes");
+	return value.map((raw, index) => {
+		const field = `escalate[${index}]`;
+		if (!raw || typeof raw !== "object" || Array.isArray(raw))
+			fail(400, `${field} is a rule: paths, with required or vetoes`);
+		const rule = raw as Args;
+		const paths = Array.isArray(rule.paths) ? rule.paths : [];
+		if (!paths.length || !paths.every(isText)) fail(400, `${field}.paths is a list of paths`);
+		const escalation: NonNullable<ReviewPolicy["escalate"]>[number] = { paths: paths as string[] };
+		if (rule.required !== undefined) {
+			if (!isCount(rule.required)) fail(400, `${field}.required is a whole number of approvals`);
+			escalation.required = rule.required as number;
+		}
+		if (rule.vetoes !== undefined) escalation.vetoes = roleList(rule.vetoes, `${field}.vetoes`);
+		return escalation;
+	});
 }
 
 /**

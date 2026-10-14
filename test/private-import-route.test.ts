@@ -76,4 +76,17 @@ describe("making a repo from a private one", () => {
 		const again = await make({ import_url: "https://github.com/ada/app.git", import_token: TOKEN });
 		expect(again.status).toBe(400);
 	});
+
+	it("refuses a name that differs from an existing repo's only in case, and leaves that repo's storage alone", async () => {
+		let fails = false;
+		const { make, deleted } = await world(async () => {
+			if (fails) throw new Error("[400] GitHub refused the token");
+			return { branch: "main" };
+		});
+		expect((await make({ import_url: "https://github.com/ada/app.git", import_token: TOKEN })).status).toBe(201);
+		fails = true;
+		const again = await make({ name: "APP", import_url: "https://github.com/ada/app.git", import_token: TOKEN });
+		expect(again.status).toBe(409);
+		expect(deleted).toEqual([]);
+	});
 });

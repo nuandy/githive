@@ -15,9 +15,19 @@ export const UPGRADES: Readonly<Record<number, Upgrade>> = {
 	1: (state) => state,
 };
 
+/** A trailer's value, read from the message's last paragraph only, so text written by agents can't pose as one. */
+export function trailerOf(message: string, name: string): string | undefined {
+	const block =
+		message
+			.trimEnd()
+			.split(/\n[ \t]*\n/)
+			.at(-1) ?? "";
+	return block.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1];
+}
+
 export function formatOf(message: string): number {
-	const found = message.match(new RegExp(`^${FORMAT_TRAILER}: (\\d+)$`, "m"))?.[1];
-	return found ? Number(found) : 1;
+	const found = trailerOf(message, FORMAT_TRAILER);
+	return found && /^\d+$/.test(found) ? Number(found) : 1;
 }
 
 export function upgradeState<S>(

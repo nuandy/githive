@@ -13,6 +13,7 @@ import {
 	DEFAULT_SHARD_DEPTH,
 	HOSTED_PREFIX,
 	MOST_AT_ONCE,
+	MOST_RECORDS_REPOS,
 	shardingOf,
 } from "./repo";
 import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
@@ -29,6 +30,8 @@ import { INSTRUCTIONS } from "./tool-list";
 
 // Tools that set up a repo and its agents: settings (which also starts GitHive on a repo) and register.
 
+const AGENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 export const setupTools: ToolHandlers = {
 	async settings(call) {
 		return call.registered?.baseline ? changeRepoSettings(call, call.registered) : startOnRepo(call);
@@ -40,6 +43,9 @@ export const setupTools: ToolHandlers = {
 			if (agent.includes("/"))
 				fail(400, 'names with "/" are signed-in agents\' (<handle>/<agent>); register a name without one');
 			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) fail(403, "githive- names are GitHive's hosted agents'");
+			// A name goes into record commit messages and shell commands, so it holds nothing that could break out.
+			if (!AGENT_NAME.test(agent))
+				fail(400, "a name is up to 64 letters, digits, dots, dashes and underscores, starting with a letter or digit");
 			return agent;
 		};
 		const keyFor = (agent: string) => {
@@ -86,8 +92,9 @@ async function startOnRepo({ args, ctx, run, repo, claims, registered, stamper }
 	// Claims stay in one record until the load calls for shards, unless shard_depth says otherwise.
 	const asked = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : undefined;
 	// Sharded claims are spread over records repos when this deployment can make them.
-	const wanted =
-		typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
+	const requestedRepos =
+		typeof args.records_repos === "number" ? Math.floor(args.records_repos) : DEFAULT_RECORDS_REPOS;
+	const wanted = Math.min(MOST_RECORDS_REPOS, Math.max(0, requestedRepos));
 	const spread = ctx.recordsRemote && ctx.createRecordsRepos ? wanted : 0;
 	const recordsRepos = asked ? spread : 0;
 	if (recordsRepos) await ctx.createRecordsRepos!(repo, recordsRepos);

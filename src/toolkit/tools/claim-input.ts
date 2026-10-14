@@ -59,9 +59,22 @@ export function workItemFrom(args: Record<string, unknown>) {
 	};
 }
 
+const CHANGE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const isChangeId = (item: unknown) => typeof item === "string" && CHANGE_ID.test(item);
+
+/** The change a claim names. It goes into the git commands reviewers are given, so it holds nothing a shell reads. */
+export function newChangeId(args: Record<string, unknown>): string {
+	const change = requiredString(args, "change");
+	if (change.length > 100 || !isChangeId(change))
+		fail(
+			400,
+			"a change id is up to 100 letters, digits, dots, dashes and underscores, starting with a letter or digit",
+		);
+	return change;
+}
+
 export function changeList(value: unknown, field: string): string[] {
 	if (value === undefined) return [];
-	const isChangeId = (item: unknown) => typeof item === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(item);
 	if (!Array.isArray(value) || !value.every(isChangeId)) fail(400, `${field} is a list of change ids`);
 	return [...new Set(value as string[])];
 }

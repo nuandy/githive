@@ -480,7 +480,8 @@ const TOOL_LIST = [
 		description:
 			"Register your agent name and get its secret key (shown once), so what you write is attributed " +
 			"to you even if you share an Access identity. With your current key, rotates it. Or `agents`: " +
-			"several new names at once (none registered yet), in one write, each with its own key.",
+			"several new names at once (none registered yet), in one write, each with its own key. A name is " +
+			"up to 64 letters, digits, dots, dashes and underscores.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, agent: str, agents: { type: "array", items: str } },

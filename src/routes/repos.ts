@@ -202,8 +202,9 @@ export function repoRoutes(app: Hono<AppEnv>) {
 		const org = await orgs.orgOrFail(String(owner));
 		const userId = principal.kind === "access" ? null : principal.user.id;
 		if (userId && !(await orgs.mayCreateRepo(org, userId))) fail(403, `you can't make repos in ${org.slug}`);
-		if (await orgs.repo(org.slug, repoName)) fail(409, `${org.slug}/${repoName} exists`);
 		const id = `${org.slug}--${repoName.toLowerCase()}`;
+		// Names differing only in case share an id, and so the storage a failed import would delete.
+		if ((await orgs.repo(org.slug, repoName)) || (await orgs.repoById(id))) fail(409, `${org.slug}/${repoName} exists`);
 		await fillNewRepo(c.env, principal, org, repoName, id, { from, url, branch, token, init: start });
 		const repo = await orgs.addRepo(org, repoName, userId, {
 			visibility: visibility === "public" ? "public" : "private",

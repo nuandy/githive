@@ -5,7 +5,7 @@ import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } 
 import { briefSteers, claimHints, keepSteering, steeringReply } from "../clef-hints";
 import { giveBackPartClaim, withoutLeftovers } from "./claim-leftovers";
 import { abandonedRule } from "./change-state";
-import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
+import { branchMerge, changeList, dependencyLoop, newChangeId, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
 import type { ClaimRecord } from "../claims";
 import { BUILDING_IDLE_MS } from "../staleness";
@@ -84,7 +84,7 @@ export const claimTools: ToolHandlers = {
  */
 export async function claimChange(call: ToolCall, piece?: { by: string }) {
 	const { args, ctx, repo, claims, votes, registered, actAs, stamper, store, branch, changeSource, warmChecks } = call;
-	const change = requiredString(args, "change");
+	const change = newChangeId(args);
 	const agent = actAs("agent");
 	// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
 	const source = optionalString(args, "source");

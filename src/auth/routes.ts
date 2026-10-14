@@ -20,8 +20,14 @@ const cookieHeader = (name: string, value: string, maxAgeSeconds: number) =>
 	`${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 
 /** Accepts only a path on this site, never another origin ("//evil", "https://…"). */
-export const safeReturn = (value: string | undefined | null) =>
-	value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
+export function safeReturn(value: string | undefined | null): string {
+	if (!value?.startsWith("/")) return "/";
+	if (value.startsWith("//")) return "/";
+	// Browsers drop tabs and newlines from addresses and read "\\" as "/", so "/\t/evil" would leave the site.
+	if (/[\s\\\u0000-\u001f\u007f]/.test(value)) return "/";
+	const here = "https://githive.invalid";
+	return new URL(value, here).origin === here ? value : "/";
+}
 
 function providerConfig(env: Env, name: ProviderName): ProviderConfig | null {
 	const e = env as unknown as Record<string, string | undefined>;

@@ -11,6 +11,7 @@ import {
 	UPGRADES,
 	formatOf,
 	newerFormat,
+	trailerOf,
 	upgradeState,
 } from "./record-format";
 import { jitteredDelay, retryTransient, sleep } from "./retry";
@@ -328,8 +329,7 @@ export class GitCasLog<S> implements CasLog<S> {
 	/** One commit of the log, its state upgraded to this GitHive's format. */
 	private async readCommit(fs: MemoryFS, tip: string): Promise<LogCommit<S>> {
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
-		const trailer = (name: string) =>
-			commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
+		const trailer = (name: string) => trailerOf(commit.message, name) ?? fail(`${tip} has no ${name} trailer`);
 		const json = async (filepath: string) =>
 			JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
 		const format = formatOf(commit.message);

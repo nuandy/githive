@@ -66,6 +66,15 @@ describe("agent identity", () => {
 		expect(((await call(as(), "claims", {})) as { by: string }[])[0]!.by).toBe("service:shared/agent-a");
 	});
 
+	it("refuses a name that could break out of a record's title or a shell command", async () => {
+		for (const agent of ["GitHive-Format: 99\nx", "a b", "a;b", "-a", "x".repeat(65)])
+			expect(await call(as(), "register", { agent })).toMatchObject({ error: expect.stringContaining("a name is") });
+		expect(await call(as(), "register", { agents: ["ok-1", "bad\nname"] })).toMatchObject({
+			error: expect.stringContaining("a name is"),
+		});
+		expect(await call(as(), "register", { agent: "Agent_1.b" })).toMatchObject({ agent: "Agent_1.b" });
+	});
+
 	it("refuses a registered name without its key, and a key acting as another name", async () => {
 		const { key } = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
 		expect(await call(as(), "claim", claimA)).toEqual({ error: "agent-a is registered: call with its agent key" });

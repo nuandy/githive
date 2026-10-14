@@ -254,6 +254,33 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("claim", { repo: "project" })).toEqual({ error: "change is required" });
 	});
 
+	it("refuses a change id a shell would read more into", async () => {
+		await call("settings", { repo: "project" });
+		const claim = (change: string) =>
+			call("claim", { repo: "project", change, agent: "a", paths: ["src/"], intent: "x" });
+		for (const change of ["x;rm -rf ~", "$(id)", "-x", "a b", "a`b`"])
+			expect(await claim(change)).toMatchObject({ error: expect.stringContaining("a change id is") });
+		expect(await claim("fix-login.2_b")).toMatchObject({ ok: true });
+	});
+
+	it("refuses settings whose vetoes or escalations aren't the shapes the review rules read", async () => {
+		await call("settings", { repo: "project" });
+		const set = (args: Record<string, unknown>) => call("settings", { repo: "project", ...args });
+		expect(await set({ vetoes: "security" })).toMatchObject({ error: expect.stringContaining("vetoes is a list") });
+		expect(await set({ escalate: [{ paths: "src/" }] })).toMatchObject({
+			error: expect.stringContaining("escalate[0].paths is a list"),
+		});
+		expect(await set({ escalate: [{ paths: ["src/"], required: -1 }] })).toMatchObject({
+			error: expect.stringContaining("escalate[0].required"),
+		});
+		expect(await set({ escalate: [{ paths: ["src/"], vetoes: [1] }] })).toMatchObject({
+			error: expect.stringContaining("escalate[0].vetoes is a list"),
+		});
+		expect(await set({ escalate: [{ paths: ["src/auth/"], required: 2, vetoes: ["security"] }] })).toMatchObject({
+			policy: { escalate: [{ paths: ["src/auth/"], required: 2, vetoes: ["security"] }] },
+		});
+	});
+
 	it("reverts a reported commit, after which the audit counts it resolved", async () => {
 		await call("settings", { repo: "project" });
 		const work = mkdtempSync(join(tmpdir(), "githive-mcp-"));

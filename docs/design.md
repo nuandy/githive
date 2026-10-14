@@ -270,7 +270,8 @@ claim lists at most 50 paths.
 **Formats.** Records outlive the code that wrote them, so each record commit,
 merge and revert says its record format in a `GitHive-Format` trailer
 (`src/record-format.ts`); records written before formats existed have none and
-are format 1. A reader upgrades an older format's state one step at a time as
+are format 1. Trailers are read only from a message's last paragraph, so an
+entry's text in the title can't pose as one. A reader upgrades an older format's state one step at a time as
 it reads it (`UPGRADES`), and a writer always writes the current format.
 Format 2 (13 Oct) lets a vote name its change, so a reviewer's earlier
 rejection can be found when the change is revised; format 1's votes name none,
@@ -322,7 +323,9 @@ can't act under any other name. A registered name is never used without its
 key, and a second `register` for it is refused unless the call carries the
 current key (which rotates it). Names starting `githive-` are reserved for
 GitHive's hosted agents (the builder, the reviewers, and `githive-github`,
-which brings GitHub's changes back), and names with a `/` for signed-in agents. An agent's
+which brings GitHub's changes back), and names with a `/` for signed-in agents. A name is up to 64
+letters, digits, dots, dashes and underscores, as is a change id (up to 100), since both go into record
+messages and the git commands agents are given. An agent's
 records always carry its caller's identity before its name, so no agent can
 pass as a verified identity.
 
@@ -1703,7 +1706,7 @@ than 15 claims and releases were written a minute over the last 5 minutes
 compare-and-swap on the registry that sets `shardDepth`, with when and why. It
 happens once. A repo's first `settings` can also be told `shard_depth`: a depth to shard now, or
 0 for never; and `records_repos`, how many records repos to spread the shards
-over (0 keeps them in the project repo).
+over (0 keeps them in the project repo, 64 at most).
 
 **Where a claim goes.** A path's shard is its first `depth` segments. A claim
 is written in the shard of each of its paths. A shallower path ("wide", like

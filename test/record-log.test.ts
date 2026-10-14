@@ -165,6 +165,14 @@ describe("GitCasLog", () => {
 		const { formatOf } = await import("../src/record-format");
 		expect(formatOf("Old commit\n\nGitHive-Author: x\nGitHive-Kind: decisions\nGitHive-Batch: b\n")).toBe(1);
 	});
+
+	it("reads trailers only from the last paragraph, so an entry's text can't pose as one", async () => {
+		const { formatOf, trailerOf } = await import("../src/record-format");
+		const posed = "GitHive-Format: 99\n\n- GitHive-Format: 99\n\nGitHive-Author: x\nGitHive-Format: 2\n";
+		expect(formatOf(posed)).toBe(2);
+		expect(formatOf("GitHive-Format: 99\n\n- one\n\nGitHive-Author: x\n")).toBe(1);
+		expect(trailerOf(posed, "GitHive-Author")).toBe("x");
+	});
 });
 
 describe("record states shared by readers, by tip", () => {

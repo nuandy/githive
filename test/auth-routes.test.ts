@@ -128,6 +128,11 @@ describe("signing in with GitHub", () => {
 		await ids.invite("ada@example.com", "admin@example.com");
 		expect((await signIn("//evil.test/steal")).location).toBe("/");
 		expect((await signIn("https://evil.test")).location).toBe("/");
+		// Browsers drop tabs and newlines and read "\\" as "/", which would make each of these //evil.test.
+		expect((await signIn("/\t/evil.test")).location).toBe("/");
+		expect((await signIn("/\n/evil.test")).location).toBe("/");
+		expect((await signIn("/\\evil.test")).location).toBe("/");
+		expect((await signIn("/#/repos/ada/app")).location).toBe("/#/repos/ada/app");
 	});
 });
 

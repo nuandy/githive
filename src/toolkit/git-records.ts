@@ -2,7 +2,7 @@ import git from "isomorphic-git";
 import { gitAuth, http } from "../git-http";
 import { isEmptyRepo, type Remote, Workspace } from "../git";
 import { fetchCommits } from "../git-fetch";
-import { formatOf, RECORD_FORMAT, upgradeState } from "../record-format";
+import { formatOf, RECORD_FORMAT, trailerOf, upgradeState } from "../record-format";
 import { checkedState } from "../record-schemas";
 import { retryTransient, whileRefsMove } from "../retry";
 import type { MergeRecord } from "./audit";
@@ -113,14 +113,9 @@ function listAndFetch(remote: Remote, prefix: string) {
 	});
 }
 
-/** A trailer's value, read from the message's last paragraph only, so text written by agents can't pose as one. */
+/** A merge commit's trailer, trimmed. */
 export function trailer(message: string, name: string) {
-	const block =
-		message
-			.trimEnd()
-			.split(/\n[ \t]*\n/)
-			.at(-1) ?? "";
-	return block.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
+	return trailerOf(message, name)?.trim() || undefined;
 }
 
 /** The branch's first-parent commits after `baseline`, oldest first. Every one is audited. */
@@ -162,20 +157,20 @@ export interface BranchCommit {
 /** A commit on a branch as the audit reads it: what its trailers say and which commits it joins. */
 export function mergeRecordOf(branchCommit: BranchCommit): MergeRecord {
 	const [first, second] = branchCommit.parents;
-	const trailerOf = (name: string) => trailer(branchCommit.message, name);
-	const commitsIn = (name: string) => trailerOf(name)?.split(/\s+/).filter(Boolean);
+	const said = (name: string) => trailer(branchCommit.message, name);
+	const commitsIn = (name: string) => said(name)?.split(/\s+/).filter(Boolean);
 	return {
 		commit: branchCommit.commit,
-		author: trailerOf("GitHive-Agent") ?? branchCommit.author,
-		change: trailerOf("GitHive-Change"),
-		claimsTip: trailerOf("GitHive-Claims"),
-		votesTip: trailerOf("GitHive-Votes"),
-		testedOn: trailerOf("GitHive-Tested"),
+		author: said("GitHive-Agent") ?? branchCommit.author,
+		change: said("GitHive-Change"),
+		claimsTip: said("GitHive-Claims"),
+		votesTip: said("GitHive-Votes"),
+		testedOn: said("GitHive-Tested"),
 		testedAfter: commitsIn("GitHive-Tested-After"),
 		testedWith: commitsIn("GitHive-Tested-With"),
-		by: trailerOf("GitHive-By"),
-		stamp: trailerOf("GitHive-Stamp"),
-		reverts: trailerOf("GitHive-Reverts"),
+		by: said("GitHive-By"),
+		stamp: said("GitHive-Stamp"),
+		reverts: said("GitHive-Reverts"),
 		base: first,
 		head: second,
 		files: branchCommit.files,

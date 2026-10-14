@@ -23,6 +23,7 @@ export const DEFAULT_SHARD_DEPTH = 2;
 
 /** Records repos per sharded repo. Artifacts takes one push at a time per repo, so shards are spread out. */
 export const DEFAULT_RECORDS_REPOS = 16;
+export const MOST_RECORDS_REPOS = 64;
 
 /** No claim goes stale sooner than this after its agent last claimed (see staleness.ts). */
 export const STALE_AFTER_MS = BUILDING_IDLE_MS;
