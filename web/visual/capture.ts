@@ -10,7 +10,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { createServer } from "vite";
-import { answer, FIXED_NOW } from "./fixtures.ts";
+import type { answer as Answer } from "./fixtures.ts";
+import { FIXED_NOW } from "./fixtures/clock.ts";
 import { SCENES, type Scene, type Scheme } from "./scenes.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -248,6 +249,10 @@ async function captureMotion(page: Page, job: Job) {
 	}
 }
 
+// The fixtures, loaded through the dev server as the dashboard's own fixture mode loads them (web/vite.config.ts), so
+// they can import from the dashboard and the Worker's sources as either does, without Node's own resolution.
+let answer: typeof Answer;
+
 async function main() {
 	const server = await createServer({
 		configFile: join(ROOT, "web/vite.config.ts"),
@@ -255,6 +260,7 @@ async function main() {
 		logLevel: "error",
 	});
 	await server.listen();
+	({ answer } = (await server.ssrLoadModule("/visual/fixtures.ts")) as { answer: typeof Answer });
 	const address = server.httpServer?.address();
 	const port = typeof address === "object" && address ? address.port : 0;
 	const base = `http://localhost:${port}`;

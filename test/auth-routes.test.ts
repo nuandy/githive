@@ -116,7 +116,8 @@ describe("signing in with GitHub", () => {
 
 	it("turns away a person who isn't invited, and one whose email GitHub hasn't verified", async () => {
 		fakeGitHub({ id: 2, login: "eve", email: "eve@example.com" });
-		expect((await signIn()).location).toBe("/?signin_error=not-invited");
+		// The email their request is noted under comes back in the fragment, which the browser never sends on.
+		expect((await signIn()).location).toBe("/?signin_error=not-invited#signin-as=eve%40example.com");
 		await ids.invite("eve@example.com", "admin@example.com");
 		fakeGitHub({ id: 2, login: "eve", email: "eve@example.com", verified: false });
 		expect((await signIn()).location).toBe("/?signin_error=unverified-email");

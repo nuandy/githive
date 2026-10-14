@@ -5,7 +5,8 @@ import { claimApprovalLabel, claimStatus } from "../lib/claimStatus";
 import { repoSnapshot } from "../test/fixtures";
 import { ChangePage } from "./ChangePage";
 import { GitHubLink } from "./GitHubLink";
-import { githubDraft, githubInput } from "./GitHubSettings";
+import { createDraftStore, draftKey } from "../lib/settingsDrafts";
+import { disconnects, githubDraft, githubForm, githubInput, GitHubSection, savedLink } from "./GitHubSettings";
 import { ChangeLabels, githubTerms } from "./RepoTabs";
 
 // A repo connected to GitHub shows it by its name: the GitHub repo, and in pr
@@ -96,30 +97,36 @@ describe("GitHub's change", () => {
 		approval: { approved: true, approvals: 0, required: 0, vetoedBy: [] },
 	};
 
-	it("can be given up from its page by people who can write, and no other change can", () => {
-		const giveUp = async () => ({ ok: true, released: "github-abc" });
-		const page = (claim: Claim, withGiveUp = true) =>
-			text(
-				renderToStaticMarkup(
-					<ChangePage
-						snapshot={{ ...repoSnapshot, claims: [claim] }}
-						changeId={claim.change}
-						claim={claim}
-						repo="acme/web"
-						tab="conversation"
-						{...(withGiveUp ? { giveUp } : {})}
-					/>,
-				),
+	it("can be released from its page by people who can write, like any change", () => {
+		const release = async () => ({ ok: true, released: "github-abc" });
+		const page = (claim: Claim, withRelease = true) =>
+			renderToStaticMarkup(
+				<ChangePage
+					snapshot={{ ...repoSnapshot, claims: [claim] }}
+					changeId={claim.change}
+					claim={claim}
+					repo="acme/web"
+					tab="conversation"
+					{...(withRelease ? { release } : {})}
+				/>,
 			);
-		expect(page(change)).toContain("Give up GitHub's changes");
-		expect(page(change, false)).not.toContain("Give up");
-		expect(page({ ...change, change: "c-1", agent: "agent-a", source: undefined })).not.toContain("Give up");
+		expect(page(change)).toContain('aria-label="More about this change"');
+		expect(page(change, false)).not.toContain("More about this change");
+		expect(page({ ...change, change: "c-1", agent: "agent-a", source: undefined })).toContain(
+			'aria-label="More about this change"',
+		);
+		// It needs no review: the decision box says so.
+		expect(text(page(change))).toContain("No review: GitHub's changes are trusted.");
 	});
 
 	it("says it's from GitHub and needs no review while the repo trusts GitHub", () => {
 		expect(text(renderToStaticMarkup(<ChangeLabels claim={change} />))).toBe("from GitHub, trusted");
 		expect(claimApprovalLabel(change)).toBe("No review: trusted");
-		expect(claimStatus(change)).toMatchObject({ label: "Trusted", tone: "good" });
+		expect(claimStatus(change)).toMatchObject({
+			label: "Approved",
+			tone: "good",
+			description: expect.stringContaining("trusted"),
+		});
 		const { trusted: _, ...untrusted } = change;
 		expect(text(renderToStaticMarkup(<ChangeLabels claim={untrusted} />))).toBe("from GitHub");
 	});
@@ -157,5 +164,82 @@ describe("the GitHub settings", () => {
 		expect(githubTerms(github({ sync: "mirror", trust: false }), "main")).toMatch(
 			/pushes main to acme\/shop .* reviewed like any change\.$/,
 		);
+	});
+
+	const section = (link: RepoGitHub | undefined, drafts = createDraftStore()) =>
+		renderToStaticMarkup(
+			<GitHubSection
+				repo="acme/web"
+				branch="main"
+				snapshot={{ policy: { required: 1, vetoes: [] }, verify: [], github: link }}
+				save={async () => ({}) as never}
+				drafts={drafts}
+				options={{ roles: [], holders: [] }}
+			/>,
+		);
+
+	it("shows a connection as it is, with Change… and Disconnect, asked first", () => {
+		const html = section(github({ pull: { number: 128, url: "https://github.com/acme/shop/pull/128" } }));
+		expect(text(html)).toContain("Connected to acme/shop · Pull request #128");
+		expect(text(html)).toContain("Change…");
+		expect(html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>Disconnect<\/button>/);
+		// No fields until Change… opens them.
+		expect(html).not.toContain('id="github-repo"');
+	});
+
+	it("chooses how GitHive's work reaches GitHub from cards that say what each means", () => {
+		const drafts = createDraftStore();
+		const form = { ...githubDraft(github()), editing: true, touched: false };
+		drafts.set(draftKey("acme/web", "github"), { draft: form, base: { ...form, editing: false }, dirty: false });
+		const html = section(github(), drafts);
+		expect(html).toMatch(/name="github-sync" checked="" value="pr"/);
+		expect(text(html)).toContain("Nothing reaches GitHub's main until someone merges it there.");
+		expect(text(html)).toContain("Pushed to main After every landing GitHive pushes main to GitHub");
+		expect(text(section(undefined))).toContain("Connect");
+	});
+
+	it("asks before a repo left blank disconnects it: Save asks Disconnect's question", () => {
+		expect(disconnects({ repo: " ", sync: "pr", trust: true }, github())).toBe(true);
+		expect(disconnects({ repo: "acme/shop", sync: "mirror", trust: true }, github())).toBe(false);
+		expect(disconnects({ repo: "", sync: "pr", trust: true }, undefined)).toBe(false);
+		const drafts = createDraftStore();
+		const form = { ...githubDraft(github()), repo: "", editing: true, touched: true };
+		drafts.set(draftKey("acme/web", "github"), { draft: form, base: githubForm(github()), dirty: true });
+		const html = section(github(), drafts);
+		expect(html).toMatch(/<button[^>]*type="submit"[^>]*>Disconnect…<\/button>/);
+		expect(text(html)).toContain("Left blank, it disconnects acme/shop: Save asks first.");
+	});
+
+	it("shows the link as saved until the repo is read again", () => {
+		const was = github({ pull: { number: 128, url: "https://github.com/acme/shop/pull/128" } });
+		const mirrored = savedLink(was, { github_sync: "mirror" }, { repo: "acme/shop", sync: "mirror", trust: true });
+		expect(mirrored).toEqual({ ...was, sync: "mirror" });
+		expect(savedLink(was, { github: "acme/new" }, { repo: "acme/new", sync: "pr", trust: false })).toEqual({
+			repo: "acme/new",
+			sync: "pr",
+			trust: false,
+			inbound: true,
+			pull: null,
+		});
+		expect(savedLink(was, { github: "" }, { repo: "", sync: "pr", trust: true })).toBeUndefined();
+
+		const drafts = createDraftStore();
+		const hold = (link: RepoGitHub | undefined) =>
+			drafts.set(draftKey("acme/web", "github"), {
+				draft: githubForm(link, true),
+				base: githubForm(link, true),
+				dirty: false,
+				against: githubForm(was),
+			});
+		hold(mirrored);
+		// The repo's settings still say a pull request: the section says what was saved, with nothing more to save.
+		expect(text(section(was, drafts))).toContain("Pushed to main after every landing");
+		expect(text(section(was, drafts))).toContain("Pull request #128");
+		hold(undefined);
+		const disconnected = section(was, drafts);
+		expect(disconnected).toContain('id="github-repo"');
+		expect(disconnected).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*>Connect<\/button>/);
+		// Read again, it shows them as they are.
+		expect(text(section(github({ repo: "acme/other" }), drafts))).toContain("Connected to acme/other");
 	});
 });

@@ -55,6 +55,8 @@ export interface Story {
 	hosted?: Claim["hosted"];
 	/** The files its merge touched, when they aren't its claimed paths. */
 	files?: string[];
+	/** How many files its merge touched, when that's more than `files` lists (the server lists 20). */
+	filesTotal?: number;
 	/** Its agent's last merge check, when it isn't a clean one against the branch's head. */
 	merge?: (head: string, branchHead: string) => MergeCheck;
 	/** Where its code meets other open changes. */
@@ -186,10 +188,12 @@ function approvalOf(
 			latest.set(vote.reviewer, vote);
 	const counted = [...latest.values()];
 	const approvals = counted.filter((vote) => vote.verdict === "approve").length;
-	const vetoedBy = vetoes.filter((role) => counted.some((vote) => vote.role === role && vote.verdict === "reject"));
-	const awaiting = vetoes.filter(
-		(role) => !vetoedBy.includes(role) && !counted.some((vote) => vote.role === role && vote.verdict === "approve"),
-	);
+	// As the server's approval() has them (src/toolkit/votes.ts): who blocked it, by their names, and the roles no one
+	// has approved as yet, a blocked one among them.
+	const vetoedBy = counted
+		.filter((vote) => vote.verdict === "reject" && vetoes.includes(vote.role))
+		.map((vote) => vote.reviewer);
+	const awaiting = vetoes.filter((role) => !counted.some((vote) => vote.role === role && vote.verdict === "approve"));
 	const approved = approvals >= required && !vetoedBy.length && !awaiting.length;
 	return { approved, approvals, required, vetoedBy, awaiting };
 }
@@ -257,7 +261,9 @@ export function buildHive(input: HiveInput): Hive {
 	for (const story of stories)
 		for (const step of story.steps) {
 			if (step.kind === "vote") {
-				const by = ownerOf(step.reviewer);
+				// A person's agent votes as them and itself, as GitHive stamps it: person:<hash>/<agent>.
+				const owner = ownerOf(step.reviewer);
+				const by = owner ? `${owner}/${step.reviewer.split("/")[1]}` : undefined;
 				const vote: Vote = {
 					commit: mustHead(story, step.at),
 					reviewer: step.reviewer,
@@ -459,6 +465,7 @@ export function buildHive(input: HiveInput): Hive {
 	// The project branch's history.
 	const landed: LandedChange[] = onProject.map((story) => {
 		const storyHead = headAt(story, -Infinity)!;
+		const files = story.files ?? touched(story.paths, input.files);
 		const reviews = votes
 			.filter((vote) => vote.commit === storyHead && vote.verdict === "approve")
 			.map((vote) => ({
@@ -474,7 +481,8 @@ export function buildHive(input: HiveInput): Hive {
 			head: storyHead,
 			title: firstLine(story.intent),
 			intent: story.intent,
-			files: story.files ?? touched(story.paths, input.files),
+			files,
+			filesTotal: story.filesTotal ?? files.length,
 			reviews,
 			at: ago(landedAt(story)!),
 		};

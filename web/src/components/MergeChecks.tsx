@@ -1,14 +1,8 @@
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import {
-	COMMAND,
-	type DraftSectionProps,
-	SETTINGS_FIELDS,
-	SettingField,
-	SettingHint,
-	SettingsSection,
-} from "./MergeSettings";
-import { BoxBody, Callout } from "./ui/box";
+import type { DraftSectionProps } from "./MergeSettings";
+import { COMMAND, problemsFor, SETTINGS_FIELDS, SettingField, SettingHint } from "./SettingsParts";
+import { Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, Label, Textarea } from "./ui/field";
 
@@ -17,7 +11,8 @@ interface MergeChecksProps extends DraftSectionProps {
 }
 
 /** The merge settings' checks: the commands, what they skip, and what they run in. */
-export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
+export function MergeChecks({ draft, update, busy, branch, problems = [] }: MergeChecksProps) {
+	const skip = problemsFor(problems, "skip-checks", "skip-checks-hint");
 	const changeCheck = (index: number, command: string) => {
 		const verify = draft.verify.map((current, checkIndex) => (checkIndex === index ? command : current));
 		update({ verify });
@@ -26,61 +21,57 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 		update({ verify: draft.verify.filter((_, checkIndex) => checkIndex !== index) });
 
 	return (
-		<SettingsSection id="settings-checks" title="Merge checks">
-			<BoxBody className={SETTINGS_FIELDS}>
-				<p className="m-0 text-muted-foreground">
-					Commands that must pass on a change merged into {branch} before it lands, run by GitHive in its own container.
-					None: a change merges once approved, and no container runs.
-				</p>
-				{draft.verify.some((command) => command.trim()) ? null : <NoChecksHint />}
-				{draft.verify.map((command, index) => (
-					<div key={index} className="flex min-w-0 items-center gap-2">
-						<label className="sr-only" htmlFor={`check-${index}`}>
-							Check {index + 1}
-						</label>
-						<Input
-							id={`check-${index}`}
-							className={cn(COMMAND, "max-w-105 flex-1")}
-							value={command}
-							onChange={(event) => changeCheck(index, event.target.value)}
-							placeholder="npm test"
-							spellCheck={false}
-							disabled={busy}
-						/>
-						<Button
-							variant="link"
-							onClick={() => removeCheck(index)}
-							disabled={busy}
-							aria-label={`Remove check ${index + 1}`}
-						>
-							Remove
-						</Button>
-					</div>
-				))}
-				<div className="flex flex-wrap gap-1">
-					<Button onClick={() => update({ verify: [...draft.verify, ""] })} disabled={busy}>
-						<Icon name="plus" />
-						Add a check
-					</Button>
-				</div>
-				<SettingField>
-					<Label htmlFor="skip-checks">Skipped for changes that only touch</Label>
-					<Textarea
-						id="skip-checks"
-						className={cn(COMMAND, "leading-[1.45]")}
-						value={draft.skipChecks}
-						onChange={(event) => update({ skipChecks: event.target.value })}
+		<div className={cn(SETTINGS_FIELDS, "px-0.5 py-4")}>
+			{draft.verify.some((command) => command.trim()) ? null : <NoChecksHint />}
+			{draft.verify.map((command, index) => (
+				<div key={index} className="flex min-w-0 items-center gap-2">
+					<label className="sr-only" htmlFor={`check-${index}`}>
+						Check {index + 1}
+					</label>
+					<Input
+						id={`check-${index}`}
+						className={cn(COMMAND, "max-w-105 flex-1")}
+						value={command}
+						onChange={(event) => changeCheck(index, event.target.value)}
+						placeholder="npm test"
 						spellCheck={false}
 						disabled={busy}
 					/>
-					<SettingHint>
-						One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top
-						(site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.
-					</SettingHint>
-				</SettingField>
-				<CheckEnvironment branch={branch} />
-			</BoxBody>
-		</SettingsSection>
+					<Button
+						variant="link"
+						onClick={() => removeCheck(index)}
+						disabled={busy}
+						aria-label={`Remove check ${index + 1}`}
+					>
+						Remove
+					</Button>
+				</div>
+			))}
+			<div className="flex flex-wrap gap-1">
+				<Button onClick={() => update({ verify: [...draft.verify, ""] })} disabled={busy}>
+					<Icon name="plus" />
+					Add a check
+				</Button>
+			</div>
+			<SettingField>
+				<Label htmlFor="skip-checks">Skipped for changes that only touch</Label>
+				<Textarea
+					id="skip-checks"
+					className={cn(COMMAND, "leading-[1.45]")}
+					value={draft.skipChecks}
+					onChange={(event) => update({ skipChecks: event.target.value })}
+					spellCheck={false}
+					disabled={busy}
+					{...skip.attrs}
+				/>
+				{skip.line}
+				<SettingHint id="skip-checks-hint">
+					One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top (site/*.html).
+					A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.
+				</SettingHint>
+			</SettingField>
+			<CheckEnvironment branch={branch} />
+		</div>
 	);
 }
 

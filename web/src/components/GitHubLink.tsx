@@ -83,13 +83,18 @@ export function GitHubLink({
 			: "GitHive pushes main there after every landing";
 	return (
 		<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-ui">
-			<a className="inline-flex items-center gap-1" href={`https://github.com/${github.repo}`} title={mode}>
+			{/* On a phone, the repo header's ⋯ menu has its links. */}
+			<a
+				className="inline-flex items-center gap-1 to-560:hidden"
+				href={`https://github.com/${github.repo}`}
+				title={mode}
+			>
 				<Icon name="repo" size={14} />
 				{github.repo}
 			</a>
 			{github.sync === "pr" && pull ? (
 				<a
-					className="inline-flex items-center gap-1"
+					className="inline-flex items-center gap-1 to-560:hidden"
 					href={pull.url}
 					title="The standing pull request from githive/main"
 				>

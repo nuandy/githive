@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { ago } from "../test/fixtures";
-import { freeWork, goalStatus, hiveGoals, rejections, stageCounts } from "./goals";
+import { distinctTitles, freeWork, goalStatus, hiveGoals, rejections, stageCounts } from "./goals";
 
 type Claim = RepoSnapshot["claims"][number];
 
@@ -18,6 +18,28 @@ const claim = (change: string, extra: Partial<Claim> = {}): Claim => ({
 	head: null,
 	approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 	...extra,
+});
+
+describe("titles side by side", () => {
+	it("fold a long start several share, so what tells them apart comes first", () => {
+		const titles = [
+			"Add edge-case tests for res.links() in test/res.links.edges.js",
+			"Add edge-case tests for req.is() in test/req.is.edges.js",
+			"Fix the cookie parser",
+		];
+		expect(distinctTitles(titles)).toEqual([
+			"…tests for res.links() in test/res.links.edges.js",
+			"…tests for req.is() in test/req.is.edges.js",
+			"Fix the cookie parser",
+		]);
+	});
+
+	it("leave a short shared start, and titles alike in full, as they are", () => {
+		const short = ["Add tests for res.links()", "Add tests for req.is()"];
+		expect(distinctTitles(short)).toEqual(short);
+		const same = ["Bump the router to 2.0", "Bump the router to 2.0"];
+		expect(distinctTitles(same)).toEqual(same);
+	});
 });
 
 describe("the hive's goals", () => {
@@ -132,7 +154,22 @@ describe("the hive's goals", () => {
 	it("tells a change waiting for a veto role apart from one waiting for any review", () => {
 		const approval = { approved: false, approvals: 1, required: 1, vetoedBy: [], awaiting: ["security"] };
 		const [goal] = hiveGoals({ claims: [claim("deps", { head: "d1", approval })], votes: [] });
-		expect(goalStatus(goal!)).toEqual({ words: "waiting for a security vote", tone: "bad" });
+		// An agent may hold the role: it's in review.
+		expect(goalStatus(goal!)).toEqual({ words: "in review · waiting for a security vote", tone: "accent" });
+		// Only people may: it needs a person.
+		const settings = { policy: { required: 1, vetoes: ["security"], grants: { security: ["person:*"] } } };
+		const [waiting] = hiveGoals({ claims: [claim("deps", { head: "d1", approval })], votes: [], settings });
+		expect(waiting?.state).toBe("needs-person");
+		expect(goalStatus(waiting!)).toEqual({ words: "needs a person for a security vote", tone: "bad" });
+		// Only the role people alone may vote as: an agent may give the other.
+		const both = { ...approval, awaiting: ["qa", "security"] };
+		const policy = { required: 1, vetoes: ["security", "qa"], grants: { security: ["person:*"], qa: ["qa-bot"] } };
+		const [one] = hiveGoals({
+			claims: [claim("deps", { head: "d1", approval: both })],
+			votes: [],
+			settings: { policy },
+		});
+		expect(goalStatus(one!)).toEqual({ words: "needs a person for a security vote", tone: "bad" });
 	});
 
 	it("tells two agents' stories apart when one released a change and the other took it up", () => {
@@ -170,7 +207,7 @@ describe("the hive's goals", () => {
 			at: ago(1),
 		};
 		const [goal] = hiveGoals({ claims: [claim("c", { head: "h1", approval })], votes: [checks] });
-		expect(goal?.state).toBe("revising");
+		expect(goal?.state).toBe("checks-failed");
 		expect(goalStatus(goal!).words).toBe("checks failed, fixing");
 	});
 
@@ -198,7 +235,8 @@ describe("the hive's goals", () => {
 	it("asks a person when the claim says so", () => {
 		const attention = { reason: "should sendFile follow symlinks?", agent: "agent-12", at: ago(1) };
 		const [goal] = hiveGoals({ claims: [claim("ask", { attention })], votes: [] });
-		expect(goal?.state).toBe("asking");
+		expect(goal?.state).toBe("needs-person");
+		expect(goalStatus(goal!)).toEqual({ words: "needs a person: should sendFile follow symlinks?", tone: "bad" });
 		expect(goal?.steps.at(-1)).toMatchObject({ kind: "asked", text: "should sendFile follow symlinks?" });
 	});
 });
@@ -229,6 +267,7 @@ describe("free work and the stage counts", () => {
 			next: 3,
 			building: 1,
 			review: 1,
+			approved: 0,
 			landing: 0,
 			landed: 1,
 		});

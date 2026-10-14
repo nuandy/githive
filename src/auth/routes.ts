@@ -5,7 +5,7 @@ import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChal
 import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
 import { demoRepoOf } from "../demo/demo-repo";
 import { OrgStore } from "./orgs";
-import { type IdentityStore, type ProviderProfile, SESSION_DAYS, randomSecret } from "./store";
+import { type IdentityStore, type ProviderProfile, SESSION_DAYS, normalizeEmail, randomSecret } from "./store";
 import { fail } from "../errors";
 
 // Sign-in with GitHub or Google, and a signed-in person's own agents, tokens and connected MCP clients.
@@ -117,9 +117,12 @@ function signInRoutes(app: Hono<AuthEnv>) {
 	// The provider's callback checks the state, learns who signed in, and starts a session.
 	app.get("/auth/:provider/callback", async (c) => {
 		const name = c.req.param("provider");
-		const back = (error: string) => {
+		// A request to join comes back with the email it's noted under, in the fragment: the browser keeps that to
+		// itself, so the address never reaches a request log.
+		const back = (error: string, noted?: string) => {
 			c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, "", 0));
-			return c.redirect(`/?signin_error=${encodeURIComponent(error)}`, 302);
+			const fragment = noted ? `#signin-as=${encodeURIComponent(noted)}` : "";
+			return c.redirect(`/?signin_error=${encodeURIComponent(error)}${fragment}`, 302);
 		};
 		if (!isProvider(name)) return c.json({ error: `no sign-in with ${name}` }, 404);
 		const config = providerConfig(c.env, name);
@@ -147,7 +150,7 @@ function signInRoutes(app: Hono<AuthEnv>) {
 		// Someone already invited gets in whatever code they typed; only the turned away hear it was wrong.
 		if (!session) {
 			const wrongCode = !!pending.invite && !withInviteCode;
-			return back(wrongCode ? "wrong-invite-code" : "not-invited");
+			return wrongCode ? back("wrong-invite-code") : back("not-invited", normalizeEmail(profile.email));
 		}
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, "", 0));
 		c.header("Set-Cookie", cookieHeader(SESSION_COOKIE, session, SESSION_DAYS * 86_400), { append: true });

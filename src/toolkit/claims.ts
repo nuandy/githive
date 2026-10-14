@@ -37,7 +37,10 @@ export interface ReleaseRecord {
 	at: string;
 	reason: string;
 	mergedAs?: string;
-	/** The branch it merged into when not the project's, for changes that wait on it. */
+	/**
+	 * The branch it merged into, or was to, when not the project's: for changes that wait on it, and its page once
+	 * released. Releases recorded before it was kept for every release name it only when merged.
+	 */
 	into?: string;
 	stale?: boolean;
 	/** The holder's last activity, which the audit checks a stale release against. */
@@ -363,15 +366,19 @@ async function staleInTheWay(
 	return stale;
 }
 
-const staleRelease = (held: ClaimRecord, by: string, at: string): ReleaseRecord => ({
-	change: held.change,
-	agent: held.agent,
-	by,
-	at,
-	reason: "stale",
-	stale: true,
-	lastActive: held.active,
-});
+const staleRelease = (held: ClaimRecord, by: string, at: string): ReleaseRecord => {
+	const into = scopedInto(held.paths);
+	return {
+		change: held.change,
+		agent: held.agent,
+		by,
+		at,
+		reason: "stale",
+		stale: true,
+		lastActive: held.active,
+		...(into ? { into } : {}),
+	};
+};
 
 // `existing` claimed again: the new paths and dependencies added, and active now. Its old stamp no longer applies.
 function extendedClaim(
@@ -424,7 +431,7 @@ export function release(
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
-		const into = input.mergedAs ? scopedInto(held.paths) : undefined;
+		const into = scopedInto(held.paths);
 		const record: ReleaseRecord = {
 			change: input.change,
 			agent: held.agent,
@@ -480,20 +487,21 @@ export function releaseStale(
 }
 
 /**
- * Releases another agent's claim on someone's word, idle or not, recorded like a stale release with their stamp. Only
- * for claims GitHive's own job holds, which no one else can release otherwise (see giveUpGitHubChange); the caller
- * decides who may.
+ * Releases another agent's claim on someone's word, idle or not, with their stamp. GitHub's change, which GitHive's
+ * own job holds and no one else can release otherwise (see giveUpGitHubChange), is recorded like a stale release; a
+ * person's release of any other claim (see releaseAsPerson) isn't stale (`stale: false`). The caller decides who may.
  */
 export function giveUp(
 	log: CasLog<Registry>,
-	input: { change: string; agent: string; reason: string },
+	input: { change: string; agent: string; reason: string; stale?: boolean },
 	stamper?: Stamper,
 ) {
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
 		const at = new Date().toISOString();
-		const record: ReleaseRecord = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		const { stale, ...notStale } = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		const record: ReleaseRecord = input.stale === false ? notStale : { ...notStale, stale };
 		return {
 			state: {
 				...state,

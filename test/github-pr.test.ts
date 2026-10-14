@@ -229,6 +229,7 @@ describe("the pull request's body", () => {
 		title: intent,
 		intent,
 		files: ["src/a.js"],
+		filesTotal: 1,
 		reviews: [{ reviewer, role: "review", verdict: "approve", evidence }],
 	});
 

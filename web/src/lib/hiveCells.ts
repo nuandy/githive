@@ -14,13 +14,14 @@ export const LANDED_LATELY_MS = 30 * 60_000;
 /** The most cells the map draws; past that, it says how many more. */
 export const MOST_CELLS = 240;
 
-/** What's happening in a cell, loudest first. */
+/** What's happening in a cell, loudest first: its goals' states (see status.ts), then backlog work, then nothing. */
 export const CELL_STATES = [
-	"asking",
-	"revising",
+	"needs-person",
+	"changes-requested",
+	"checks-failed",
 	"landing",
 	"approved",
-	"review",
+	"in-review",
 	"building",
 	"landed",
 	"next",
@@ -28,14 +29,8 @@ export const CELL_STATES = [
 ] as const;
 export type CellState = (typeof CELL_STATES)[number];
 
-const CELL_STATE_OF: Partial<Record<Goal["state"], CellState>> = {
-	asking: "asking",
-	revising: "revising",
-	landing: "landing",
-	approved: "approved",
-	"in-review": "review",
-	building: "building",
-};
+/** A goal lights its cells in its own state. */
+const cellStateOf = (goal: Goal): CellState => (goal.state === "released" ? "free" : goal.state);
 
 export interface Cell {
 	/** A folder's or file's path; "<folder>/*" for the rest of a folder's own files, "*" at the top. */
@@ -228,7 +223,7 @@ function light(cell: Cell, hot: Hot[], cells: Map<string, Cell>, now: number) {
 		if (!goal.finished) inFlight.set(goal.key, goal);
 		else if (landedLately(goal, now) && (!landed || (goal.finished ?? "") > (landed.finished ?? ""))) landed = goal;
 	}
-	const loudness = (goal: Goal) => CELL_STATES.indexOf(CELL_STATE_OF[goal.state] ?? "free");
+	const loudness = (goal: Goal) => CELL_STATES.indexOf(cellStateOf(goal));
 	const working = [...inFlight.values()].sort((a, b) => loudness(a) - loudness(b));
 	cell.goals = working.map((goal) => goal.key);
 	cell.agents = [...new Set(working.map((goal) => goal.agent))];
@@ -237,7 +232,7 @@ function light(cell: Cell, hot: Hot[], cells: Map<string, Cell>, now: number) {
 		cell.goals.push(landed.key);
 	}
 	const loudest = working[0];
-	if (loudest) cell.state = CELL_STATE_OF[loudest.state] ?? "building";
+	if (loudest) cell.state = cellStateOf(loudest);
 	else if (landed) cell.state = "landed";
 	else if (next) cell.state = "next";
 }
@@ -280,4 +275,119 @@ export function agentChip(agent: string): string {
 	if (words.length >= 2) return `${words[0]![0]}${words[1]![0]}`.toUpperCase();
 	const word = words[0] ?? "?";
 	return `${word[0]!.toUpperCase()}${word.slice(1, 2)}`;
+}
+
+/** The theme's agent hues no lamp means anything by: amber, green and red (hue-1, -5, -6) are left out. */
+const QUIET_HUES = [0, 2, 3, 4, 7];
+
+/** An agent's hue on its chip: one of the theme's (hue-0 … hue-7), the same wherever it shows. */
+export function agentHue(agent: string): number {
+	// FNV-1a, so names that differ by a letter land far apart.
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < agent.length; index++) {
+		hash ^= agent.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return QUIET_HUES[(hash >>> 0) % QUIET_HUES.length]!;
+}
+
+/** An agent's hue as a chip's ring: in SVG, and on a chip in the page. */
+export const HUE_STROKE = [
+	"stroke-hue-0",
+	"stroke-hue-1",
+	"stroke-hue-2",
+	"stroke-hue-3",
+	"stroke-hue-4",
+	"stroke-hue-5",
+	"stroke-hue-6",
+	"stroke-hue-7",
+];
+export const HUE_BORDER = [
+	"border-hue-0",
+	"border-hue-1",
+	"border-hue-2",
+	"border-hue-3",
+	"border-hue-4",
+	"border-hue-5",
+	"border-hue-6",
+	"border-hue-7",
+];
+
+/**
+ * A name cut to `fits` characters in the middle, so its end stays: "OrderSummary.tsx" → "Ord…mary.tsx". The start
+ * keeps a short first word whole ("res.…File.js"), or else about a third; the end the rest, with the extension.
+ */
+export function middleCut(name: string, fits: number): string {
+	if (name.length <= fits) return name;
+	const room = fits - 1;
+	const word = /^[^.\-_]{1,4}[.\-_]/.exec(name)?.[0];
+	const head = word && room - word.length >= 6 ? word.length : Math.max(1, Math.floor(room * 0.3));
+	return `${name.slice(0, head)}…${name.slice(name.length - (room - head))}`;
+}
+
+/**
+ * Names drawn side by side, each cut to `fits`: in the middle, so the end stays, unless the end it keeps is another's
+ * too and tells nothing ("res.…dges.js" for every file of a swarm); then at the end, where they differ
+ * ("res.sendSta…").
+ */
+export function cellNames(names: string[], fits: number): string[] {
+	return names.map((name, index) => {
+		const middle = middleCut(name, fits);
+		const end = middle.slice(middle.indexOf("…") + 1);
+		const shared = middle !== name && names.some((other, at) => at !== index && other.endsWith(end));
+		return shared ? `${name.slice(0, fits - 1)}…` : middle;
+	});
+}
+
+/** Overpass's semibold lowercase letters' widths at 100px, a to z. */
+const LOWER = [55, 57, 53, 57, 55, 35, 57, 58, 27, 27, 55, 28, 87, 58, 56, 57, 57, 41, 48, 39, 58, 54, 74, 56, 56, 53];
+
+/** A letter's width at 1px: lowercase as measured, the rest by kind. */
+function letterWidth(letter: string): number {
+	const code = letter.charCodeAt(0) - 97;
+	if (code >= 0 && code < 26) return LOWER[code]! / 100;
+	if (letter === " ") return 0.25;
+	if (/[.,:;'!|]/.test(letter)) return 0.25;
+	if (/[MW]/.test(letter)) return 0.85;
+	if (/[A-Z]/.test(letter)) return 0.68;
+	if (/[0-9]/.test(letter)) return 0.62;
+	if (letter === "…") return 1.02;
+	return 0.6;
+}
+
+/** About how wide words are in the map's sans face at `size` px, semibold, a little over so they surely fit. */
+export function sansWidth(text: string, size: number): number {
+	let width = 0;
+	for (const letter of text) width += letterWidth(letter);
+	return width * size * 1.04;
+}
+
+/**
+ * Words on up to as many lines as there's room for, each no wider than its room (`room[0]` for the first line, …):
+ * broken at the space that fits best, evenly where it can, and cut short with "…" where nothing fits.
+ */
+export function fitLines(text: string, room: number[], width: (text: string) => number): string[] {
+	if (width(text) <= room[0]! || room.length < 2) return [cutTo(text, room[0]!, width)];
+	let best: { lines: string[]; uneven: number } | undefined;
+	for (let at = text.indexOf(" "); at >= 0; at = text.indexOf(" ", at + 1)) {
+		const lines = [text.slice(0, at), text.slice(at + 1)];
+		const fits = lines.every((line, index) => width(line) <= room[index]!);
+		const uneven = Math.abs(width(lines[0]!) - width(lines[1]!));
+		if (fits && (!best || uneven < best.uneven)) best = { lines, uneven };
+	}
+	if (best) return best.lines;
+	// Nothing fits: as many whole words on the first line as fit, the rest cut.
+	let split = -1;
+	for (let at = text.indexOf(" "); at >= 0; at = text.indexOf(" ", at + 1))
+		if (width(text.slice(0, at)) <= room[0]!) split = at;
+	if (split < 0) return [cutTo(text, room[0]!, width)];
+	return [text.slice(0, split), cutTo(text.slice(split + 1), room[1]!, width)];
+}
+
+/** Text cut at its end with "…" until it fits. */
+function cutTo(text: string, room: number, width: (text: string) => number): string {
+	if (width(text) <= room) return text;
+	let cut = text;
+	while (cut.length > 1 && width(`${cut}…`) > room) cut = cut.slice(0, -1);
+	return `${cut.trimEnd()}…`;
 }

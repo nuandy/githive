@@ -1,12 +1,24 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { MyOrg, OrgDetail, RepoAccess } from "../api";
 import { repoSnapshot, stubApi, visibleText } from "../test/fixtures";
 import { newRepoInput, NewRepoView } from "./NewRepoPage";
+import { promotionQuestion, roleMeans } from "./OrgMembers";
 import { type OrgActions, OrgView } from "./OrgPage";
 import { OrgsView } from "./OrgsPage";
-import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
+import {
+	adminQuestion,
+	DangerZone,
+	GeneralSection,
+	RepoAccessBox,
+	type RepoManageApi,
+	VisibilityToggle,
+} from "./RepoAdmin";
 import { RepoPage } from "./RepoPage";
+import { preloadLazyParts } from "./Lazy";
+
+// The parts a page loads as they're first shown (Lazy.tsx), loaded, so they draw as a page does once they've come.
+beforeAll(preloadLazyParts);
 
 const noop = async () => ({}) as never;
 const orgActions: OrgActions = {
@@ -158,6 +170,15 @@ describe("your organizations", () => {
 		expect(text).toContain("acme Acme admin");
 		expect(text).toContain("Create an organization");
 	});
+
+	it("marks an org with a building, not a repository's book", () => {
+		const html = renderToStaticMarkup(
+			<OrgsView me={{ handle: "ada" }} orgs={[ADA, acmeMembership("admin")]} createOrg={noop} onCreated={() => {}} />,
+		);
+		const acmeRow = html.slice(html.indexOf('href="#/orgs/acme"') - 600, html.indexOf('href="#/orgs/acme"'));
+		expect(acmeRow).toContain("M6 22V4");
+		expect(acmeRow).not.toContain("M4 19.5v-15");
+	});
 });
 
 describe("an organization's page", () => {
@@ -176,6 +197,57 @@ describe("an organization's page", () => {
 		// You don't change your own role here, and the last owner can't leave.
 		expect(html).not.toContain('id="role-ada"');
 		expect(text).not.toContain("Leave");
+	});
+
+	it("labels the fields that add people and teams, at the end of their lists", () => {
+		const html = renderToStaticMarkup(
+			<OrgView org={acme("owner")} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />,
+		);
+		for (const [id, label] of [
+			["add-member-email", "Email"],
+			["add-member-role", "Role"],
+			["new-team-slug", "Team name"],
+			["new-team-name", "Display name (optional)"],
+			["team-add-security", "Add to @acme/security"],
+		] as const)
+			expect(html).toMatch(new RegExp(`<label[^>]*for="${id}">${label.replace(/[()]/g, "\\$&")}</label>`));
+		expect(html).not.toContain('placeholder="person@example.com"');
+		expect(html).not.toContain('placeholder="security"');
+		// Each add-form comes after the rows it adds to.
+		expect(html.indexOf("dan@example.com")).toBeLessThan(html.indexOf('for="add-member-email"'));
+		expect(html.indexOf("@acme/security")).toBeLessThan(html.indexOf('for="new-team-slug"'));
+		// What the role chosen lets them do.
+		expect(visibleText(html)).toContain("Member: Write in its repositories");
+	});
+
+	it("keeps a badge on an invitation that waits on GitHive's approval", () => {
+		const waiting = acme("owner", {
+			invites: [{ email: "dan@example.com", role: "member", createdAt: "", awaitingApproval: true }],
+		});
+		const text = visibleText(
+			renderToStaticMarkup(<OrgView org={waiting} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />),
+		);
+		expect(text).toContain("dan@example.com Waiting for GitHive approval");
+		expect(text).toContain("joins once a GitHive admin approves them");
+		expect(
+			visibleText(
+				renderToStaticMarkup(
+					<OrgView org={acme("owner")} me={{ handle: "ada" }} actions={orgActions} onLeft={() => {}} />,
+				),
+			),
+		).not.toContain("Waiting for GitHive approval");
+	});
+
+	it("asks before making someone an admin or owner, saying what they'll be able to do", () => {
+		expect(promotionQuestion("sol", "acme", "owner")).toBe(
+			"Make sol an owner of acme? Owners can delete any of its repositories, and remove anyone, other owners too.",
+		);
+		expect(promotionQuestion("sol", "acme", "admin")).toMatch(/^Make sol an admin of acme\? Admins can delete/);
+		expect(roleMeans("admin", { defaultPermission: "write" })).toMatch(/^Admin: add and remove people/);
+		// A repo's collaborator too.
+		expect(adminQuestion("sol", "acme/storefront")).toBe(
+			"Make sol an admin of acme/storefront? Admins change settings and collaborators, and can delete the repo.",
+		);
 	});
 
 	it("shows members the people and teams, without managing, and lets them leave", () => {
@@ -228,37 +300,66 @@ describe("a repo's access settings", () => {
 		visibility: "private",
 	});
 
-	it("gives admins visibility, collaborators and deleting", () => {
-		const text = visibleText(
-			renderToStaticMarkup(
-				<RepoAdmin
-					repo="acme/web"
-					access={access("admin")}
-					manage={manageApi}
-					onChanged={() => {}}
-					onDeleted={() => {}}
-				/>,
-			),
+	it("gives admins visibility and collaborators under General, and deleting in the Danger zone", () => {
+		const html = renderToStaticMarkup(
+			<GeneralSection repo="acme/web" access={access("admin")} manage={manageApi} onChanged={() => {}} />,
 		);
+		const text = visibleText(html);
 		expect(text).toContain("Admin: write, and change settings");
-		expect(text).toContain("Make it Public");
+		expect(text).toContain("Make public");
 		expect(text).toContain("Collaborators");
-		expect(text).toContain("Delete this repository");
+		// The form that adds a collaborator labels its fields, and says what the permission chosen lets them do.
+		expect(html).toMatch(/<label[^>]*for="collab-handle">Their handle<\/label>/);
+		expect(html).toMatch(/<label[^>]*for="collab-level">Permission<\/label>/);
+		expect(html).not.toContain("placeholder=");
+		expect(text).toContain("Write: review, and claim, push and land changes.");
+		const danger = renderToStaticMarkup(<DangerZone repo="acme/web" deleteRepo={noop} onDeleted={() => {}} />);
+		expect(visibleText(danger)).toContain("Delete this repository");
+		// Deleting asks in a dialog, which wants the repo's name typed.
+		expect(danger).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>Delete repository…<\/button>/);
+	});
+
+	describe("its visibility", () => {
+		const rest = {
+			manage: manageApi,
+			onChanged: () => {},
+			setConfirming: () => {},
+			run: async () => true,
+			busy: null,
+			errorFor: () => null,
+		};
+
+		it("names the visibility action and asks before making a repo public", () => {
+			const text = visibleText(
+				renderToStaticMarkup(
+					<VisibilityToggle repo="acme/docs" visibility="private" confirming="visibility" {...rest} />,
+				),
+			);
+			expect(text).toContain("Make acme/docs public? Anyone signed in to GitHive can read its code and history.");
+			expect(text).toContain("Yes, make public");
+			expect(text).toContain("Keep private");
+		});
+
+		it("offers making a private repo public by name, before asking", () => {
+			const text = visibleText(
+				renderToStaticMarkup(<VisibilityToggle repo="acme/docs" visibility="private" confirming={null} {...rest} />),
+			);
+			expect(text).toContain("Make public");
+			expect(text).not.toContain("?");
+		});
+
+		it("makes a public repo private without asking", () => {
+			const text = visibleText(
+				renderToStaticMarkup(<VisibilityToggle repo="acme/docs" visibility="public" confirming={null} {...rest} />),
+			);
+			expect(text).toContain("Make private");
+			expect(text).not.toContain("?");
+		});
 	});
 
 	it("shows everyone else what they may do, and nothing to change", () => {
-		const text = visibleText(
-			renderToStaticMarkup(
-				<RepoAdmin
-					repo="acme/web"
-					access={access("write")}
-					manage={manageApi}
-					onChanged={() => {}}
-					onDeleted={() => {}}
-				/>,
-			),
-		);
-		expect(text).toContain("Write: review, and claim, push and merge changes");
+		const text = visibleText(renderToStaticMarkup(<RepoAccessBox repo="acme/web" access={access("write")} />));
+		expect(text).toContain("Write: review, and claim, push and land changes");
 		expect(text).toMatch(/Only the owner.s members and its collaborators/);
 		expect(text).not.toContain("Collaborators");
 		expect(text).not.toContain("Delete");
@@ -288,25 +389,31 @@ describe("a repo's access settings", () => {
 			policy: { required: 2, vetoes: ["security"], escalate: [{ paths: ["package.json"], required: 3 }] },
 			verify: ["npm test"],
 		};
-		const render = (level: RepoAccess["level"]) =>
+		const render = (level: RepoAccess["level"], section?: "review" | "checks" | "path-rules" | "general") =>
 			renderToStaticMarkup(
 				<RepoPage
 					repo="acme/web"
-					view={{ kind: "repo", tab: "settings" }}
+					view={{ kind: "repo", tab: "settings", ...(section ? { section } : {}) }}
 					snapshot={snapshot}
 					api={stubApi()}
 					access={access(level)}
 					manage={{ ...manageApi, changeSettings: noop }}
 				/>,
 			);
-		const admin = render("admin");
-		expect(admin).toContain('id="settings-required" type="number" min="0" inputMode="numeric" value="2"');
-		expect(admin).toContain('value="npm test"');
-		expect(visibleText(admin)).toContain("Save settings");
-		expect(visibleText(admin)).toContain("Stricter rules for paths");
-		expect(visibleText(admin)).toContain("How the records are kept");
-		const writer = visibleText(render("write"));
-		expect(writer).not.toContain("Save settings");
+		const review = render("admin", "review");
+		expect(review).toMatch(/id="settings-required" type="number" min="0" inputMode="numeric"[^>]* value="2"/);
+		expect(render("admin", "checks")).toContain('value="npm test"');
+		expect(visibleText(render("admin", "path-rules"))).toContain("Path rules");
+		expect(visibleText(render("admin"))).toContain("How the records are kept");
+		// Each section saves on its own, in ink: green is for landing and approving.
+		for (const section of ["review", "checks", "path-rules"] as const) {
+			const saves = render("admin", section).match(/<button[^>]*type="submit"[^>]*>(?:Save|Saving)[^<]*/g) ?? [];
+			expect(saves).toHaveLength(1);
+			expect(saves[0]).toContain("bg-primary");
+			expect(saves[0]).not.toContain("bg-good");
+		}
+		const writer = visibleText(render("write", "review"));
+		expect(writer).not.toContain("Save");
 		expect(writer).toContain("Merging needs 2 approvals; security can block");
 		expect(writer).toContain("package.json need 3 approvals");
 	});
@@ -332,8 +439,11 @@ describe("a repo's access settings", () => {
 		// Someone who may only write is told who can start it, with no button.
 		expect(render("write", { kind: "repo", tab: "changes" })).not.toContain("Start GitHive");
 		expect(render("write", { kind: "repo", tab: "changes" })).toContain("once one of its admins starts it");
-		// Settings shows who may do what and the code shows, but there is no way to start.
-		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Delete");
+		// Settings shows who may do what, and deleting, and the code shows, but there is no way to start.
+		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Collaborators");
+		expect(render("admin", { kind: "repo", tab: "settings", section: "danger-zone" })).toContain(
+			"Delete this repository",
+		);
 		expect(render("admin", { kind: "repo", tab: "settings" })).not.toContain("Nothing here yet");
 		expect(render("admin", { kind: "repo", tab: "code" })).not.toContain("Nothing here yet");
 	});

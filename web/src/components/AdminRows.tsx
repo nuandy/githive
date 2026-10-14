@@ -3,7 +3,7 @@ import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useStagger } from "../hooks/useStagger";
 import { cn } from "../lib/utils";
-import { ROW, ROW_ACTIONS, ROW_MAIN, ROWS } from "./ui/manage";
+import { ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED } from "./ui/manage";
 
 // A line in place of the rows: a box's padding, with a paragraph's margins about it.
 const LINE = "my-3.75 px-0.5 py-4 text-muted-foreground";
@@ -49,13 +49,13 @@ export function AdminRow({
 	children: ReactNode;
 }) {
 	return (
-		<li className={cn(ROW, arrived && "animate-appear")}>
+		<li className={cn(RULED, ROW, arrived && "animate-appear")}>
 			<div className={ROW_MAIN}>
 				<strong>{name}</strong>
 				<span className="text-muted-foreground">{detail}</span>
 				{error}
 			</div>
-			<div className={ROW_ACTIONS}>{children}</div>
+			<div className={cn(ROW_ACTIONS, "gap-2")}>{children}</div>
 		</li>
 	);
 }

@@ -25,8 +25,7 @@ export class PageBoundary extends Component<{ children: ReactNode }, PageBoundar
 		return (
 			<div key={failed ? "failed" : "page"} className="flex animate-fade flex-col">
 				{failed ? (
-					<EmptyPage role="alert">
-						<h2>This page couldn't be shown</h2>
+					<EmptyPage role="alert" title="This page couldn't be shown">
 						<p>
 							Something in its data was unexpected. The rest of the dashboard still works:{" "}
 							<a href="#/">go to Repositories</a> or reload to try again.

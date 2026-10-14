@@ -26,10 +26,12 @@ export type { HostedStatus, ToolContext } from "./tools/context";
 export { DEFAULT_POLICY, hostedRoles, votesFor } from "./tools/repo";
 export { INSTRUCTIONS, TOOLS } from "./tools/tool-list";
 export {
+	changeDiff,
 	changeHistory,
 	giveUpAsPerson,
 	makeBranch,
 	openCount,
+	releaseAsPerson,
 	repoAudit,
 	repoSnapshot,
 	voteAsPerson,

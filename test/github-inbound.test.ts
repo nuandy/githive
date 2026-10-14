@@ -313,6 +313,29 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await expect(giveUpAsPerson(asPerson, "p", "c-5", person)).rejects.toThrow("not GitHub's");
 	});
 
+	it("gives GitHub's change up when a person releases it, asking their reason once and keeping GitHub's", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const theirs = github.push({ "src/a.js": "from GitHub\n" });
+		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
+		const change = `github-${theirs.slice(0, 12)}`;
+		const { releaseAsPerson } = await import("../src/toolkit/mcp");
+		const person = "person:ana@example.com";
+		const asPerson = { ...ctx(), stamper: async () => makeStamper(privateKey, person) };
+		await expect(releaseAsPerson(asPerson, "p", change, person, " ")).rejects.toThrow("[400] say why");
+		expect(await releaseAsPerson(asPerson, "p", change, person, "it's stuck")).toMatchObject({
+			ok: true,
+			released: change,
+			note: expect.stringContaining("GitHive brings GitHub's changes back"),
+		});
+		expect((await registryNow()).released.at(-1)).toMatchObject({
+			change,
+			agent: GITHUB_AGENT,
+			by: person,
+			reason: `GitHub's changes given up by ${person}`,
+		});
+		expect((await sync.state()).job).toMatchObject({ step: "given up", change });
+	});
+
 	it("lets a repo admin give up GitHub's change through release, and no one else", async () => {
 		await land("c-1", { "src/a.js": "a\n" });
 		const theirs = github.push({ "src/a.js": "from GitHub\n" });

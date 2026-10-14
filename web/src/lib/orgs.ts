@@ -17,11 +17,54 @@ export function slugProblem(slug: string): string | null {
 /** A repo's name: letters, digits, dots, underscores or single dashes, up to 100. */
 export function repoNameProblem(name: string): string | null {
 	if (!name) return "Give it a name.";
-	if (name.length > 100) return "Up to 100 characters.";
-	if (!/^[A-Za-z0-9._-]+$/.test(name)) return "Only letters, digits, dots, underscores and dashes.";
-	if (name.includes("--")) return "No two dashes in a row.";
-	if (name.startsWith("-") || name === "." || name === "..") return "That isn't a usable name.";
+	const typed = repoNameTyping(name);
+	if (typed) return typed;
+	if (name.length > 100) return `Up to 100 characters: this one has ${name.length}.`;
+	if (name === "." || name === "..") return `“${name}” can't be a name. Add a letter or a digit.`;
 	return null;
+}
+
+const REPO_CHARACTER = /[A-Za-z0-9._-]/;
+
+/** Characters a name can't have, by what people call them; any other is named itself. */
+function characterName(character: string): string {
+	if (/\s/.test(character)) return "Spaces aren't";
+	if (character === "/") return "Slashes aren't";
+	return `“${character}” isn't`;
+}
+
+/**
+ * The name a repo's name might have meant: accents dropped, what it can't have turned into single dashes. None while
+ * it ends in one of those (it's still being typed), or when nothing usable is left.
+ */
+function meantRepoName(name: string): string | null {
+	const plain = name.normalize("NFD").replace(/\p{M}/gu, "");
+	if (!REPO_CHARACTER.test(plain.at(-1) ?? "") || /--$/.test(plain)) return null;
+	const meant = plain
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^-+/, "");
+	return meant && meant !== name && meant !== "." && meant !== ".." ? meant : null;
+}
+
+/**
+ * What's wrong with a repo's name as it's typed: a character it can't have (named), two dashes in a row, or a dash to
+ * start, with a name to use instead when there's one. Its length, and a name that's only dots, wait until the field
+ * is left (repoNameProblem).
+ */
+export function repoNameTyping(name: string): string | null {
+	const bad = [...name].find((character) => !REPO_CHARACTER.test(character));
+	let problem: string | null = null;
+	let otherwise = "";
+	if (bad) {
+		problem = `${characterName(bad)} allowed.`;
+		otherwise = /\s/.test(bad) ? "Use dashes instead." : "Use letters, digits, dots, underscores and dashes.";
+	} else if (name.includes("--")) problem = "No two dashes in a row.";
+	else if (name.startsWith("-")) problem = "It can't start with a dash.";
+	if (!problem) return null;
+	const meant = meantRepoName(name);
+	if (meant) return `${problem} Use ${meant}?`;
+	return otherwise ? `${problem} ${otherwise}` : problem;
 }
 
 /**

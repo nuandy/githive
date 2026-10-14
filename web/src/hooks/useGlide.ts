@@ -1,4 +1,5 @@
 import { type RefObject, useLayoutEffect, useRef } from "react";
+import { reducedMotion } from "../lib/motion";
 
 /** How long a glide takes, and its easing (the theme's ease-out). */
 const GLIDE_MS = 380;
@@ -21,7 +22,7 @@ export function useGlide(container: RefObject<HTMLElement | null>, shape: string
 		const before = last.current;
 		last.current = { shape, tops };
 		if (before.shape === shape || !before.tops.size) return;
-		if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		if (reducedMotion()) return;
 		for (const row of rows) {
 			const was = before.tops.get(row.dataset.key ?? "");
 			const is = tops.get(row.dataset.key ?? "");

@@ -1,24 +1,27 @@
 import git from "isomorphic-git";
+import { diffCommits } from "../../change-diff";
 import { type Remote, Workspace } from "../../git";
+import { fetchCommits } from "../../git-fetch";
 import { projectBranch } from "../../project-branch";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
-import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
+import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
-import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
+import { DEFAULT_GRANT, type FlagRecord, openFlag, peopleOnly, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
 import { type AgentAtWork, agentsAtWork, onlyAPersonCanReview } from "./no-reviewer";
 import { giveUpGitHubChange } from "./github-tools";
-import type { HostedStatus, ToolContext } from "./context";
+import type { HostedStatus, ToolContext, WaitingItem } from "./context";
 import {
 	branchSettings,
+	claimPolicy,
 	claimsRef,
 	DEFAULT_POLICY,
 	recordLog,
@@ -98,7 +101,7 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	);
 	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
 	// The change's own commits are those since it left the branch it lands on.
-	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
+	const branch = landsOn(registry, record, released);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
 	const mergedAs = released.find((release) => release.mergedAs)?.mergedAs;
 	const hints = cachedHints(ctx, repo, change, !!claim);
@@ -112,6 +115,11 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	const ids = new Set(commits.map((commit) => commit.commit));
 	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((vote) => ids.has(vote.commit));
 	return { change, branch, claim: claim ?? null, released, commits, votes, ...(await hints) };
+}
+
+/** The branch a change lands on: its claim's, or once released, the one its release names (see ReleaseRecord.into). */
+function landsOn(registry: Registry, record: ClaimRecord | null | undefined, released: ReleaseRecord[]) {
+	return record ? claimInto(record, projectBranch(registry)) : (released.at(-1)?.into ?? projectBranch(registry));
 }
 
 /** A merge check as status kept it (see mergeCheck in work-tools.ts), with the change head it was worked out on. */
@@ -178,6 +186,93 @@ async function ownCommits(
 		});
 	}
 	return own;
+}
+
+/**
+ * A change's files for its page's Files tab (see change-diff.ts). Open, or released without landing: its pushed head
+ * against its merge base with the branch it lands on, each file outside its claim flagged. Landed: the commit it
+ * landed as against that commit's first parent, the branch before it, which is what it brought. Nothing pushed (or its
+ * branch gone): no files. When they can't be read (its branch or what it landed as unreadable just now, or no history
+ * shared with its branch), no files and `unavailable` says why: an answer, kept like one, not a failure every reader
+ * repeats.
+ */
+export async function changeDiff(ctx: ToolContext, repo: string, change: string) {
+	const timing = ctx.timing ?? new Timing();
+	const registry = (await timing.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
+		.state;
+	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
+	const { claim: record, released } = await timing.time("change", () =>
+		storeFor(ctx, repo, registry).readChange(change),
+	);
+	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
+	const mergedAs = record ? undefined : released.find((release) => release.mergedAs)?.mergedAs;
+	const of = mergedAs ? ("landed" as const) : ("head" as const);
+	try {
+		if (mergedAs) return { change, of, ...(await landedDiff(ctx, repo, change, mergedAs, timing)) };
+		const agent = record?.agent ?? released.at(-1)!.agent;
+		const branch = landsOn(registry, record, released);
+		const claimed = record ? presentClaim(record, projectBranch(registry)).paths : null;
+		const workspace = await timing
+			.time("clone", async () =>
+				Workspace.clone(await changeSourceFor(ctx, repo)(agent, "read", change, record?.since), `changes/${change}`, {
+					depth: 8,
+				}),
+			)
+			.catch(() => null);
+		if (!workspace) return { change, of, base: null, head: null, files: [], total: 0 };
+		const head = await workspace.head();
+		const projectHead = await orUnavailable(`${branch} couldn't be read just now.`, head, () =>
+			timing.time("project", async () => workspace.fetch("project", await ctx.remote(repo, "read"), branch)),
+		);
+		const base = await orUnavailable(
+			(err) =>
+				/no common ancestor/.test(String(err))
+					? `It shares no history with ${branch}.`
+					: `Where it left ${branch} couldn't be found just now.`,
+			head,
+			() => timing.time("base", () => workspace.mergeBase(projectHead, head)),
+		);
+		const diff = await orUnavailable("Its files couldn't be read just now.", head, () =>
+			timing.time("diff", () => diffCommits(workspace.held, base, head, { claimed })),
+		);
+		return { change, of, ...diff };
+	} catch (err) {
+		if (!(err instanceof Unavailable)) throw err;
+		return { change, of, base: null, head: err.head, files: [], total: 0, unavailable: err.message };
+	}
+}
+
+// What a landed change brought: the commit it landed as against its first parent.
+async function landedDiff(ctx: ToolContext, repo: string, change: string, mergedAs: string, timing: Timing) {
+	const lost = "The commit it landed as couldn't be read just now.";
+	// The merge and its parents, with their trees, in one fetch.
+	const held = await orUnavailable(lost, mergedAs, () =>
+		timing.time("fetch", async () => fetchCommits(await ctx.remote(repo, "read"), [mergedAs], "/landed", { depth: 2 })),
+	);
+	const { commit } = await orUnavailable(lost, mergedAs, () => git.readCommit({ ...held, oid: mergedAs }));
+	const before = commit.parent[0] ?? fail(409, `${change} landed as ${mergedAs}, which has no parent`);
+	return orUnavailable("Its files couldn't be read just now.", mergedAs, () =>
+		timing.time("diff", () => diffCommits(held, before, mergedAs)),
+	);
+}
+
+/** Why a change's files can't be read just now, with its head where that was read. */
+class Unavailable extends Error {
+	constructor(
+		why: string,
+		readonly head: string | null,
+	) {
+		super(why);
+	}
+}
+
+// `work`'s answer, or Unavailable saying why it failed (logged).
+function orUnavailable<T>(why: string | ((err: unknown) => string), head: string | null, work: () => Promise<T>) {
+	return work().catch((err: unknown) => {
+		const said = typeof why === "string" ? why : why(err);
+		console.error(`a change's files: ${said}`, String(err));
+		throw new Unavailable(said, head);
+	});
 }
 
 /**
@@ -263,6 +358,60 @@ export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: str
 	return outcome;
 }
 
+/** What a person's release tells, and what its agent hears. */
+export const RELEASED_NOTE = "Its paths are free for other agents; its agent is told; its commits stay on its branch.";
+
+/** The most of a person's reason for a release that's kept, as of a question for people (see waitingOnPerson). */
+const RELEASE_REASON_CHARS = 500;
+
+/**
+ * A person releases a change's claim from the dashboard, whoever's it is, saying why: a stuck change freed. Its paths
+ * are free for other agents, its agent is told with its next reply, and its commits stay on its branch. The release is
+ * stamped with the person, not as stale, which the audit accepts (see othersClaimsReleased). Not while its batch is
+ * being checked, which may land it. GitHub's change is given up as before (see giveUpGitHubChange), so GitHive brings it
+ * back when GitHub's branch moves; the reason, asked here as for any change, gives way to that one's own. The route
+ * checks they can write.
+ */
+export async function releaseAsPerson(ctx: ToolContext, repo: string, change: string, person: string, reason: string) {
+	if (!/^person:[^/]+$/.test(person))
+		fail(403, "only a person releases another's claim from the dashboard; agents release their own with release");
+	const why = reason.trim().slice(0, RELEASE_REASON_CHARS);
+	if (!why) fail(400, "say why you release it: its agent is told");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const store = storeFor(ctx, repo, registry);
+	const { claim } = await store.readChange(change);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to release`);
+	// Released mid-check, it would land anyway and its merge's own release would fail. A landing unread doesn't stop it.
+	const landing = await Promise.resolve()
+		.then(() => ctx.landing?.(repo, claimInto(claim, projectBranch(registry))).view())
+		.catch(() => null);
+	if (landing?.checking?.changes.some((checked) => checked.change === change))
+		fail(409, `${change} is being checked to land now; release it if the batch sends it back.`);
+	const stamper = await ctx.stamper?.();
+	if (isGitHubChange(claim))
+		return giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
+	const outcome = await store.giveUp({ change, agent: person, reason: why, stale: false }, stamper);
+	if (!outcome.ok) return outcome;
+	const at = new Date().toISOString();
+	await ctx.notify?.(repo, claimInto(claim, projectBranch(registry)), [
+		{
+			agent: claim.agent,
+			notice: {
+				kind: "released",
+				at,
+				change,
+				says: `A person released your claim on ${change}: ${why}`,
+				next:
+					`Its paths are free for other agents now. Your commits stay on changes/${change} in your fork; claim ` +
+					"again to carry on, if they're still free.",
+				from: { agent: person },
+			},
+		},
+	]);
+	await ctx.ping?.(repo, { kind: "released", agent: claim.agent, change, detail: why, at }).catch(() => undefined);
+	return { ok: true as const, released: change, note: RELEASED_NOTE };
+}
+
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */
 export async function repoAudit(ctx: ToolContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
@@ -310,17 +459,14 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			),
 		),
 	);
-	const waiting = claims.filter((claim) => claim.attention);
+	const waiting = claims
+		.flatMap((claim) => waitingOnPerson(claim, votes.votes, claimPolicy(state, claim)) ?? [])
+		.sort(inboxOrder);
 	await ctx
 		.summarize?.(repo, {
 			open: claims.length,
 			needsYou: waiting.length,
-			waiting: waiting.slice(0, 20).map((claim) => ({
-				change: claim.change,
-				title: (claim.intent.split("\n")[0] ?? "").slice(0, 120),
-				reason: claim.attention!.reason.slice(0, 500),
-				...(claim.attention!.urgency === undefined ? {} : { urgency: claim.attention!.urgency }),
-			})),
+			waiting: waiting.slice(0, 20),
 			countedAt: new Date().toISOString(),
 		})
 		.catch(() => undefined);
@@ -504,6 +650,52 @@ function attentionFor(
 	}
 	if (onlyAPerson) return { reason: onlyAPerson, agent: "githive", at: claim.active };
 	return null;
+}
+
+/**
+ * What a change waits on a person for, for the Inbox: its agent's question (or GitHive's failed builder), or, pushed
+ * and not sent back, a vote as a role only people may vote as. Failed checks are its agent's to fix. The dashboard
+ * decides the same (web/src/lib/status.ts, waitingOn).
+ */
+function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: ReviewPolicy): WaitingItem | null {
+	const { change, attention, approval, head } = claim;
+	const title = (claim.intent.split("\n")[0] ?? "").slice(0, 120);
+	if (attention)
+		return {
+			kind: "question",
+			change,
+			title,
+			reason: attention.reason.slice(0, 500),
+			agent: attention.agent,
+			at: attention.at,
+			...(attention.urgency === undefined ? {} : { urgency: attention.urgency }),
+		};
+	if (!head || approval.approved || approval.vetoedBy.length) return null;
+	const sentBack = votes.some(
+		(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== claim.agent,
+	);
+	if (sentBack || claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject")) return null;
+	const role = (approval.awaiting ?? []).find((each) => peopleOnly(policy, each));
+	if (!role) return null;
+	// Since its agent last claimed or extended it: as near as the snapshot knows to when its head was pushed.
+	return {
+		kind: "vote",
+		change,
+		title,
+		role,
+		reason: `Waiting for a ${role} vote, which only a person can give.`,
+		agent: claim.agent,
+		at: claim.active,
+	};
+}
+
+/**
+ * The Inbox's order, so the 20 a summary keeps are what matters most: questions before votes, the most urgent first,
+ * then the oldest. The dashboard sorts by urgency too (web/src/lib/inbox.ts).
+ */
+function inboxOrder(a: WaitingItem, b: WaitingItem) {
+	const rank = (item: WaitingItem) => (item.kind === "vote" ? 1 : 0);
+	return rank(a) - rank(b) || (b.urgency ?? 0) - (a.urgency ?? 0) || (a.at ?? "").localeCompare(b.at ?? "");
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */

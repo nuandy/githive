@@ -37,15 +37,17 @@ function ProviderMark({ provider }: { provider: Provider }) {
 	);
 }
 
-/** One button per provider, once they're known. */
+/** One button per provider, once they're known; the first in ink unless something else leads (`quiet`). */
 function ProviderButtons({
 	providers,
 	hash,
 	invite,
+	quiet = false,
 }: {
 	providers: Provider[] | undefined;
 	hash: string;
 	invite: string;
+	quiet?: boolean;
 }) {
 	// What takes the place of "Loading…" fades in.
 	const appear = useChanged(providers === undefined) && "animate-fade";
@@ -60,17 +62,12 @@ function ProviderButtons({
 	return (
 		<div className={cn("mt-1.5 grid w-full gap-2.5", appear)}>
 			{providers.map((provider, index) => (
-				// The first is in ink. Keyboard focus outlines them, as it does links, rather than ringing them.
+				// The first is in ink.
 				<Button
 					key={provider}
 					asChild
-					variant={index === 0 ? "primary" : "default"}
-					className={cn(
-						"gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal",
-						"focus-visible:shadow-none focus-visible:outline-2 focus-visible:outline-offset-2",
-						"focus-visible:outline-solid focus-visible:outline-link",
-						index === 0 ? "focus-visible:border-primary" : "focus-visible:border-border-strong",
-					)}
+					variant={index === 0 && !quiet ? "primary" : "default"}
+					className="gap-2.5 px-4 py-2.5 leading-[inherit] whitespace-normal"
 				>
 					<a href={signInHref(provider, hash, invite)}>
 						<ProviderMark provider={provider} />
@@ -122,10 +119,43 @@ function SignInFooter() {
 	);
 }
 
+/** Signed out and asked to join: the account it's noted under, how they'll hear, and the demo to watch meanwhile. */
+function Requested({
+	account,
+	demoRepo,
+	onSeeHive,
+}: {
+	account: string | null;
+	demoRepo: string | undefined;
+	onSeeHive: (() => void) | undefined;
+}) {
+	return (
+		<>
+			<h1 className="text-title-lg tracking-[-0.01em] text-balance">Your request to join is noted</h1>
+			<p className="m-0 max-w-[36ch] text-muted-foreground">
+				{account ? (
+					<>
+						GitHive noted it for <strong className="text-foreground wrap-anywhere">{account}</strong>.{" "}
+					</>
+				) : null}
+				An admin lets people in by hand. GitHive doesn't email you when they do: sign in again later, and once you're
+				approved you're in.
+			</p>
+			{demoRepo ? (
+				<Button asChild variant="primary" className="mt-1 w-full px-4 py-2.5 whitespace-normal">
+					<a href={href.repo(demoRepo)} onClick={onSeeHive}>
+						Watch a hive build a game
+					</a>
+				</Button>
+			) : null}
+		</>
+	);
+}
+
 /**
- * The page everyone who isn't signed in sees: who GitHive is for, and one
- * button per provider set up on this address. A failed sign-in comes back here
- * with its reason.
+ * The page everyone who isn't signed in sees: who GitHive is for, and one button per provider set up on this address.
+ * A failed sign-in comes back here with its reason; a request to join, with the account it's noted under; a session
+ * that ended, saying so. Anyone can watch the public demo repo instead.
  */
 export function SignIn({
 	providers,
@@ -135,6 +165,8 @@ export function SignIn({
 	invite: linkedInvite = "",
 	demoRepo,
 	onSeeHive,
+	request,
+	notice,
 }: {
 	providers: Provider[] | undefined;
 	error?: string | null;
@@ -147,6 +179,10 @@ export function SignIn({
 	demoRepo?: string;
 	/** Called as its link is followed: on that repo's page already, the address doesn't change, so nothing else would. */
 	onSeeHive?: () => void;
+	/** Their sign-in was turned away and noted as a request to join, under this account if the server said. */
+	request?: { account: string | null } | undefined;
+	/** Why they're here again: their session ended. */
+	notice?: string | undefined;
 }) {
 	const [invite, setInvite] = useState(linkedInvite);
 	return (
@@ -165,26 +201,38 @@ export function SignIn({
 				<div className="mb-1 grid place-items-center">
 					<HiveMark size={56} />
 				</div>
-				<h1 className="text-title-lg tracking-[-0.01em] text-balance">Sign in to GitHive</h1>
-				<p className="m-0 max-w-[32ch] text-muted-foreground">
-					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
-					recorded in Git.
-				</p>
-				{demoRepo ? (
-					<a href={href.repo(demoRepo)} onClick={onSeeHive}>
-						See a hive at work →
-					</a>
+				{request ? (
+					<Requested account={request.account} demoRepo={demoRepo} onSeeHive={onSeeHive} />
+				) : (
+					<>
+						<h1 className="text-title-lg tracking-[-0.01em] text-balance">Sign in to GitHive</h1>
+						<p className="m-0 max-w-[32ch] text-muted-foreground">
+							A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
+							recorded in Git.
+						</p>
+						{demoRepo ? (
+							<a href={href.repo(demoRepo)} onClick={onSeeHive}>
+								See a hive at work →
+							</a>
+						) : null}
+					</>
+				)}
+				{notice ? (
+					<p className="mt-1 mb-0 w-full rounded-md bg-surface-2 px-3 py-2.5 text-left" role="status">
+						{notice}
+					</p>
 				) : null}
 				{error ? (
 					<p className="mt-1 mb-0 w-full rounded-md bg-warn-soft px-3 py-2.5 text-left text-warn" role="alert">
 						{error}
 					</p>
 				) : null}
+				{request ? <p className="mt-2 mb-0 text-ui text-muted-foreground">Or sign in again:</p> : null}
 				{takesInviteCode ? (
 					<Label className="grid w-full gap-1 text-left text-ui text-muted-foreground">
 						<span>Invite code, if you have one</span>
 						<Input
-							className="w-full [font-family:monospace]"
+							className="w-full font-mono"
 							value={invite}
 							onChange={(event) => setInvite(event.target.value)}
 							autoComplete="off"
@@ -192,10 +240,15 @@ export function SignIn({
 						/>
 					</Label>
 				) : null}
-				<ProviderButtons providers={providers} hash={hash} invite={invite} />
+				{takesInviteCode && !request ? (
+					<p className="m-0 w-full text-left text-ui text-muted-foreground">
+						No code? Continue anyway and we'll ask an admin to let you in.
+					</p>
+				) : null}
+				<ProviderButtons providers={providers} hash={hash} invite={invite} quiet={!!request} />
 				<p className="mt-2 mb-0 max-w-[34ch] text-meta text-muted-foreground">
 					{takesInviteCode
-						? "GitHive is invite-only for now. Have an invite code? Enter it, then continue."
+						? "GitHive is invite-only for now."
 						: "GitHive is invite-only for now. If you aren't invited yet, signing in asks an admin to let you in."}
 				</p>
 			</div>

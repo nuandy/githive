@@ -1,25 +1,54 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
-import type { ManageApi, RepoAccess } from "../api";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import type { ManageApi, MyAgent, RepoAccess } from "../api";
 import { canAdminister, LEVEL_WORDS, LEVELS, type Level } from "../lib/permissions";
 import { isLoose } from "../lib/repoName";
 import { messageOf } from "../lib/errors";
 import { useArrivals } from "../hooks/useArrivals";
 import { useChanged } from "../hooks/useChanged";
 import { useRowActions } from "../hooks/useRowActions";
+import { useSavedNote } from "../hooks/useSavedNote";
 import { useStagger } from "../hooks/useStagger";
+import { type Undo, useUndo } from "../hooks/useUndo";
 import { cn } from "../lib/utils";
-import { ConfirmButton } from "./Confirm";
-import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { ConfirmButton, Question } from "./Confirm";
+import { SettingsPart, SettingsSubhead } from "./SettingsParts";
+import {
+	AlertDialog,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "./ui/alert-dialog";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
-import { Input, NativeSelect } from "./ui/field";
-import { INLINE, INLINE_INPUT, LINE, NOTE, ROW, ROW_ACTIONS, ROW_MAIN, ROWS, RULED, STACK, TERMS } from "./ui/manage";
+import { Field, FieldHint, Input, Label, NativeSelect } from "./ui/field";
+import {
+	ADD_FORM,
+	INLINE,
+	INLINE_FIELDS,
+	INLINE_INPUT,
+	LINE,
+	ROW,
+	ROW_ACTIONS,
+	ROWS,
+	RULED,
+	SAVED_NOTE,
+	TERMS,
+} from "./ui/manage";
+import { UndoLine } from "./ui/undo-line";
 
 /** What the repo's Settings can change. */
 export type RepoManageApi = Pick<
 	ManageApi,
 	"setVisibility" | "deleteRepo" | "collaborators" | "setCollaborator" | "removeCollaborator"
 > &
-	Partial<Pick<ManageApi, "startRepo" | "changeSettings">>;
+	Partial<Pick<ManageApi, "startRepo" | "changeSettings" | "org">> & {
+		/** The reader's agents, offered as who may vote as a role (stand-ins may leave it out). */
+		agents?: () => Promise<MyAgent[]>;
+	};
 
 type Collaborator = { handle: string; permission: Level };
 
@@ -32,9 +61,9 @@ interface RunProps {
 
 const label = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
 
-// On a page of its own (a repo GitHive hasn't started on), its headings are the browser's own size; in the Settings tab,
-// the tab sets them smaller (SettingsTab).
-const TITLE = "text-[1.5em] font-bold";
+/** The question before making a collaborator an admin: what they'll be able to do. */
+export const adminQuestion = (handle: string, repo: string) =>
+	`Make ${handle} an admin of ${repo}? Admins change settings and collaborators, and can delete the repo.`;
 
 function LevelOptions() {
 	return (
@@ -48,56 +77,100 @@ function LevelOptions() {
 	);
 }
 
+function visibleTo(visibility: RepoAccess["visibility"] | undefined, loose: boolean) {
+	if (visibility === "public") return "Anyone signed in to GitHive can read it";
+	if (visibility === "private") return "Only the owner's members and its collaborators";
+	if (loose) return "GitHive's admins: it isn't in an organization yet";
+	return "Loading…";
+}
+
+/** The reader's own permission and who can see the repo; `children` (changing it) after the latter. */
+function AccessTerms({
+	access,
+	loose,
+	children,
+}: {
+	access: RepoAccess | undefined;
+	loose: boolean;
+	children?: ReactNode;
+}) {
+	return (
+		<dl className={TERMS}>
+			<dt>You</dt>
+			<dd>{access ? LEVEL_WORDS[access.level] : "Loading…"}</dd>
+			<dt>Visible to</dt>
+			<dd>
+				{visibleTo(access?.visibility, loose)}
+				{children}
+			</dd>
+		</dl>
+	);
+}
+
+/** Who may do what, for those who can't change it: their own permission, and who can see the repo. */
+export function RepoAccessBox({ repo, access }: { repo: string; access: RepoAccess | undefined }) {
+	return (
+		<Box aria-labelledby="repo-access">
+			<BoxHeader>
+				<BoxTitle id="repo-access">Access</BoxTitle>
+			</BoxHeader>
+			<BoxBody>
+				<AccessTerms access={access} loose={isLoose(repo)} />
+			</BoxBody>
+		</Box>
+	);
+}
+
 /**
- * Who may do what in a repo: the caller's own permission and the repo's
- * visibility; to its admins, changing visibility, collaborators, and deleting
- * it (typing its name to confirm).
+ * General & access, for the repo's admins: their permission and the repo's visibility, its collaborators, and (once
+ * GitHive has started on it) how its records are kept. Visibility and collaborators apply at once.
  */
-export function RepoAdmin({
+export function GeneralSection({
 	repo,
 	access,
 	manage,
-	onDeleted,
 	onChanged,
+	records,
 }: {
 	repo: string;
 	access: RepoAccess | undefined;
 	manage: RepoManageApi;
-	onDeleted: () => void;
 	onChanged: () => void;
+	/** How the records are kept, folded under the rest. */
+	records?: ReactNode;
 }) {
 	const admin = canAdminister(access?.level);
 	const loose = isLoose(repo);
 	const { run, busy, confirming, setConfirming, errorFor } = useRowActions();
-
 	const runProps = { run, busy, errorFor };
+	const changes = admin && !loose;
 
 	return (
-		<Box aria-labelledby="repo-access">
-			<BoxHeader>
-				<h2 id="repo-access" className={TITLE}>
-					Access
-				</h2>
-			</BoxHeader>
-			<BoxBody className={STACK}>
-				<dl className={TERMS}>
-					<dt>You</dt>
-					<dd>{access ? LEVEL_WORDS[access.level] : "Loading…"}</dd>
-					<dt>Visible to</dt>
-					<dd>{visibleTo(access?.visibility, loose)}</dd>
-				</dl>
-				{admin && !loose && access?.visibility ? (
-					<VisibilityToggle
-						{...runProps}
-						repo={repo}
-						visibility={access.visibility}
-						manage={manage}
-						onChanged={onChanged}
-					/>
-				) : null}
-			</BoxBody>
-
-			{admin && !loose ? (
+		<SettingsPart
+			id="settings-general"
+			title="General & access"
+			description={
+				changes
+					? "Who can see this repo and what each person may do in it. A change to its visibility or to a collaborator applies at once."
+					: "Who can see this repo and what each person may do in it."
+			}
+		>
+			<div className="grid gap-3 px-0.5 py-4">
+				<AccessTerms access={access} loose={loose}>
+					{changes && access?.visibility ? (
+						<VisibilityToggle
+							{...runProps}
+							repo={repo}
+							visibility={access.visibility}
+							manage={manage}
+							onChanged={onChanged}
+							confirming={confirming}
+							setConfirming={setConfirming}
+						/>
+					) : null}
+				</AccessTerms>
+			</div>
+			{changes ? (
 				<CollaboratorsSection
 					{...runProps}
 					repo={repo}
@@ -106,11 +179,8 @@ export function RepoAdmin({
 					setConfirming={setConfirming}
 				/>
 			) : null}
-
-			{admin ? (
-				<DeleteRepository {...runProps} repo={repo} deleteRepo={() => manage.deleteRepo(repo)} onDeleted={onDeleted} />
-			) : null}
-		</Box>
+			{records}
+		</SettingsPart>
 	);
 }
 
@@ -121,13 +191,15 @@ interface CollaboratorsSectionProps extends RunProps {
 	setConfirming: (id: string | null) => void;
 }
 
-/** The repo's collaborators, each with their permission, and a form to add one. */
+/** The repo's collaborators, each with their permission, then a form to add one. */
 function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runProps }: CollaboratorsSectionProps) {
 	const { run, busy, errorFor } = runProps;
 	const [collaborators, setCollaborators] = useState<Collaborator[] | undefined>(undefined);
 	const [listError, setListError] = useState<string | null>(null);
 	const [handle, setHandle] = useState("");
 	const [level, setLevel] = useState<Level>("write");
+	const undo = useUndo();
+	const { saved, note } = useSavedNote();
 	const load = () =>
 		manage.collaborators(repo).then(
 			(list) => {
@@ -154,15 +226,11 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 	const arrived = useArrivals((collaborators ?? []).map((collaborator) => collaborator.handle));
 	const staggers = useStagger(!!collaborators?.length);
 	const read = useChanged(collaborators === undefined && !listError);
-	const line = cn(LINE, read && "animate-fade");
+	const line = cn(LINE, "my-0", read && "animate-fade");
 
 	return (
 		<>
-			<BoxHeader>
-				<h2 id="repo-collaborators" className={TITLE}>
-					Collaborators
-				</h2>
-			</BoxHeader>
+			<SettingsSubhead id="repo-collaborators">Collaborators</SettingsSubhead>
 			{listError ? <p className={cn(line, "text-bad")}>{listError}</p> : null}
 			{collaborators === undefined && !listError ? <p className={cn(line, "text-muted-foreground")}>Loading…</p> : null}
 			{collaborators?.length === 0 ? (
@@ -182,48 +250,50 @@ function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runP
 						confirming={confirming}
 						setConfirming={setConfirming}
 						arrived={arrived(collaborator.handle)}
+						undo={undo}
+						saved={saved === collaborator.handle}
+						onSaved={() => note(collaborator.handle)}
 					/>
 				))}
 			</ul>
-			<form className={cn("px-0.5 py-4", STACK)} onSubmit={add}>
-				<div className={INLINE}>
-					<label className="sr-only" htmlFor="collab-handle">
-						Handle
-					</label>
-					<Input
-						id="collab-handle"
-						type="text"
-						className={INLINE_INPUT}
-						value={handle}
-						onChange={(event) => setHandle(event.target.value)}
-						placeholder="Their handle"
-						autoComplete="off"
-						spellCheck={false}
-					/>
-					<label className="sr-only" htmlFor="collab-level">
-						Permission
-					</label>
-					<NativeSelect id="collab-level" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
-						<LevelOptions />
-					</NativeSelect>
+			<UndoLine undo={undo} where="collaborators" className="[&>p]:mb-3" />
+			<form className={ADD_FORM} onSubmit={add} aria-label="Add a collaborator">
+				<div className={INLINE_FIELDS}>
+					<Field className={INLINE_INPUT}>
+						<Label htmlFor="collab-handle">Their handle</Label>
+						<Input
+							id="collab-handle"
+							type="text"
+							value={handle}
+							onChange={(event) => setHandle(event.target.value)}
+							autoComplete="off"
+							spellCheck={false}
+							aria-describedby="collab-handle-hint"
+						/>
+					</Field>
+					<Field>
+						<Label htmlFor="collab-level">Permission</Label>
+						<NativeSelect
+							id="collab-level"
+							value={level}
+							onChange={(event) => setLevel(event.target.value as Level)}
+							aria-describedby="collab-level-hint"
+						>
+							<LevelOptions />
+						</NativeSelect>
+					</Field>
 					<Button type="submit" variant="primary" disabled={!handle.trim() || busy === "add"}>
-						Add collaborator
+						{busy === "add" ? "Adding…" : "Add collaborator"}
 					</Button>
 				</div>
-				<p className="m-0 text-ui text-muted-foreground">
+				<FieldHint id="collab-level-hint">{LEVEL_WORDS[level]}.</FieldHint>
+				<FieldHint id="collab-handle-hint">
 					They need to have signed in to GitHive once. Their agents act with the same permission.
-				</p>
+				</FieldHint>
 				{errorFor("add")}
 			</form>
 		</>
 	);
-}
-
-function visibleTo(visibility: RepoAccess["visibility"] | undefined, loose: boolean) {
-	if (visibility === "public") return "Anyone signed in to GitHive can read it";
-	if (visibility === "private") return "Only the owner's members and its collaborators";
-	if (loose) return "GitHive's admins: it isn't in an organization yet";
-	return "Loading…";
 }
 
 interface VisibilityToggleProps extends RunProps {
@@ -231,19 +301,42 @@ interface VisibilityToggleProps extends RunProps {
 	visibility: "private" | "public";
 	manage: RepoManageApi;
 	onChanged: () => void;
+	confirming: string | null;
+	setConfirming: (id: string | null) => void;
 }
 
-function VisibilityToggle({ repo, visibility, manage, onChanged, run, busy, errorFor }: VisibilityToggleProps) {
-	const toggle = () => {
-		const next = visibility === "public" ? "private" : "public";
-		return run("visibility", () => manage.setVisibility(repo, next)).then((ok) => ok && onChanged());
-	};
+/** Making a repo public opens its code to everyone signed in, so it asks first; making it private doesn't. */
+export function VisibilityToggle({
+	repo,
+	visibility,
+	manage,
+	onChanged,
+	confirming,
+	setConfirming,
+	run,
+	busy,
+	errorFor,
+}: VisibilityToggleProps) {
+	const make = (next: "private" | "public") =>
+		run("visibility", () => manage.setVisibility(repo, next)).then((ok) => ok && onChanged());
 	return (
 		<div className={INLINE}>
-			<span className="text-body-sm font-semibold">Make it</span>
-			<Button size="sm" disabled={busy === "visibility"} onClick={toggle}>
-				{visibility === "public" ? "Private" : "Public"}
-			</Button>
+			{visibility === "private" ? (
+				<ConfirmButton
+					id="visibility"
+					confirming={confirming}
+					setConfirming={setConfirming}
+					label="Make public"
+					question={`Make ${repo} public? Anyone signed in to GitHive can read its code and history.`}
+					keep="Keep private"
+					busy={busy === "visibility"}
+					onConfirm={() => make("public")}
+				/>
+			) : (
+				<Button size="sm" disabled={busy === "visibility"} onClick={() => make("private")}>
+					Make private
+				</Button>
+			)}
 			{errorFor("visibility")}
 		</div>
 	);
@@ -259,8 +352,16 @@ interface CollaboratorRowProps extends RunProps {
 	setConfirming: (id: string | null) => void;
 	/** Added since the list was first read: it fades in. */
 	arrived: boolean;
+	undo: Undo;
+	/** Their permission was just changed: "Saved" shows by it. */
+	saved: boolean;
+	onSaved(): void;
 }
 
+/**
+ * A collaborator: their permission, what it lets them do, and removing them (with Undo). Making them an admin asks
+ * first, in place of the controls, as an org's promotions do.
+ */
 function CollaboratorRow({
 	repo,
 	collaborator,
@@ -272,35 +373,90 @@ function CollaboratorRow({
 	busy,
 	errorFor,
 	arrived,
+	undo,
+	saved,
+	onSaved,
 }: CollaboratorRowProps) {
-	const { handle } = collaborator;
+	const { handle, permission } = collaborator;
 	const key = `collab:${handle}`;
-	const runThenReload = (work: () => Promise<unknown>) => run(key, work).then((ok) => (ok ? reload() : undefined));
+	const [promoting, setPromoting] = useState(false);
+	const select = useRef<HTMLSelectElement>(null);
+	const setPermission = (next: Level) =>
+		run(key, () => manage.setCollaborator(repo, handle, next)).then(async (ok) => {
+			setPromoting(false);
+			if (!ok) return;
+			await reload();
+			onSaved();
+		});
+	const choose = (next: Level) =>
+		next === "admin" && permission !== "admin" ? setPromoting(true) : void setPermission(next);
+	const remove = () =>
+		run(key, () => manage.removeCollaborator(repo, handle)).then(async (ok) => {
+			if (!ok) return;
+			await reload();
+			undo.offer(
+				"collaborators",
+				{ done: `Removed ${handle}.`, undone: `${handle} is back, with ${label(permission)}.` },
+				async () => {
+					await manage.setCollaborator(repo, handle, permission);
+					await reload();
+				},
+			);
+		});
 	return (
 		<li className={cn(RULED, arrived && "animate-appear")}>
 			<div className={ROW}>
-				<strong className={ROW_MAIN}>{handle}</strong>
+				<div className="grid min-w-0 gap-0.5 wrap-anywhere">
+					<strong>{handle}</strong>
+					<span id={`collab-${handle}-means`} className="text-ui text-muted-foreground">
+						{LEVEL_WORDS[permission]}
+					</span>
+				</div>
 				<div className={ROW_ACTIONS}>
-					<label className="sr-only" htmlFor={`collab-${handle}`}>
-						{handle}'s permission
-					</label>
-					<NativeSelect
-						id={`collab-${handle}`}
-						value={collaborator.permission}
-						disabled={busy === key}
-						onChange={(event) => runThenReload(() => manage.setCollaborator(repo, handle, event.target.value as Level))}
-					>
-						<LevelOptions />
-					</NativeSelect>
-					<ConfirmButton
-						id={key}
-						confirming={confirming}
-						setConfirming={setConfirming}
-						label="Remove"
-						question={`Remove ${handle}?`}
-						busy={busy === key}
-						onConfirm={() => runThenReload(() => manage.removeCollaborator(repo, handle))}
-					/>
+					{promoting ? (
+						<Question
+							question={adminQuestion(handle, repo)}
+							yes="Yes, make admin"
+							keep={`Keep ${handle} at ${label(permission)}`}
+							yesVariant="primary"
+							busy={busy === key}
+							onYes={() => void setPermission("admin")}
+							onKeep={() => {
+								setPromoting(false);
+								// Focus goes back to the select, once it's back.
+								requestAnimationFrame(() => select.current?.focus());
+							}}
+						/>
+					) : (
+						<>
+							<label className="sr-only" htmlFor={`collab-${handle}`}>
+								{handle}'s permission
+							</label>
+							<NativeSelect
+								ref={select}
+								id={`collab-${handle}`}
+								value={permission}
+								disabled={busy === key}
+								aria-describedby={`collab-${handle}-means`}
+								onChange={(event) => choose(event.target.value as Level)}
+							>
+								<LevelOptions />
+							</NativeSelect>
+							<span className={SAVED_NOTE} role="status">
+								{saved ? "Saved" : ""}
+							</span>
+							<ConfirmButton
+								id={key}
+								confirming={confirming}
+								setConfirming={setConfirming}
+								label="Remove"
+								question={`Remove ${handle}? They and their agents lose ${label(permission)} access to ${repo}.`}
+								keep={`Keep ${handle}`}
+								busy={busy === key}
+								onConfirm={remove}
+							/>
+						</>
+					)}
 				</div>
 			</div>
 			{errorFor(key)}
@@ -308,42 +464,122 @@ function CollaboratorRow({
 	);
 }
 
-interface DeleteRepositoryProps extends RunProps {
+/** The Danger zone: deleting the repo, asked in a dialog that wants its name typed. */
+export function DangerZone({
+	repo,
+	deleteRepo,
+	onDeleted,
+}: {
 	repo: string;
 	deleteRepo: () => Promise<unknown>;
 	onDeleted: () => void;
+}) {
+	return (
+		<SettingsPart id="settings-danger-zone" title="Danger zone" description="What can't be undone. Each asks first.">
+			<div className="grid gap-3 px-0.5 py-4">
+				<h3 className="text-body font-semibold">Delete this repository</h3>
+				<p className="m-0 max-w-measure text-muted-foreground">
+					This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks.
+					It can't be undone. The saved setup its containers start from is never used again and is gone within 30 days.
+				</p>
+				<div>
+					<DeleteRepository repo={repo} deleteRepo={deleteRepo} onDeleted={onDeleted} />
+				</div>
+			</div>
+		</SettingsPart>
+	);
 }
 
-function DeleteRepository({ repo, deleteRepo, onDeleted, run, busy, errorFor }: DeleteRepositoryProps) {
+/** Deleting the repo: a dialog that names it, wants its name typed, and stays open, saying why, if deleting fails. */
+function DeleteRepository({
+	repo,
+	deleteRepo,
+	onDeleted,
+}: {
+	repo: string;
+	deleteRepo: () => Promise<unknown>;
+	onDeleted: () => void;
+}) {
+	const [open, setOpen] = useState(false);
 	const [typed, setTyped] = useState("");
-	const remove = () => run("delete", deleteRepo).then((ok) => ok && onDeleted());
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const field = useRef<HTMLInputElement>(null);
+	const remove = async () => {
+		setBusy(true);
+		setError(null);
+		try {
+			await deleteRepo();
+			setOpen(false);
+			onDeleted();
+		} catch (err) {
+			setError(messageOf(err));
+		} finally {
+			setBusy(false);
+		}
+	};
 	return (
-		<BoxBody className={STACK}>
-			<h2 className={TITLE}>Delete this repository</h2>
-			<p className={NOTE}>
-				This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks. It
-				can't be undone. The saved setup its containers start from is never used again and is gone within 30 days. Type{" "}
-				<code>{repo}</code> to confirm.
-			</p>
-			<div className={INLINE}>
-				<label className="sr-only" htmlFor="delete-confirm">
-					Type {repo} to confirm
-				</label>
-				<Input
-					id="delete-confirm"
-					type="text"
-					className={INLINE_INPUT}
-					value={typed}
-					onChange={(event) => setTyped(event.target.value)}
-					placeholder={repo}
-					autoComplete="off"
-					spellCheck={false}
-				/>
-				<Button variant="danger" disabled={typed !== repo || busy === "delete"} onClick={remove}>
-					{busy === "delete" ? "Deleting…" : "Delete repository"}
-				</Button>
-			</div>
-			{errorFor("delete")}
-		</BoxBody>
+		<AlertDialog
+			open={open}
+			onOpenChange={(next) => {
+				if (busy) return;
+				setOpen(next);
+				setTyped("");
+				setError(null);
+			}}
+		>
+			<AlertDialogTrigger asChild>
+				<Button variant="danger">Delete repository…</Button>
+			</AlertDialogTrigger>
+			<AlertDialogContent
+				onOpenAutoFocus={(event) => {
+					// Typing its name is the question's answer, so the field takes focus.
+					event.preventDefault();
+					field.current?.focus();
+				}}
+			>
+				<form
+					className="grid gap-4"
+					onSubmit={(event) => {
+						event.preventDefault();
+						if (typed === repo && !busy) void remove();
+					}}
+				>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete {repo}?</AlertDialogTitle>
+						<AlertDialogDescription>
+							Its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks go for
+							good.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<Field>
+						<Label htmlFor="delete-confirm">
+							Type <code>{repo}</code> to confirm
+						</Label>
+						<Input
+							ref={field}
+							id="delete-confirm"
+							type="text"
+							className="font-mono text-meta"
+							value={typed}
+							onChange={(event) => setTyped(event.target.value)}
+							autoComplete="off"
+							spellCheck={false}
+						/>
+					</Field>
+					{error ? (
+						<p className="m-0 animate-appear text-ui text-bad" role="alert">
+							{error}
+						</p>
+					) : null}
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={busy}>Keep repository</AlertDialogCancel>
+						<Button type="submit" variant="danger" disabled={typed !== repo || busy}>
+							{busy ? "Deleting…" : "Delete repository"}
+						</Button>
+					</AlertDialogFooter>
+				</form>
+			</AlertDialogContent>
+		</AlertDialog>
 	);
 }

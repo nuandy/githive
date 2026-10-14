@@ -229,6 +229,11 @@ export class Workspace {
 		}
 	}
 
+	/** The repo it holds, for reading with isomorphic-git directly (see change-diff.ts). */
+	get held() {
+		return { fs: this.fs, dir: DIR, cache: this.cache };
+	}
+
 	async write(files: Record<string, string>) {
 		for (const [path, content] of Object.entries(files)) {
 			await this.fs.promises.writeFile(`${DIR}/${path}`, content);

@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
+import { type ChangeState, STATES } from "../../lib/status";
 import { cn } from "../../lib/utils";
 
 // Pills, counters and lamps: the small marks that say how something stands. A tone is one of the lamps' meanings
@@ -27,13 +28,13 @@ export const badgeVariants = cva(
 			solid: { true: "", false: "" },
 			outline: { true: "border-border-strong bg-transparent font-medium text-muted-foreground", false: "" },
 			// Each size says its line height again: cn() drops a line height that a font size follows.
-			size: { default: "", sm: "py-0 text-micro leading-4.5", lg: "px-3 py-1.25 text-ui-lg leading-5" },
+			size: { default: "", sm: "py-0 text-caption leading-4.5", lg: "px-3 py-1.25 text-ui-lg leading-5" },
 		},
 		compoundVariants: [
-			{ solid: true, tone: "good", class: "bg-good text-white" },
-			{ solid: true, tone: "bad", class: "bg-bad text-white" },
-			{ solid: true, tone: "warn", class: "bg-warn text-white" },
-			{ solid: true, tone: "needs", class: "bg-needs text-white" },
+			{ solid: true, tone: "good", class: "bg-good text-good-foreground" },
+			{ solid: true, tone: "bad", class: "bg-bad text-bad-foreground" },
+			{ solid: true, tone: "warn", class: "bg-warn text-warn-foreground" },
+			{ solid: true, tone: "needs", class: "bg-needs text-needs-foreground" },
 			{ solid: true, tone: "accent", class: "bg-primary text-primary-foreground" },
 			{ solid: true, tone: "neutral", class: "bg-neutral text-card" },
 		],
@@ -64,14 +65,26 @@ export function Counter({ className, ...props }: ComponentProps<"span">) {
 export type LampColor = "amber" | "green" | "red" | "neutral";
 
 const LAMP: Record<LampColor, string> = {
-	amber: "[--lamp:var(--amber)]",
+	// Amber is pale on light paper (2.2:1); a ring of the darker warn gives it an edge that shows.
+	amber: "[--lamp:var(--amber)] inset-ring inset-ring-warn dark:inset-ring-0",
 	green: "[--lamp:var(--good)]",
 	red: "[--lamp:var(--bad)]",
 	neutral: "[--lamp:var(--border-strong)]",
 };
 
-/** A lamp: amber, green or red, and always the same meaning (theme.css). Without a color it takes the one set around it. */
-export function Lamp({ color, className, ...props }: ComponentProps<"span"> & { color?: LampColor }) {
+/**
+ * A lamp: amber, green or red, and always the same meaning (theme.css). Without a color it takes the one set around it.
+ * A change state's lamp (`state`) is in that state's color and pattern with its glyph on it, so color never says it
+ * alone (see status.ts): a size bigger than a plain lamp, so its 10px glyph reads, and as big for every state, so
+ * lamps in a row line up.
+ */
+export function Lamp({
+	color,
+	state,
+	className,
+	...props
+}: ComponentProps<"span"> & { color?: LampColor; state?: ChangeState }) {
+	const look = state ? STATES[state] : undefined;
 	return (
 		<span
 			data-slot="lamp"
@@ -79,9 +92,12 @@ export function Lamp({ color, className, ...props }: ComponentProps<"span"> & { 
 			className={cn(
 				"inline-block size-2.5 flex-none rounded-full bg-[var(--lamp,var(--border-strong))] transition-[background-color] duration-slow",
 				color ? LAMP[color] : "",
+				look && ["inline-grid size-3.5 place-items-center border text-[10px] leading-none font-black", look.mark],
 				className,
 			)}
 			{...props}
-		/>
+		>
+			{look?.glyph}
+		</span>
 	);
 }

@@ -1,14 +1,15 @@
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
-// Fields: text, long text, a native select, their labels, and a field's label, control and hint together. A field's
-// border warms to the ring's color as it takes focus, with the ring itself fading in around it.
+// Fields: text, long text, a native select, their labels, and a field's label, control and hint together. A focused
+// field takes the outline every focusable thing has (theme.css).
 
 const field = [
-	"min-w-0 rounded-md border border-border-strong bg-card px-2.5 py-1.5 text-foreground",
+	"min-w-0 rounded-md border border-input bg-card px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground",
+	// A field whose value is wrong says so under it (FieldHint), and its edge is red.
+	"aria-invalid:border-bad",
 	"[font-family:inherit] [font-size:inherit] [font-weight:inherit] leading-[inherit]",
-	"transition-[border-color,box-shadow] duration-fast ease-out",
-	"focus-visible:border-ring focus-visible:shadow-focus focus-visible:outline-none",
+	"transition-[border-color] duration-fast ease-out",
 	"disabled:cursor-not-allowed disabled:opacity-55",
 ];
 

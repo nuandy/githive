@@ -286,7 +286,11 @@ const STORIES: Story[] = [
 		[".prettierrc", "package.json"],
 		day(18, 120),
 		[],
-		{ files: [".prettierrc", "package.json", "src/App.tsx", "src/main.tsx", "src/routes.ts", "src/lib/api.ts"] },
+		// Formatting the codebase touched more files than History lists, so what landed before it is hedged in the Code tab.
+		{
+			files: [".prettierrc", "package.json", "src/App.tsx", "src/main.tsx", "src/routes.ts", "src/lib/api.ts"],
+			filesTotal: 46,
+		},
 	),
 	landedLongAgo(
 		"analytics-consent",

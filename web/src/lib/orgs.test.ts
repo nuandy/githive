@@ -84,7 +84,7 @@ describe("orgs", () => {
 		expect(slugProblem("Acme")).toMatch(/lowercase/);
 		expect(slugProblem("x".repeat(40))).toMatch(/39/);
 		expect(repoNameProblem("my.repo_1")).toBeNull();
-		expect(repoNameProblem("a b")).toMatch(/Only/);
-		expect(repoNameProblem("..")).toMatch(/usable/);
+		expect(repoNameProblem("a b")).toMatch(/Spaces/);
+		expect(repoNameProblem("..")).toMatch(/can't be a name/);
 	});
 });

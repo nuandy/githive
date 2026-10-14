@@ -11,7 +11,8 @@ describe("cn", () => {
 	it("lets a later class win over an earlier one that sets the same thing", () => {
 		expect(cn("px-2 py-1", "px-4")).toBe("py-1 px-4");
 		expect(cn("duration-fast", "duration-slow")).toBe("duration-slow");
-		expect(cn("shadow-raised", "shadow-focus")).toBe("shadow-focus");
+		expect(cn("shadow-raised", "shadow-none")).toBe("shadow-none");
 		expect(cn("rounded-md", false, undefined, "rounded-full")).toBe("rounded-full");
+		expect(cn("max-w-measure", "max-w-none")).toBe("max-w-none");
 	});
 });

@@ -4,13 +4,15 @@ import { useStagger } from "../hooks/useStagger";
 import { filterRepos, groupRepos, type RepoRow, type RepoState, repoState } from "../lib/repos";
 import { stretchWords } from "../lib/stretch";
 import { splitRepo } from "../lib/repoName";
+import type { ChangeState } from "../lib/status";
 import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
 import { cn } from "../lib/utils";
 import { DemoCard, type DemoApi } from "./DemoRun";
+import { GetStarted, type StartApi } from "./GetStarted";
 import { Icon } from "./Icon";
-import { Page } from "./Page";
-import { Badge, Lamp, type LampColor } from "./ui/badge";
+import { Page, PageHeader } from "./Page";
+import { Badge, Lamp } from "./ui/badge";
 import { Box } from "./ui/box";
 import { Button } from "./ui/button";
 import { Fold } from "./ui/collapse";
@@ -23,20 +25,26 @@ export interface RepoListProps {
 	canCreate?: boolean;
 	/** Demo runs, which a person signed in can start. */
 	demo?: DemoApi;
+	/** Your agents and apps, for the Get started checklist (people signed in). */
+	start?: StartApi;
+	/** The search, as the address has it (#/?q=…), and keeping it there as it's typed. */
+	query?: string;
+	onQueryChange?: (query: string) => void;
 }
 
-const LAMP: Record<RepoState, LampColor> = {
-	"needs-you": "red",
-	"at-work": "amber",
-	done: "green",
-	quiet: "neutral",
+/** A repo's lamp: what needs a person, work being built, or work landed, as a change's lamp says each; quiet is unlit. */
+const LAMP: Record<RepoState, ChangeState | undefined> = {
+	"needs-you": "needs-person",
+	"at-work": "building",
+	done: "landed",
+	quiet: undefined,
 };
 
 /** A count beside the total, marked by its lamp. */
-function Count({ color, children }: { color: LampColor; children: ReactNode }) {
+function Count({ state, children }: { state: ChangeState; children: ReactNode }) {
 	return (
 		<span className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp color={color} />
+			<Lamp state={state} />
 			{children}
 		</span>
 	);
@@ -53,16 +61,16 @@ function Summary({ rows, className }: { rows: RepoRow[]; className?: string }) {
 				{rows.length} {rows.length === 1 ? "repository" : "repositories"}
 			</strong>
 			{needsYou ? (
-				<Count color="red">
+				<Count state="needs-person">
 					{needsYou} {needsYou === 1 ? "change needs" : "changes need"} you
 				</Count>
 			) : null}
 			{violations ? (
-				<Count color="red">
+				<Count state="needs-person">
 					{violations} audit {violations === 1 ? "violation" : "violations"}
 				</Count>
 			) : null}
-			<Count color="amber">
+			<Count state="building">
 				{open} open {open === 1 ? "change" : "changes"}
 			</Count>
 		</p>
@@ -100,19 +108,19 @@ function RepoLine({ row, ruled }: { row: RepoRow; ruled: boolean }) {
 			</span>,
 		);
 	if (row.open) parts.push(<span key="open">{row.open} open</span>);
-	if (row.merged) parts.push(<span key="merged">{row.merged} merged</span>);
+	if (row.merged) parts.push(<span key="landed">{row.merged} landed</span>);
 	return (
 		<div className={cn("flex items-start gap-3.5 px-0.5 py-3.5", ruled && "border-t border-border")}>
 			{/* A quiet repo's lamp is unlit: an empty ring rather than a grey dot. */}
 			<Lamp
-				color={LAMP[state]}
+				state={LAMP[state]}
 				className={cn(
 					"mt-1.75",
 					state === "quiet" && "bg-transparent [box-shadow:inset_0_0_0_1.5px_var(--border-strong)]",
 				)}
 			/>
 			<div className="min-w-0 flex-1">
-				<a className="text-[17px] font-bold wrap-anywhere text-foreground" href={href.repo(row.name)}>
+				<a className="text-lead font-bold wrap-anywhere text-foreground" href={href.repo(row.name)}>
 					<span className="font-normal text-muted-foreground">{owner}/</span>
 					{name}
 				</a>
@@ -189,26 +197,17 @@ function RepoGroup(props: {
 	);
 }
 
-/** No repositories to list: what they're for, and a way to make one. */
-function NoRepos({ canCreate }: { canCreate: boolean }) {
+/** No repositories to list: what they're for. The page's header has the way to make one. */
+function NoRepos() {
 	return (
 		<div className="px-6 py-10 text-center">
-			<Icon name="repo" size={32} className="inline align-baseline text-muted-foreground" />
+			<Icon name="repo" size={28} className="inline align-baseline text-muted-foreground" />
 			<h2 className="mt-3 mb-2 text-title">No repositories yet</h2>
 			<p className="mx-auto mt-0 mb-2 max-w-130 text-muted-foreground">
 				Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
-				will change, push their changes to their own forks, and merge them after review and checks, just like pull
+				will change, push their changes to their own forks, and land them after review and checks, just like pull
 				requests.
 			</p>
-			{canCreate ? (
-				<div className="mt-4.5">
-					<Button asChild>
-						<a href={href.newRepo()}>
-							<Icon name="plus" size={15} /> New repository
-						</a>
-					</Button>
-				</div>
-			) : null}
 		</div>
 	);
 }
@@ -220,8 +219,16 @@ const NOTE = "my-3.75 border-t border-border px-0.5 py-3 text-muted-foreground";
  * The home page: the reader's own repos (theirs, their orgs' and those shared with them), those that need a person
  * first, then those at work, then the quiet ones; then other people's public repos, apart.
  */
-export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoListProps) {
-	const [query, setQuery] = useState("");
+export function RepoList({
+	rows: all,
+	loaded,
+	canCreate = false,
+	demo,
+	start,
+	query: asked = "",
+	onQueryChange,
+}: RepoListProps) {
+	const [query, setQuery] = useState(asked);
 	const rows = all.filter((row) => !row.public);
 	const others = all.filter((row) => row.public);
 	const matching = new Set(filterRepos(all, query).map((row) => row.name));
@@ -248,27 +255,33 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 	let shownAbove = phase !== "list" || noMatch;
 
 	return (
-		<Page id="main">
-			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-				<div className="grid min-w-0 gap-2">
-					<h1 className="text-display tracking-[-0.01em]">Repositories</h1>
-					{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
-				</div>
-				{canCreate ? (
-					<div className="flex flex-wrap gap-2">
-						<Button asChild>
-							<a href={href.orgs()}>Create an organization</a>
-						</Button>
-						<Button asChild variant="primary">
-							<a href={href.newRepo()}>
-								<Icon name="plus" size={15} /> New repository
-							</a>
-						</Button>
-					</div>
-				) : null}
-			</div>
+		<Page>
+			<PageHeader
+				title="Repositories"
+				className="items-center"
+				actions={
+					canCreate ? (
+						<>
+							<Button asChild>
+								<a href={href.orgs()}>Create an organization</a>
+							</Button>
+							<Button asChild variant="primary">
+								<a href={href.newRepo()}>
+									<Icon name="plus" /> New repository
+								</a>
+							</Button>
+						</>
+					) : null
+				}
+			>
+				{rows.length ? <Summary rows={rows} className={cn(summaryFades && "animate-fade")} /> : null}
+			</PageHeader>
 
-			{demo ? <DemoCard api={demo} /> : null}
+			{start ? (
+				<GetStarted rows={rows} loaded={loaded} api={start} elsewhere={canCreate ? [href.newRepo()] : []} />
+			) : null}
+			{/* Prominent for an account with no repositories; otherwise a line. */}
+			{demo && phase !== "loading" ? <DemoCard api={demo} compact={phase === "list"} /> : null}
 
 			{all.length > 0 ? (
 				<div className={cn("relative mb-4", searchFades && "animate-fade")}>
@@ -282,7 +295,10 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 						className="h-9 w-full pl-8.5"
 						placeholder="Find a repository…"
 						value={query}
-						onChange={(event) => setQuery(event.target.value)}
+						onChange={(event) => {
+							setQuery(event.target.value);
+							onQueryChange?.(event.target.value);
+						}}
 					/>
 				</div>
 			) : null}
@@ -293,7 +309,7 @@ export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoLis
 						Loading repositories…
 					</p>
 				) : null}
-				{phase === "empty" ? <NoRepos canCreate={canCreate} /> : null}
+				{phase === "empty" ? <NoRepos /> : null}
 				{phase === "list" ? (
 					<Fold open={noMatch}>
 						<p className={NOTE}>No repositories match “{missed}”.</p>

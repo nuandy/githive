@@ -52,14 +52,6 @@ export interface RepoGitHub {
 	};
 }
 
-/** What giving up GitHub's change answers: released, or why not. */
-export interface GiveUpAnswer {
-	ok: boolean;
-	released?: string;
-	note?: string;
-	refused?: string;
-}
-
 /** What github_pr answers: the pull request, and whether it was just opened or rewritten. */
 export interface PullAnswer {
 	pr: string;
@@ -318,7 +310,15 @@ export interface LandedChange {
 	head: string;
 	title: string;
 	intent?: string;
+	/** The files its merge changed: the first 20 of them. */
 	files: string[];
+	/** How many files its merge changed: more than `files` lists when that's cut short (newer servers). */
+	filesTotal?: number;
+	/**
+	 * Commits that aren't landed changes (pushed with plain git, a revert) reached the branch after it, and History
+	 * lists neither them nor their files (newer servers).
+	 */
+	unlistedSince?: true;
 	reviews: HistoryReview[];
 	at?: string;
 }
@@ -336,7 +336,8 @@ export interface ChangeHistory {
 	branch: string;
 	/** The claim in force, or null once it merged or was released. */
 	claim: Omit<RepoSnapshot["claims"][number], "head" | "approval" | "hosted"> | null;
-	released: { reason: string; at: string; mergedAs?: string; agent: string; stale?: boolean }[];
+	/** How its claim ended: `agent` held it, `by` released it (its agent, another as stale, or a person). */
+	released: { reason: string; at: string; mergedAs?: string; agent: string; by?: string; stale?: boolean }[];
 	/** The change's own commits, newest first. */
 	commits: { commit: string; message: string; author: string; at: string }[];
 	votes: RepoSnapshot["votes"];
@@ -346,6 +347,56 @@ export interface ChangeHistory {
 	attempts?: string[];
 	/** While its claim is in force: its footprint, and where it meets other open changes (newer servers). */
 	awareness?: ChangeAwareness;
+}
+
+/** One hunk of a file's diff: where it starts on each side and how many lines it spans, and its lines. */
+export interface DiffHunk {
+	oldStart: number;
+	oldLines: number;
+	newStart: number;
+	newLines: number;
+	/** Each line marked " " kept, "-" removed or "+" added; "\\ No newline at end of file" after a side's last. */
+	lines: string[];
+}
+
+/** One file a change changed. Binary and too-big files aren't diffed; a cut one kept its counts, not its lines. */
+export interface FileDiff {
+	path: string;
+	status: "added" | "removed" | "modified";
+	added?: number;
+	removed?: number;
+	/** Outside the change's claim. */
+	outside?: true;
+	binary?: true;
+	tooBig?: true;
+	/** Its lines were left out: the diff (about 900 KB) ran out of room before it. */
+	cut?: true;
+	hunks?: DiffHunk[];
+}
+
+/**
+ * A change's files (GET /repos/:repo/changes/:change/diff): its head against where it left its branch ("head"), or the
+ * commit it landed as against the branch before ("landed"). Base and head are null when nothing is pushed.
+ */
+export interface ChangeDiff {
+	change: string;
+	of: "head" | "landed";
+	base: string | null;
+	head: string | null;
+	/** Sorted by path, at most 300. */
+	files: FileDiff[];
+	/** Every file it changed: more than `files` lists when there were too many. */
+	total: number;
+	/** Why its files can't be shown just now (its branch unreadable, or no history shared with it): no files. */
+	unavailable?: string;
+}
+
+/** What a person's release answers: released, or why not. */
+export interface ReleaseAnswer {
+	ok: boolean;
+	released?: string;
+	note?: string;
+	refused?: string;
 }
 
 /** A commit on the branch that touched a conflicted file since the change left it. */
@@ -510,7 +561,8 @@ export interface OrgDetail extends Org {
 	repos: RepoRecord[];
 	members: { userId: string; handle: string; name: string | null; avatarUrl: string | null; role: OrgRole }[];
 	teams: { id: string; slug: string; name: string | null; members: string[] }[];
-	invites: { email: string; role: OrgRole; createdAt: string }[];
+	/** Each says if it waits on a GitHive admin approving the email (newer servers). */
+	invites: { email: string; role: OrgRole; createdAt: string; awaitingApproval?: boolean }[];
 }
 
 /** What the caller may do in a repo (GET /repos/:owner/:name/access). */
@@ -521,6 +573,10 @@ export interface RepoAccess {
 	visibility: "private" | "public" | null;
 	/** Its default branch (newer servers), or null for a repo with no commits. */
 	branch?: string | null;
+	/** A person's identity in the records, "person:<hash>" (newer servers): who their votes are counted as. */
+	by?: string;
+	/** A person's teams in the repo's org, "@<org>/<team>" (newer servers): roles granted to a team are theirs. */
+	teams?: string[];
 }
 
 /** A new repository: imported, copied, or empty. */
@@ -544,6 +600,16 @@ export const SIGNED_OUT_EVENT = "githive:signed-out";
 
 /** What a call that needs signing in fails with: a session ended, or someone signed out asked for a private repo. */
 export const SIGNED_OUT_MESSAGE = "Your session ended: sign in to GitHive again.";
+
+/** A call the server refused: its words, and the HTTP status they came with (409 for a name that's taken, say). */
+export class ApiError extends Error {
+	readonly status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = "ApiError";
+		this.status = status;
+	}
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
 	const isRecord = value !== null && typeof value === "object" && !Array.isArray(value);
@@ -573,7 +639,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	}
 	if (!response.ok) {
 		if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
-		throw new Error(failureMessage(response, data));
+		throw new ApiError(failureMessage(response, data), response.status);
 	}
 	return data as T;
 }
@@ -616,14 +682,19 @@ export const api = {
 	/** One change: its claim or how it ended, its commits and the votes on them. */
 	change: (repo: string, change: string) =>
 		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
+	/** One change's files, each with its diff. */
+	diff: (repo: string, change: string) =>
+		call<ChangeDiff>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/diff`),
+	/** A person releases a change's claim, whoever's it is, saying why: its paths free, its agent told. */
+	release: (repo: string, change: string, reason: string) =>
+		call<ReleaseAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/release`, {
+			reason,
+		}),
 	/** What the caller may do in a repo, and whether it's private or public. */
 	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
 	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
 	githubPull: (repo: string, refresh = false) =>
 		call<PullAnswer>("POST", `/repos/${repoPath(repo)}/github/pr`, { refresh }),
-	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
-	giveUpGitHub: (repo: string, change: string) =>
-		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
 	/** GitHive's hosted agents on a repo, if it has had any. */
 	hostedAgents: (repo: string) => call<HiveStatus | null>("GET", `/repos/${repoPath(repo)}/hosted-agents`),
 	/** People who can write, and whom an admin lists: start `count` hosted agents for `minutes`. */

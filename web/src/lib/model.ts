@@ -30,3 +30,11 @@ export function briefPaths(paths: string[], shown = 3): string {
 	const more = paths.length - shown;
 	return `${first} +${more} more`;
 }
+
+/** A title cut to about `most` characters at a word, for a sentence that names it: "Let shoppers apply a coupon…". */
+export function shortTitle(title: string, most = 60): string {
+	if (title.length <= most) return title;
+	const cut = title.slice(0, most + 1);
+	const word = cut.lastIndexOf(" ");
+	return `${(word > most / 2 ? cut.slice(0, word) : title.slice(0, most)).replace(/[\s,.;:–—-]+$/, "")}…`;
+}

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import css from "../theme.css?raw";
+import indexHtml from "../../index.html?raw";
 
 // lib/theme.ts keeps the choice in a module-level store, so each test loads it fresh into a fake window: storage,
 // the system's color scheme (which a test can flip) and <html>'s class and data-theme.
@@ -17,7 +19,8 @@ function fakeWindow({ stored, systemDark = false }: { stored?: string | null; sy
 		},
 		dataset: {} as Record<string, string>,
 	};
-	vi.stubGlobal("document", { documentElement: html });
+	const metas = [{ content: "" }, { content: "" }];
+	vi.stubGlobal("document", { documentElement: html, querySelectorAll: () => metas });
 	vi.stubGlobal("window", {
 		localStorage: {
 			getItem: (key: string) => storage.get(key) ?? null,
@@ -29,11 +32,17 @@ function fakeWindow({ stored, systemDark = false }: { stored?: string | null; sy
 			addEventListener: (_: string, listener: Listener) => schemeListeners.push(listener),
 		}),
 		addEventListener: () => {},
+		getComputedStyle: () => ({
+			getPropertyValue: (name: string) =>
+				name === "--card" ? (classes.has("dark") ? " #dark-card" : "#light-card") : "",
+		}),
 	});
 	return {
 		storage,
 		dark: () => classes.has("dark"),
 		chosen: () => html.dataset.theme,
+		/** The browser bar's colors, as the theme-color metas say. */
+		barColors: () => metas.map((meta) => meta.content),
 		setSystemDark(dark: boolean) {
 			scheme.matches = dark;
 			for (const listener of schemeListeners) listener();
@@ -80,6 +89,8 @@ describe("the theme", () => {
 		expect(page.storage.get("githive.theme")).toBe("dark");
 		expect(page.dark()).toBe(true);
 		expect(page.chosen()).toBe("dark");
+		// The browser's own bar takes the top bar's dark color.
+		expect(page.barColors()).toEqual(["#dark-card", "#dark-card"]);
 
 		theme.setThemeChoice("system");
 		expect(page.storage.has("githive.theme")).toBe(false);
@@ -98,5 +109,175 @@ describe("the theme", () => {
 		page.setSystemDark(false);
 		page.setSystemDark(true);
 		expect(page.dark()).toBe(false);
+	});
+});
+
+// What theme.css says, scheme by scheme, as the page has it: <html> is :root in either scheme and .dark in dark, so a
+// scheme's custom properties are those of every top-level rule naming :root (or .dark, in dark), the later winning, and
+// a var() is read in the same scheme, as the browser reads it on <html>.
+const block = (selector: string) => {
+	const start = css.indexOf(`\n${selector} {`);
+	return css.slice(start, css.indexOf("}", start));
+};
+const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(?:^|\n)([^\s@{}][^{}]*?)\{([^{}]*)\}/g)].map(
+	([, selectors, body]) => ({ selectors: selectors!.split(",").map((each) => each.trim()), body: body! }),
+);
+const propertiesOf = (scheme: string) => {
+	const found = new Map<string, string>();
+	for (const { selectors, body } of rules)
+		if (selectors.includes(":root") || selectors.includes(scheme))
+			for (const [, name, declared] of body.matchAll(/--([\w-]+):\s*([^;]+);/g)) found.set(name!, declared!.trim());
+	return found;
+};
+const properties: Record<string, Map<string, string>> = {
+	":root": propertiesOf(":root"),
+	".dark": propertiesOf(".dark"),
+};
+/** A custom property's color in a scheme, through any var() it names; undefined if it isn't a six-digit hex. */
+const value = (scheme: string, name: string, seen = new Set<string>()): string | undefined => {
+	const declared = properties[scheme]!.get(name);
+	const named = declared && /^var\(--([\w-]+)\)$/.exec(declared)?.[1];
+	if (named) return seen.has(named) ? undefined : value(scheme, named, seen.add(name));
+	return declared && /^#[0-9a-f]{6}$/i.test(declared) ? declared : undefined;
+};
+const luminance = (hex: string) => {
+	const [r, g, b] = [1, 3, 5]
+		.map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+		.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+	return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+};
+const contrast = (a: string, b: string) => {
+	const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (light! + 0.05) / (dark! + 0.05);
+};
+const SCHEMES = [":root", ".dark"];
+
+describe("the browser's bar", () => {
+	it("is the top bar's color, light and dark, from before the first paint", () => {
+		const [light, dark] = [value(":root", "card"), value(".dark", "card")];
+		expect(indexHtml).toContain(`media="(prefers-color-scheme: light)" content="${light}"`);
+		expect(indexHtml).toContain(`media="(prefers-color-scheme: dark)" content="${dark}"`);
+		// A choice against the system's, as the page loads.
+		expect(indexHtml).toContain(`meta.content = dark ? "${dark}" : "${light}"`);
+	});
+});
+
+/** Asserts `fore` reads on each of `backs` at `least`, in every scheme (or those given). */
+function reads(fore: string, backs: string[], least: number, schemes = SCHEMES) {
+	for (const scheme of schemes)
+		for (const back of backs)
+			it(`${fore} on ${back}, ${scheme}: ${least}:1 or more`, () => {
+				const [a, b] = [value(scheme, fore), value(scheme, back)];
+				expect(a, `--${fore}`).toBeDefined();
+				expect(b, `--${back}`).toBeDefined();
+				expect(contrast(a!, b!)).toBeGreaterThanOrEqual(least);
+			});
+}
+
+// Text on a solid status fill (Merge, a solid badge, the inbox count) takes that fill's -foreground, which must read
+// on it in each scheme.
+describe("text on a solid status color", () => {
+	for (const tone of ["good", "bad", "warn", "needs"]) reads(`${tone}-foreground`, [tone], 4.5);
+});
+
+// A status in words (a soft pill, a step, a banner) sits on its own tint, or on the muted surfaces rows and boxes use.
+describe("status text", () => {
+	for (const tone of ["good", "bad", "warn", "needs", "neutral"])
+		reads(tone, [`${tone}-soft`, "surface-2", "surface-3", "card", "background"], 4.5);
+	reads("link", ["link-soft", "surface-2", "surface-3", "card", "background"], 4.5);
+});
+
+// Code's syntax colors read on the code's paper (the card), on a hovered line (surface-2), and on the page.
+describe("code's syntax colors", () => {
+	for (const token of ["keyword", "string", "literal", "comment", "title", "type", "attr"])
+		reads(`code-${token}`, ["card", "surface-2", "background"], 4.5);
+});
+
+// Muted words, placeholders among them, read wherever they're set.
+describe("muted text", () => {
+	reads("muted-foreground", ["card", "background", "surface-2", "surface-3"], 4.5);
+});
+
+// What says where a control is, or which one has focus, stands out from the paper around it (WCAG 1.4.11).
+describe("edges and the focus ring", () => {
+	reads("input", ["card", "background"], 3);
+	reads("border-strong", ["card", "background"], 3);
+	reads("ring", ["card", "background", "surface-2", "surface-3", "link-soft"], 3);
+});
+
+// A change's state colors (--stage-*, each a lamp's) fill and edge its square on the Claims map, its swatch in a legend
+// and its cell on the Hive: marks, not words, so 3:1 against the page and the card (WCAG 1.4.11).
+describe("the stages' colors", () => {
+	for (const stage of ["building", "review", "landed", "asking"]) reads(`stage-${stage}`, ["background", "card"], 3);
+	reads("stage-landing", ["background", "card"], 3, [".dark"]);
+	// An accepted exception: landing is the amber lamp, the logo's honey, about 2.2:1 on light paper. Its mark never
+	// says "landing" by color alone: its glyph (●) and its words do, which WCAG 1.4.11 allows where what the color
+	// shows is there without it, and an amber lamp carries a ring of warn. It mustn't get paler than this.
+	reads("stage-landing", ["background", "card"], 2, [":root"]);
+	it("stage-landing on light paper is the one under 3:1", () => {
+		expect(contrast(value(":root", "stage-landing")!, value(":root", "background")!)).toBeLessThan(3);
+	});
+});
+
+// A hovered or highlighted item's surface shows on the muted surfaces too, not only on the card.
+describe("the hover surface", () => {
+	it("is surface-3, a step under surface-2", () => {
+		expect(block(":root")).toMatch(/--accent:\s*var\(--surface-3\);/);
+		expect(block(".dark")).not.toMatch(/--accent:/);
+	});
+});
+
+// A link in a sentence is told from the words around it by more than its color (WCAG 1.4.1); one standing on its own
+// (navigation, a row's title, a button) keeps the bare look.
+describe("links in running text", () => {
+	it("are underlined in paragraphs, callouts and prose blocks, but not in rows laid out as flex or grid", () => {
+		const rule =
+			/:where\(p:not\(\.flex, \.inline-flex, \.grid\),[^{]*\.prose\) a:not\(\[data-slot\]\) \{([^}]*)\}/.exec(css);
+		expect(rule?.[1]).toMatch(/text-decoration-line: underline;/);
+	});
+});
+
+// Eight sizes, far enough apart to tell: 11 for counts only, 12 the smallest for words (Overpass's x-height is small),
+// then 13, 14, 15, 17, 20 and 26. The roles are names for them.
+describe("the type scale", () => {
+	const sizes = [...css.matchAll(/--text-([a-z-]+):\s*([\d.]+)px;/g)].map(
+		([, name, px]) => [name!, Number(px)] as const,
+	);
+
+	it("has eight whole-pixel steps", () => {
+		expect(sizes.length).toBeGreaterThan(8);
+		expect([...new Set(sizes.map(([, px]) => px))].sort((a, b) => a - b)).toEqual([11, 12, 13, 14, 15, 17, 20, 26]);
+	});
+
+	it("keeps 11px to the counts", () => {
+		expect(sizes.filter(([, px]) => px < 12).map(([name]) => name)).toEqual(["micro"]);
+	});
+});
+
+// On a touch screen, what's small to tap takes taps 44px about its middle (WCAG 2.5.8 asks 24; 44 is a finger), without
+// growing, so nothing moves on a desktop.
+describe("touch targets", () => {
+	it("reach 44px under a coarse pointer, for touch-target and a radio's or checkbox's label", () => {
+		const coarse = css.slice(css.indexOf("@media (pointer: coarse)"));
+		expect(coarse).toMatch(/\.touch-target/);
+		expect(coarse).toMatch(/label:has\(> input:is\(\[type="radio"\], \[type="checkbox"\]\)\)/);
+		expect(coarse).toMatch(/width: max\(100%, 44px\);\s*height: max\(100%, 44px\);/);
+	});
+});
+
+// Nothing blinks or pulses for more than a few seconds (WCAG 2.2.2): three times, then it holds still. A bump is a
+// nudge, not a jump.
+describe("motion", () => {
+	const animation = (name: string) => new RegExp(`--animate-${name}:([^;]*);`).exec(css)?.[1] ?? "";
+
+	for (const name of ["goal-blink", "hive-cell-blink", "live"])
+		it(`${name} plays three times, then holds still`, () => {
+			expect(animation(name)).not.toMatch(/infinite/);
+			expect(animation(name)).toMatch(/\s3$/);
+		});
+
+	it("bumps a changed number by about 15%", () => {
+		const bump = /@keyframes bump \{\s*0% \{\s*transform: scale\(([\d.]+)\);/.exec(css)?.[1];
+		expect(Number(bump)).toBeCloseTo(1.15, 2);
 	});
 });

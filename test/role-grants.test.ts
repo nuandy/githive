@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
-import { approval, grantWarnings, holdsRole, type VoteRecord } from "../src/toolkit/votes";
+import { approval, grantWarnings, holdsRole, peopleOnly, type VoteRecord } from "../src/toolkit/votes";
 import { startGitServer } from "./helpers/git-server";
 
 // A role that can block a merge (a veto role, like security) counts only from
@@ -119,6 +119,26 @@ describe("warnings about who holds a role", () => {
 		expect(
 			grantWarnings({ required: 1, vetoes: ["security"], grants: { security: ["sec-1", "sec-2", "person:*"] } }),
 		).toEqual([]);
+	});
+
+	it("knows a role only people may vote as: its waiting reviews need a person", () => {
+		const policy = (holders?: string[]) => ({
+			required: 1,
+			vetoes: ["security"],
+			...(holders ? { grants: { security: holders } } : {}),
+		});
+		expect(peopleOnly(policy(["person:*"]), "security")).toBe(true);
+		expect(peopleOnly(policy(["person:ada", "person:*"]), "security")).toBe(true);
+		// GitHive's reviewers hold it by default, and a pool, a person's agent or an agent's name is agents.
+		expect(peopleOnly(policy(), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:*", "service:sec-team/*"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:ada/claude"]), "security")).toBe(false);
+		expect(peopleOnly(policy(["person:*", "sec-bot"]), "security")).toBe(false);
+		expect(peopleOnly(policy([]), "security")).toBe(false);
+		// An agent votes with its owner's teams, so a team's role is one an agent can give.
+		const teamAgent = { reviewer: "sec-bot", by: "service:acme/sec-bot", teams: ["@acme/security"] };
+		expect(holdsRole(policy(["@acme/security"]), "security", teamAgent)).toBe(true);
+		expect(peopleOnly(policy(["person:ada", "@acme/security"]), "security")).toBe(false);
 	});
 });
 

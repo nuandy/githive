@@ -38,5 +38,8 @@ export default defineConfig({
 		// Run through Vite, so its cloudflare:workers import gets the stand-in above, and a package's .wasm (the
 		// parser's core) gets the plugin above instead of Node instantiating it as a module.
 		server: { deps: { inline: ["@cloudflare/workers-oauth-provider", /\.wasm$/] } },
+		// Vitest empties every stylesheet a test imports. One imported as text (theme.css?raw) keeps it, so the
+		// dashboard's tests can read the theme without Node's types.
+		css: { include: [/\.css\?raw$/] },
 	},
 });

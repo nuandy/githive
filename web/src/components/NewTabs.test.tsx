@@ -49,9 +49,8 @@ describe("the Inbox", () => {
 		expect(renderToStaticMarkup(<InboxPage groups={[]} loaded />)).toContain("Nothing waits on you");
 		const bar = renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={3} />);
 		expect(bar).toContain('href="#/inbox"');
-		expect(bar).toContain('aria-label="Inbox, 3 waiting on you"');
-		expect(bar).toMatch(/Inbox<\/span><span[^>]*>3<\/span>/);
-		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toMatch(/Inbox<\/span><span/);
+		expect(bar).toMatch(/Inbox<\/span> <span[^>]*>3<\/span><span class="sr-only"> waiting on you<\/span>/);
+		expect(renderToStaticMarkup(<TopBar crumbs={[]} inboxCount={0} />)).not.toMatch(/Inbox<\/span> ?<span/);
 	});
 });
 
@@ -66,7 +65,10 @@ describe("Agents", () => {
 
 describe("the repo header", () => {
 	it("shows a live dot while connected or reconnecting, and the repo's tabs", () => {
-		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/title="Connected: [^"]*".*Live/);
+		// What the state means is a tooltip, reached by focus as well as by hover.
+		const live = renderToStaticMarkup(<LiveDot status="live" />);
+		expect(live).toMatch(/<span[^>]*tabindex="0"[^>]*data-state="closed"[^>]*>.*Live/);
+		expect(live).not.toContain("title=");
 		expect(renderToStaticMarkup(<LiveDot status="reconnecting" />)).toContain("Reconnecting");
 		expect(renderToStaticMarkup(<LiveDot status="off" />)).toBe("");
 		const page = renderToStaticMarkup(
@@ -78,7 +80,7 @@ describe("the repo header", () => {
 				api={stubApi()}
 			/>,
 		);
-		expect(page).toMatch(/title="Connected: [^"]*".*>Live</);
+		expect(page).toMatch(/role="status"[^>]*>.*>Live</);
 		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"])
 			expect(page).toContain(`<span>${tab}</span>`);
 		expect(page).not.toMatch(/elected|Insights|Activity/);

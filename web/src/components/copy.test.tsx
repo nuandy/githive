@@ -6,6 +6,7 @@ import { buildInbox } from "../lib/inbox";
 import { holdersFromSnapshot } from "../lib/claimsMap";
 import { ClaimsMap } from "./ClaimsMap";
 import { CodeView } from "./CodeBrowser";
+import { CopyBlock } from "./CopyBlock";
 import { InboxPage } from "./InboxPage";
 import { TopBar } from "./TopBar";
 import { RepoPage } from "./RepoPage";
@@ -134,5 +135,17 @@ describe("dashboard copy", () => {
 			/>,
 		];
 		for (const page of pages) expect(words(renderToStaticMarkup(page))).toBeNull();
+	});
+});
+
+describe("copying", () => {
+	it("names the copy button by what it copies, never by the secret", () => {
+		const html = renderToStaticMarkup(<CopyBlock text="ghv_secretsecretsecretsecretsecretsecret" label="Copy token" />);
+		const button = html.match(/<button[\s\S]*?<\/button>/)?.[0] ?? "";
+		expect(visibleText(button).trim()).toBe("Copy token");
+		expect(button).not.toContain("ghv_");
+		expect(html).not.toMatch(/aria-label="[^"]*ghv_/);
+		// "Copied" is said in a status line of its own, so a screen reader hears it.
+		expect(html).toContain('role="status"');
 	});
 });

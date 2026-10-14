@@ -183,7 +183,8 @@ export function Playground() {
 	const update = (patch: Partial<Settings>) => setSettings((old) => ({ ...old, ...patch }));
 	const description = SCENARIOS.find((each) => each.name === scenario)?.description;
 	const now = view?.state.now ?? Date.now();
-	// The Hive as the repo page draws it: in the page's main column, with the landing and the feed shown.
+	// The Hive as the repo page draws it for someone who can write: in the page's main column, with the landing and the
+	// feed shown.
 	const hive = view ? (
 		<Hive
 			repo={view.state.snapshot.repo}
@@ -196,6 +197,8 @@ export function Playground() {
 			now={view.state.now}
 			showsLanding
 			showsFeed
+			writes
+			origin={window.location.origin}
 		/>
 	) : null;
 
@@ -301,7 +304,7 @@ export function Playground() {
 					</NarrowFrame>
 				</div>
 			) : (
-				<Page id="main">{hive}</Page>
+				<Page>{hive}</Page>
 			)}
 		</Shell>
 	);

@@ -27,7 +27,7 @@ describe("a change's conversation", () => {
 		expect(historyStatus(historyFixture)).toBeNull();
 	});
 
-	it("ends with the merge, linking the merge commit", () => {
+	it("ends with its landing, linking the merge commit", () => {
 		const merged = {
 			...historyFixture,
 			claim: null,
@@ -36,12 +36,12 @@ describe("a change's conversation", () => {
 		const items = buildTimeline(merged, "acme/docs-site");
 		expect(items.at(-1)).toMatchObject({
 			kind: "merged",
-			text: "merged into main as",
+			text: "landed on main as",
 			commit: "ffee0011",
 			commitHref: "#/repos/acme/docs-site/code?ref=ffee0011",
 		});
 		expect(items[0]!.text).toBe("agent-c claimed its paths");
-		expect(historyStatus(merged)).toMatchObject({ kind: "merged", label: "Merged" });
+		expect(historyStatus(merged)).toMatchObject({ kind: "landed", label: "Landed", tone: "good" });
 	});
 
 	it("or with the release and its reason", () => {
@@ -56,6 +56,7 @@ describe("a change's conversation", () => {
 			body: "out of time",
 		});
 		expect(historyStatus(released)).toMatchObject({
+			kind: "released",
 			label: "Released",
 			description: "Its claim was released: out of time",
 		});

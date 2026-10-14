@@ -5,6 +5,7 @@ import { useStagger } from "../hooks/useStagger";
 import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
+import { roleName } from "../lib/roles";
 import type { TimelineItem, TimelineKind } from "../lib/timeline";
 import { cn } from "../lib/utils";
 import { Icon, type IconName } from "./Icon";
@@ -78,12 +79,12 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 			>
 				{review.by ? (
 					<>
-						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer){" "}
+						<strong>{identityName(review.by)}</strong> ({roleName(review.reviewer)}){" "}
 						{approved ? "approved these changes" : "requested changes"}
 					</>
 				) : (
 					<>
-						<strong>{review.reviewer}</strong> reviewer {approved ? "approved these changes" : "requested changes"}
+						<strong>{roleName(review.reviewer)}</strong> {approved ? "approved these changes" : "requested changes"}
 					</>
 				)}
 				{review.head ? (
@@ -97,7 +98,9 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 					<When at={review.at} />
 				</span>
 			</div>
-			{review.summary ? <div className="px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div> : null}
+			{review.summary ? (
+				<div className="max-w-measure px-3.5 py-3 whitespace-pre-wrap wrap-anywhere">{review.summary}</div>
+			) : null}
 			{review.thin ? <p className="m-0 px-3.5 py-3 wrap-anywhere text-muted-foreground">{THIN_NOTE}</p> : null}
 			{review.evidence ? (
 				<details className="disclosure px-3.5 pb-3">
@@ -141,11 +144,11 @@ function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (va
 			{item.body ? (
 				<div
 					className={cn(
-						"mt-1.5 text-foreground whitespace-pre-wrap wrap-anywhere",
+						"prose mt-1.5 text-foreground whitespace-pre-wrap wrap-anywhere",
 						// A commit's message in a box of its own, in the code's face; anything else, set off by a rule.
 						item.kind === "pushed"
 							? "rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-meta"
-							: "border-l-3 border-border px-3 py-2 text-ui-lg",
+							: "max-w-measure border-l-3 border-border px-3 py-2 text-ui-lg",
 					)}
 				>
 					{withLinks(item.body)}
@@ -172,10 +175,10 @@ export function TimelineList({ className, children }: { className?: string; chil
 
 /** A badge's colors by tone; neutral, or none, is the rule's own grey. */
 const BADGE: Partial<Record<Tone, string>> = {
-	good: "bg-good text-white",
-	bad: "bg-bad text-white",
+	good: "bg-good text-good-foreground",
+	bad: "bg-bad text-bad-foreground",
 	warn: "bg-warn-soft text-warn",
-	needs: "bg-needs text-white",
+	needs: "bg-needs text-needs-foreground",
 	accent: "bg-link-soft text-link",
 };
 
@@ -183,7 +186,7 @@ const BADGE: Partial<Record<Tone, string>> = {
 const KIND_BADGE: Partial<Record<TimelineKind, string>> = {
 	pushed: "bg-background text-muted-foreground",
 	note: "bg-background text-muted-foreground",
-	merged: "bg-good text-white",
+	merged: "bg-good text-good-foreground",
 };
 
 /** One entry: its badge on the rule, and what happened beside it. */

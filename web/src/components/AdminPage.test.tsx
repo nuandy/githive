@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { NOW, ago, visibleText } from "../test/fixtures";
+import { NOW, ago, inlineText, visibleText } from "../test/fixtures";
 import { type AdminActions, AdminView } from "./AdminPage";
 import { TopBar } from "./TopBar";
 
@@ -50,6 +50,12 @@ describe("the Admin page", () => {
 		expect(text).toMatch(/doesn.t sign out someone already signed in/);
 		expect(text).toContain("allowed by admin@example.com");
 		expect(text).toMatch(/run on GitHive.s model account, so only the people listed here can start them/);
+		// The forms that add to a list are labelled, and come after it.
+		expect(html).toMatch(/<label[^>]*for="admin-email">Email to approve<\/label>/);
+		expect(html).toMatch(/<label[^>]*for="admin-hosted-handle">Their handle<\/label>/);
+		expect(html).not.toContain("placeholder=");
+		expect(html.indexOf("ada@example.com")).toBeLessThan(html.indexOf('for="admin-email"'));
+		expect(html.indexOf("allowed by admin@example.com")).toBeLessThan(html.indexOf('for="admin-hosted-handle"'));
 	});
 
 	it("says when there's nothing waiting, and nobody listed", () => {
@@ -66,7 +72,7 @@ describe("the Admin page", () => {
 			<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} adminRequests={2} />,
 		);
 		expect(html).toContain('href="#/admin"');
-		expect(html).toContain("Admin, 2 requests waiting");
+		expect(inlineText(html)).toContain("Admin 2 requests waiting");
 		const person = renderToStaticMarkup(
 			<TopBar
 				crumbs={[]}

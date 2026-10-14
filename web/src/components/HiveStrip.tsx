@@ -1,36 +1,46 @@
 import { useRef } from "react";
 import type { LandingStretch, RepoAudit, RepoLanding, RepoSnapshot } from "../api";
 import { useBumps } from "../hooks/useBumps";
-import { displayName } from "../lib/agent";
+import { whoWaits } from "../lib/agent";
 import { type Goal, type Stage, stageCounts } from "../lib/goals";
+import { needsYou } from "../lib/needsYou";
 import { counted } from "../lib/plural";
-import { timeAgo } from "../lib/relativeTime";
+import { connectSteps } from "../lib/session";
+import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { type ChangeState, STATES } from "../lib/status";
 import { justFinished, stretchWords } from "../lib/stretch";
 import { hhmm, RANGE_WORDS } from "../lib/timeAxis";
 import { cn } from "../lib/utils";
+import { rememberedClient } from "./AgentsConnect";
+import { CopyBlock } from "./CopyBlock";
+import { Icon, type IconName } from "./Icon";
+import { StateMark } from "./StateMark";
 import { Lamp } from "./ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 /**
- * Each stage's words, its swatch (as tall as the count's digits, and level with them) and its count's color. Up next
- * is a dashed outline, in review a dashed tint; the rest are tinted in their stage's color.
+ * Each stage, by the state its swatch shows (as tall as the count's digits, and level with them), and its count's
+ * color. Up next is a dashed outline; the rest are their states' marks, so the strip is the map's key.
  */
-const STAGES: { stage: Stage; words: string; swatch: string; count?: string }[] = [
-	{ stage: "next", words: "up next", swatch: "border-dashed border-border-strong" },
-	{ stage: "building", words: "building", swatch: "border-stage-building bg-stage-building/25" },
-	{ stage: "review", words: "in review", swatch: "border-dashed border-stage-review bg-stage-review/8" },
-	{
-		stage: "landing",
-		words: "landing",
-		swatch: "border-stage-landing bg-stage-landing/25",
-		count: "text-stage-landing",
-	},
-	{ stage: "landed", words: "landed", swatch: "border-stage-landed bg-stage-landed/25", count: "text-stage-landed" },
+const STAGES: { stage: Stage; state?: ChangeState; count?: string }[] = [
+	{ stage: "next" },
+	{ stage: "building", state: "building" },
+	{ stage: "review", state: "in-review" },
+	{ stage: "approved", state: "approved", count: "text-good" },
+	{ stage: "landing", state: "landing", count: "text-stage-landing" },
+	{ stage: "landed", state: "landed", count: "text-stage-landed" },
 ];
+
+/** A swatch, as tall as the digits beside it and level with them. */
+const SWATCH = cn(
+	"size-[1cap] rounded-sm border-[1.5px] text-title-lg",
+	"supports-[not_(text-box:trim-both_cap_alphabetic)]:relative supports-[not_(text-box:trim-both_cap_alphabetic)]:-top-0.5",
+);
 
 /**
  * The top of the Hive tab: what needs a person, if anything, then how many goals are at each stage. The stages'
- * swatches are the map's key, so the map needs no legend. Once everything has landed it says so instead.
+ * swatches key the map's colors; the map keys its red cells itself. Once everything has landed it says so instead.
  */
 export function HiveStrip({
 	repo,
@@ -38,10 +48,13 @@ export function HiveStrip({
 	upNext,
 	landing,
 	audit,
-	policy,
+	snapshot,
+	waitingElsewhere = 0,
 	range,
 	since,
 	now,
+	writes = false,
+	origin = "",
 }: {
 	repo: string;
 	goals: Goal[];
@@ -49,13 +62,19 @@ export function HiveStrip({
 	upNext?: number;
 	landing?: RepoLanding;
 	audit?: RepoAudit;
-	/** Who may vote as each role, for changes waiting on a vote only a person can give. */
-	policy?: RepoSnapshot["policy"];
+	/** The claims, votes and review settings, for what waits on a person (see needsYou.ts). */
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
+	/** How many changes on other branches wait on a person, for what the banner leaves to the Inbox. */
+	waitingElsewhere?: number;
 	/** The goals panel's range: landed counts what landed within it. */
 	range: number;
 	/** Where the goals panel's clock starts (before now - range when quiet stretches fold). */
 	since: number;
 	now: number;
+	/** The reader can write here: an empty hive shows how to bring an agent in. */
+	writes?: boolean;
+	/** Where GitHive is, for the command that connects an agent. */
+	origin?: string;
 }) {
 	const counts = stageCounts(goals, upNext ?? 0, since);
 	const folded = since < now - range;
@@ -65,28 +84,25 @@ export function HiveStrip({
 	const stages = STAGES.filter(({ stage }) => stage !== "next" || upNext !== undefined);
 	return (
 		<header>
-			<NeedsYou repo={repo} goals={goals} landing={landing} audit={audit} policy={policy} range={range} now={now} />
+			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} elsewhere={waitingElsewhere} now={now} />
 			{!goals.length && !justFinished(stretch, now) ? (
-				<EmptyHive stretch={stretch} now={now} />
+				<EmptyHive repo={repo} stretch={stretch} now={now} writes={writes} origin={origin} />
 			) : (
 				<ol
 					className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2 p-0"
 					aria-label="Goals by stage"
 				>
-					{stages.map(({ stage, words, swatch, count }) => (
+					{stages.map(({ stage, state, count }) => (
 						<li
 							key={stage}
 							data-stage={stage}
 							className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 transition-[border-color,background-color] duration-300 ease-[ease]"
 						>
-							<span
-								className={cn(
-									"size-[1cap] flex-none rounded-sm border-[1.5px] text-title-lg",
-									"supports-[not_(text-box:trim-both_cap_alphabetic)]:relative supports-[not_(text-box:trim-both_cap_alphabetic)]:-top-0.5",
-									swatch,
-								)}
-								aria-hidden="true"
-							/>
+							{state ? (
+								<StateMark state={state} className={SWATCH} />
+							) : (
+								<span className={cn(SWATCH, "flex-none border-dashed border-border-strong")} aria-hidden="true" />
+							)}
 							{/* The box is the digits' height, so centring it centres the digits, not the line with its descender room. */}
 							<b
 								key={counts[stage]}
@@ -99,7 +115,7 @@ export function HiveStrip({
 								{counts[stage]}
 							</b>
 							<span className="text-ui text-muted-foreground">
-								{words}
+								{state ? STATES[state].short : "up next"}
 								{stage === "landed" ? (
 									<span className="text-muted-foreground">
 										{" "}
@@ -118,101 +134,164 @@ export function HiveStrip({
 	);
 }
 
-/** What waits on a person: an agent's question, a change its checks put out, merges the audit flags. */
+/** How many of what needs a person the banner lists; the rest are counted, and in the Inbox. */
+const NEEDS_ROWS = 3;
+
+/** One thing that needs a person, as a row of the banner: what kind, who and when, what about, and what to do. */
+interface NeedsRow {
+	key: string;
+	icon: IconName;
+	/** Who asks or waits, and how long ago: "mara/claude asks · 38m". */
+	lead: string;
+	/** The question, or what the vote or audit is about, on one line. */
+	text: string;
+	/** Quoted: an agent's own words. */
+	quoted?: boolean;
+	verb: string;
+	href: string;
+}
+
+/**
+ * What needs a person, as the banner's rows (see needsYou.ts): agents' questions first, then votes only people may
+ * give, then the audit's open violations. Failed checks aren't here: the goal's row says its agent is fixing them.
+ */
+export function needsRows(
+	repo: string,
+	goals: Goal[],
+	audit: RepoAudit | undefined,
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">,
+	now: number,
+): NeedsRow[] {
+	const { changes, violations } = needsYou(snapshot, audit);
+	const titleOf = new Map(goals.map((goal) => [goal.change, goal.title]));
+	const activeOf = new Map(snapshot.claims.map((claim) => [claim.change, claim.active]));
+	// Where a person decides: the change's page, opened at its decision.
+	const decide = (change: string) => href.change(repo, change, "conversation", { decide: true });
+	const rows: NeedsRow[] = changes.map((waiting) => {
+		if (waiting.kind === "question") {
+			const who = whoWaits(waiting.agent);
+			return {
+				key: `ask:${waiting.change}`,
+				icon: "comment",
+				lead: `${who} ${who === "GitHive" ? "says" : "asks"} · ${shortAge(waiting.at, now)}`,
+				text: waiting.reason,
+				quoted: who !== "GitHive",
+				verb: "Answer",
+				href: decide(waiting.change),
+			};
+		}
+		const since = activeOf.get(waiting.change);
+		return {
+			key: `vote:${waiting.change}`,
+			icon: "user",
+			lead: `${titleOf.get(waiting.change) ?? waiting.change}${since ? ` · ${shortAge(since, now)}` : ""}`,
+			text: `waits for a ${waiting.role} vote, which only people may give`,
+			verb: `Vote as ${waiting.role}`,
+			href: decide(waiting.change),
+		};
+	});
+	if (violations)
+		rows.push({
+			key: "audit",
+			icon: "shield",
+			lead: "The audit",
+			text: `flags ${counted(violations, "open violation")} to look at`,
+			verb: "See the audit",
+			href: href.repo(repo, "audit"),
+		});
+	return rows;
+}
+
+/**
+ * What needs a person: up to three rows, then how many more the Inbox has, this branch's that don't fit and other
+ * branches'. It slides open and shut.
+ */
 function NeedsYou({
 	repo,
 	goals,
-	landing,
 	audit,
-	policy,
-	range,
+	snapshot,
+	elsewhere,
 	now,
 }: {
 	repo: string;
 	goals: Goal[];
-	landing: RepoLanding | undefined;
 	audit: RepoAudit | undefined;
-	policy: RepoSnapshot["policy"] | undefined;
-	range: number;
+	snapshot: Pick<RepoSnapshot, "claims" | "votes" | "policy" | "branchRules" | "branch">;
+	elsewhere: number;
 	now: number;
 }) {
-	const asking = goals.filter((goal) => goal.state === "asking");
-	const titleOf = new Map(goals.map((goal) => [goal.change, goal]));
-	const failed = new Map<string, string>();
-	for (const outcome of landing?.recent ?? []) {
-		const goal = titleOf.get(outcome.change);
-		const later = goal?.state === "landed" || goal?.state === "released";
-		if (outcome.how === "failed" && !later && now - Date.parse(outcome.at) <= range)
-			failed.set(outcome.change, goal?.title ?? outcome.change);
-	}
-	// A pushed change waiting for a role only people hold; one GitHive has already flagged is asking, above.
-	const voting = goals.flatMap((goal) => {
-		if (!goal.head || goal.finished || goal.state === "asking") return [];
-		const role = goal.approval?.awaiting?.find((each) => peopleOnly(policy, each));
-		return role ? [{ goal, role }] : [];
-	});
-	const flagged = audit?.open ?? 0;
-	const needed = asking.length || voting.length || failed.size || flagged;
-	const line = needed ? (
-		<p
-			className={cn(
-				"m-0 mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-md border border-bad/45 bg-bad-soft px-3 py-2 text-body-sm",
-				"[&_a+a]:before:mr-3.5 [&_a+a]:before:text-muted-foreground [&_a+a]:before:content-['·']",
-			)}
+	const rows = needsRows(repo, goals, audit, snapshot, now);
+	const shown = rows.slice(0, NEEDS_ROWS);
+	const more = rows.length - shown.length + elsewhere;
+	const box = rows.length ? (
+		<section
+			className="mb-3 rounded-md border border-bad/45 bg-bad-soft px-3 pt-2 pb-2.5"
+			aria-labelledby="needs-person-title"
 		>
-			<span className="inline-flex items-center gap-2 font-bold text-bad">
-				<Lamp color="red" />
-				Needs a person:
-			</span>
-			{asking.map((goal) => {
-				const question = goal.attention?.reason ?? goal.title;
-				return (
-					<a key={goal.key} href={href.change(repo, goal.change)} title={question}>
-						{goal.attention?.agent === "githive" ? "GitHive" : (displayName(goal.attention?.agent) ?? goal.agent)}
-						{goal.attention?.agent === "githive" ? ": " : " asks "}“{brief(question)}”
-					</a>
-				);
-			})}
-			{voting.map(({ goal, role }) => (
-				<a key={goal.key} href={href.change(repo, goal.change)}>
-					{goal.title} needs a {role} vote from a person
-				</a>
-			))}
-			{[...failed].map(([change, title]) => (
-				<a key={change} href={href.change(repo, change)}>
-					{title}: its checks failed
-				</a>
-			))}
-			{flagged ? <a href={href.repo(repo, "audit")}>{counted(flagged, "merge")} for the audit to look at</a> : null}
-		</p>
+			<h2 id="needs-person-title" className="m-0 mb-1.5 inline-flex items-center gap-2 text-body-sm font-bold text-bad">
+				<Lamp state="needs-person" />
+				{STATES["needs-person"].label}
+			</h2>
+			<ul className="m-0 grid list-none gap-1.5 p-0">
+				{shown.map((row) => (
+					// One line on a wide screen; on a narrow one who and the verb, then the question under them.
+					<li
+						key={row.key}
+						className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2.5 gap-y-0.5 text-body-sm"
+					>
+						<Icon name={row.icon} size={14} className="relative top-0.5 row-start-1 self-start text-bad" />
+						<span className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-baseline gap-x-2 to-640:contents">
+							<span className="max-w-full truncate font-semibold to-640:col-start-2 to-640:row-start-1">
+								{row.lead}
+							</span>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span
+										tabIndex={0}
+										className="min-w-0 flex-[1_1_14rem] truncate text-foreground to-640:col-span-2 to-640:col-start-2 to-640:row-start-2"
+									>
+										{row.quoted ? `“${row.text}”` : row.text}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent align="start">{row.text}</TooltipContent>
+							</Tooltip>
+						</span>
+						<a className="col-start-3 row-start-1 font-semibold whitespace-nowrap" href={row.href}>
+							{row.verb} <span aria-hidden="true">→</span>
+						</a>
+					</li>
+				))}
+			</ul>
+			{more ? (
+				<p className="m-0 mt-1.5 pl-6 text-ui">
+					{moreWords(more, elsewhere)} <a href={href.inbox()}>See {more === 1 ? "it" : "them"} in the Inbox</a>
+				</p>
+			) : null}
+		</section>
 	) : null;
-	// The line slides open when something needs a person and shut when nothing does, showing what it last said
-	// while it closes.
-	const last = useRef(line);
-	if (line) last.current = line;
+	// The box slides open when something needs a person and shut when nothing does, showing what it last said while
+	// it closes.
+	const last = useRef(box);
+	if (box) last.current = box;
 	return (
 		<div
 			className={cn(
 				"grid [transition:grid-template-rows_0.4s_ease,opacity_0.3s_ease] *:min-h-0 *:overflow-hidden",
-				line ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0",
+				box ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0",
 			)}
-			inert={!line}
+			inert={!box}
 		>
-			<div>{line ?? last.current}</div>
+			<div>{box ?? last.current}</div>
 		</div>
 	);
 }
 
-/** How much of a question the line quotes; the rest is in its tooltip and on the change's page. */
-const QUOTED = 90;
-
-const brief = (text: string) => (text.length > QUOTED ? `${text.slice(0, text.lastIndexOf(" ", QUOTED - 1))}…` : text);
-
-/** Whether only people may vote as a role: no agent, pool or GitHive reviewer holds it (see grantWarnings). */
-function peopleOnly(policy: RepoSnapshot["policy"] | undefined, role: string): boolean {
-	const holders = policy?.grants?.[role] ?? ["person:*", "githive"];
-	const person = (holder: string) => holder === "person:*" || /^person:[^/]+$/.test(holder) || holder.startsWith("@");
-	return holders.length > 0 && holders.every(person);
+/** What the banner leaves to the Inbox: "+2 more.", "+3 more, 2 of them on other branches.". */
+function moreWords(more: number, elsewhere: number): string {
+	if (!elsewhere) return `+${more} more.`;
+	const branches = elsewhere === 1 ? "another branch" : "other branches";
+	return more === elsewhere ? `+${more} more on ${branches}.` : `+${more} more, ${elsewhere} of them on ${branches}.`;
 }
 
 /** The recap once a stretch of work has landed and nothing's in flight. */
@@ -236,14 +315,75 @@ function AllLanded({
 	);
 }
 
-/** No goals at all: how to bring an agent in, or when the last work finished. */
-function EmptyHive({ stretch, now }: { stretch: LandingStretch | undefined; now: number }) {
+/** What to ask an agent once it's connected, naming the repo, ready to paste. */
+export const firstPrompt = (repo: string) => `Use GitHive to find one small improvement and land it in ${repo}.`;
+
+/**
+ * No goals at all: when the last work finished, and how to bring an agent in. Someone who can write here gets it
+ * ready to copy, the command that connects their agent and a prompt naming this repo, then the hive listening for
+ * the first claim; a visitor, where agents come from.
+ */
+function EmptyHive({
+	repo,
+	stretch,
+	now,
+	writes,
+	origin,
+}: {
+	repo: string;
+	stretch: LandingStretch | undefined;
+	now: number;
+	writes: boolean;
+	origin: string;
+}) {
+	const last = stretch
+		? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. `
+		: "";
+	if (!writes)
+		return (
+			<div className="animate-hive-appear">
+				<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
+				<p className="m-0 mt-1 text-muted-foreground">
+					{last}
+					Connect an agent from the Agents page: it claims work here, and shows up as it does.
+				</p>
+			</div>
+		);
+	const connect = connectSteps(rememberedClient(), origin).find((step) => step.copy);
 	return (
-		<div className="animate-hive-appear">
-			<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
-			<p className="m-0 mt-1 text-muted-foreground">
-				{stretch ? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. ` : ""}
-				Connect an agent from the Agents page: it claims work here, and shows up as it does.
+		<div className="grid max-w-measure animate-hive-appear gap-3">
+			<div>
+				<h2 className="m-0 text-title-sm">No agents in the hive {stretch ? "now" : "yet"}</h2>
+				<p className="m-0 mt-1 text-muted-foreground">
+					{last}
+					Bring one in: connect it to GitHive, then ask it for work here.
+				</p>
+			</div>
+			<ol className="m-0 grid list-none gap-3 p-0">
+				{connect?.copy ? (
+					<li className="grid gap-1.5">
+						<span className="text-ui">
+							<b>1.</b> {connect.text}
+						</span>
+						<CopyBlock text={connect.copy} label="Copy" />
+						<span className="text-ui text-muted-foreground">
+							Then sign in when it asks. <a href={href.agents()}>The Agents page</a> has every step, and other clients.
+						</span>
+					</li>
+				) : null}
+				<li className="grid gap-1.5">
+					<span className="text-ui">
+						<b>{connect?.copy ? "2." : "1."}</b> Ask it, or put your own task in its place:
+					</span>
+					<CopyBlock text={firstPrompt(repo)} label="Copy" />
+				</li>
+			</ol>
+			<p className="m-0 inline-flex items-center gap-2.5 text-ui text-muted-foreground" role="status">
+				<span
+					aria-hidden="true"
+					className="size-2 flex-none animate-live rounded-full bg-good [box-shadow:0_0_0_3px_color-mix(in_srgb,var(--good)_25%,transparent)] motion-reduce:animate-none"
+				/>
+				Waiting for the first claim…
 			</p>
 		</div>
 	);

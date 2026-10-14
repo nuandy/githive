@@ -1,10 +1,12 @@
+import type { ChangeState } from "./status";
+
 // How a change stands, in the words a person reading a pull request expects
-// (see claimStatus.ts, which derives it from claims).
+// (see claimStatus.ts, which derives it from claims, and status.ts, which names each state).
 
 export type Tone = "good" | "bad" | "warn" | "neutral" | "needs" | "accent";
 
-export type StatusKind =
-	"merged" | "abandoned" | "needs-you" | "approved" | "changes-requested" | "in-review" | "draft";
+/** A change's state (see status.ts). */
+export type StatusKind = ChangeState;
 
 export interface ChangeStatus {
 	kind: StatusKind;

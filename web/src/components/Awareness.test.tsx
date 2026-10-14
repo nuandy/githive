@@ -91,6 +91,23 @@ describe("where a change meets other open changes", () => {
 		expect(text).toContain("read at b1c2d3e.");
 	});
 
+	it("links what's in this change's own files to them in its Files tab", () => {
+		const html = renderToStaticMarkup(
+			<Awareness
+				awareness={awareness}
+				claims={claims}
+				head="b1c2d3e4f5a6"
+				repo="acme/docs-site"
+				fileHref={(path) => `#/files/${path}`}
+			/>,
+		);
+		// What it alters is in its own file; where it uses another's is in its own files too.
+		expect(html).toMatch(/<a href="#\/files\/src\/config\.ts"[^>]*><code>loadSettings<\/code><\/a>/);
+		expect(html).toMatch(/<a href="#\/files\/src\/c\/cache\.ts"[^>]*><code>src\/c\/cache\.ts:3<\/code><\/a>/);
+		// Where another change uses it is that change's, not this one's.
+		expect(html).not.toContain('href="#/files/src/jobs/sync.ts"');
+	});
+
 	it("says when nothing meets, and when its footprint was read before the latest push", () => {
 		const quiet = render({ ...awareness, usedBy: [], alteredBy: [] }, "ffff0000");
 		const text = inlineText(quiet);
@@ -143,19 +160,21 @@ describe("a change's page, with what its agent hears", () => {
 			/>,
 		);
 
-	it("shows its earlier attempts in the timeline, then its conflict and where it meets others, before the merge box", () => {
+	it("shows its earlier attempts in the timeline, then its conflict and where it meets others", () => {
 		const html = page(leased({ waitingOn: "reviewers" }));
 		const text = inlineText(html);
+		// The decision box comes first; then the conversation, in its order.
+		const conversation = text.slice(text.indexOf("opened this change"));
+		expect(text.indexOf("review: 1 of 2")).toBeLessThan(text.indexOf("opened this change"));
 		const order = [
 			"First draft of section C",
 			"an attempt to land conflicted with its branch",
 			"conflict on src/c/x.ts with c-7 by alice (6584265)",
 			"an attempt to land failed its checks",
 			"Conflicts with main",
-			"The agent's next commands",
+			"What the agent will do",
 			"Where it meets other open changes",
-			"1 of 2 approvals",
-		].map((words) => text.indexOf(words));
+		].map((words) => conversation.indexOf(words));
 		expect(order.every((index) => index >= 0)).toBe(true);
 		expect([...order].sort((a, b) => a - b)).toEqual(order);
 	});

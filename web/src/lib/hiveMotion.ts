@@ -70,8 +70,9 @@ const STATE_MOTION: Partial<Record<Goal["state"], Motion>> = {
 	landing: "checking",
 	landed: "landed",
 	released: "released",
-	asking: "asking",
-	revising: "changes-asked",
+	"needs-person": "asking",
+	"changes-requested": "changes-asked",
+	"checks-failed": "changes-asked",
 	approved: "approved",
 };
 
@@ -89,9 +90,49 @@ export const MOTION_MS: Record<Motion, number> = {
 };
 
 /** Which motions are worth announcing to a screen reader, and how. */
-export function announcement(goal: Pick<Goal, "agent" | "title">, motion: Motion): string | undefined {
+export function announcement(goal: Pick<Goal, "agent" | "title" | "waiting">, motion: Motion): string | undefined {
 	if (motion === "landed") return `${goal.agent} landed ${goal.title}`;
-	if (motion === "asking") return `${goal.agent} is asking a person about ${goal.title}`;
+	if (motion === "asking")
+		return goal.waiting?.kind === "vote"
+			? `${goal.title} waits on a ${goal.waiting.role} vote from a person`
+			: `${goal.agent} is asking a person about ${goal.title}`;
 	if (motion === "failed") return `${goal.title} failed its checks`;
 	return undefined;
+}
+
+/** The goals panel's rows, by key: in flight, then finished, each in the order drawn. */
+export interface GoalLayout {
+	inFlight: string[];
+	done: string[];
+}
+
+/**
+ * The rows to draw, held still while someone reads the panel: nothing new comes in and nothing moves to Finished,
+ * so what's under the reader stays put. What waits is counted instead: goals that arrived, and goals that finished.
+ * A goal that's gone goes (there's nothing left to draw). Not paused, or with no rows drawn yet, the rows are as they
+ * are.
+ */
+export function holdLayout(
+	shown: GoalLayout | undefined,
+	next: GoalLayout,
+	paused: boolean,
+): { shown: GoalLayout; arrived: string[]; finished: string[] } {
+	const nothing = !shown || (!shown.inFlight.length && !shown.done.length);
+	if (nothing || !paused) return { shown: next, arrived: [], finished: [] };
+	const nextFlying = new Set(next.inFlight);
+	const nextDone = new Set(next.done);
+	const there = (key: string) => nextFlying.has(key) || nextDone.has(key);
+	const held = new Set([...shown.inFlight, ...shown.done]);
+	return {
+		shown: { inFlight: shown.inFlight.filter(there), done: shown.done.filter(there) },
+		arrived: [...next.inFlight, ...next.done].filter((key) => !held.has(key)),
+		finished: shown.inFlight.filter((key) => nextDone.has(key)),
+	};
+}
+
+/** What waits while the panel is held, in a few words: "2 new · 1 finished". */
+export function pendingWords(arrived: string[], finished: string[]): string {
+	return [arrived.length ? `${arrived.length} new` : "", finished.length ? `${finished.length} finished` : ""]
+		.filter(Boolean)
+		.join(" · ");
 }

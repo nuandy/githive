@@ -8,7 +8,7 @@ import { Icon } from "./Icon";
 
 // A change's conflict with its branch, as the agent's last status found it: the files changed on both sides, who
 // changed each since the change left the branch, the conflict markers, and the commands the agent runs next. People
-// can't resolve it from here; the agent does, in its clone, and the result is reviewed and merged as before.
+// can't resolve it from here; the agent does, in its clone, and the result is reviewed and lands as before.
 
 /** The most conflicted files the panel lists; the rest are counted. */
 const FILES_SHOWN = 20;
@@ -49,23 +49,31 @@ function ConflictedFile({
 	touchedBy,
 	hunk,
 	repo,
+	fileHref,
 }: {
 	file: string;
 	into: string;
 	touchedBy: TouchedBy[];
 	hunk: Hunk | undefined;
 	repo: string;
+	fileHref?: ((path: string) => string) | undefined;
 }) {
 	return (
 		<li className="grid min-w-0 gap-1.5 border-t border-border px-4 py-3">
 			<h3 className="flex items-center gap-1.5 text-ui">
-				<Icon name="file" size={13} className="text-muted-foreground" />
-				<code>{file}</code>
+				<Icon name="file" size={14} className="text-muted-foreground" />
+				{fileHref ? (
+					<a href={fileHref(file)} title="Its lines in this change's files">
+						<code>{file}</code>
+					</a>
+				) : (
+					<code>{file}</code>
+				)}
 			</h3>
 			{touchedBy.length ? (
 				<>
 					<p className={LABEL}>Changed on {into} since this change left it, by:</p>
-					<ul className="m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
+					<ul className="prose m-0 grid list-disc gap-0.75 pl-4.5 text-ui wrap-anywhere">
 						{touchedBy.map((touched) => (
 							<ChangedBy key={touched.commit} touched={touched} repo={repo} />
 						))}
@@ -100,18 +108,25 @@ function ConflictedFile({
 const LABEL = "m-0 text-meta text-muted-foreground";
 
 /**
- * The conflict panel, when the change's last merge check found conflicts; nothing otherwise. Beside the conversation,
- * like the merge box, with a red rule.
+ * The conflict panel, when the change's last merge check found conflicts; nothing otherwise. In the conversation, with
+ * a red rule. Each file links to its lines in the change's Files tab (`fileHref`); what its agent will run to resolve
+ * it is folded away, for whoever wants to see it.
  */
 export function ConflictPanel({
 	merge,
 	head,
 	repo,
+	fileHref,
+	id,
 	className,
 }: {
 	merge: MergeCheck;
 	head?: string | null;
 	repo: string;
+	/** A file's place in the change's Files tab. */
+	fileHref?: (path: string) => string;
+	/** For the page to scroll to it and focus it. */
+	id?: string;
 	className?: string;
 }) {
 	const files = merge.conflicts ?? [];
@@ -125,8 +140,10 @@ export function ConflictPanel({
 	const then = (merge.fix ?? []).filter((line) => line.startsWith("call "));
 	return (
 		<section
+			id={id}
+			tabIndex={id ? -1 : undefined}
 			className={cn(
-				"min-w-0 rounded-md border border-[color-mix(in_srgb,var(--bad)_40%,var(--border))] border-l-3 border-l-bad bg-card",
+				"min-w-0 scroll-mt-[calc(var(--topbar-height)+12px)] rounded-md border border-[color-mix(in_srgb,var(--bad)_40%,var(--border))] border-l-3 border-l-bad bg-card",
 				className,
 			)}
 			aria-labelledby="conflict-panel-title"
@@ -164,6 +181,7 @@ export function ConflictPanel({
 						touchedBy={(merge.touchedBy ?? []).filter((touched) => touched.file === file)}
 						hunk={merge.hunks?.find((hunk) => hunk.file === file)}
 						repo={repo}
+						fileHref={fileHref}
 					/>
 				))}
 			</ul>
@@ -173,15 +191,17 @@ export function ConflictPanel({
 				</p>
 			) : null}
 			{commands.length ? (
-				<div className="grid gap-1.5 border-t border-border bg-surface-2 px-4 pt-3 pb-3.5 [&_pre]:bg-card">
-					<h3 className="text-ui">The agent's next commands</h3>
-					<p className={LABEL}>
-						For its own clone, where <code>origin</code> is the project and <code>fork</code> its copy. The agent
-						resolves the conflict there; its new commit is reviewed and merged as usual.
-					</p>
-					<CopyBlock text={commands.join("\n")} label="Copy commands" />
-					{then.length ? <p className={LABEL}>Then: {then.join(" ")}.</p> : null}
-				</div>
+				<details className="disclosure border-t border-border bg-surface-2 [&_pre]:bg-card">
+					<summary className="cursor-pointer px-4 py-2.5 text-ui font-semibold">What the agent will do</summary>
+					<div className="grid gap-1.5 px-4 pb-3.5">
+						<p className={LABEL}>
+							Its next commands, for its own clone, where <code>origin</code> is the project and <code>fork</code> its
+							copy. The agent resolves the conflict there; its new commit is reviewed and lands as usual.
+						</p>
+						<CopyBlock text={commands.join("\n")} label="Copy commands" />
+						{then.length ? <p className={LABEL}>Then: {then.join(" ")}.</p> : null}
+					</div>
+				</details>
 			) : null}
 		</section>
 	);

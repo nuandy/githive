@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import type { Gitignore, MyOrg } from "../api";
 import { useChanged } from "../hooks/useChanged";
+import { sentence } from "../lib/errors";
 import { cn } from "../lib/utils";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Fold } from "./ui/collapse";
 import { Field, FieldHint, Input, Label, NativeSelect } from "./ui/field";
 
@@ -35,14 +36,12 @@ const LEGEND = "px-0.5 text-body-sm font-semibold";
 /** The page around the form, or around what shows instead of it. */
 export function NewRepoFrame({ children }: { children: ReactNode }) {
 	return (
-		<Page id="main" className="grid gap-5">
-			<header>
-				<h1 className="text-display-sm tracking-[-0.01em]">New repository</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in
-					its Settings.
-				</p>
-			</header>
+		<Page className="grid gap-5">
+			<PageHeader
+				className="mb-0"
+				title="New repository"
+				description="GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in its Settings."
+			/>
 			{children}
 		</Page>
 	);
@@ -57,18 +56,33 @@ export function Folding({ open, className, children }: { open: boolean; classNam
 	);
 }
 
+/** What went wrong with a field, under it in red, as a sentence; it fades in as it comes. */
+function FieldError({ id, error }: { id: string; error: string }) {
+	return (
+		<FieldHint key={error} id={id} className="animate-fade text-bad">
+			{sentence(error)}
+		</FieldHint>
+	);
+}
+
 /** Who owns the new repository, and its name, with a hint for the name. */
 export function OwnerAndName(props: {
 	owners: MyOrg[];
 	chosen: string;
 	setOwner: (owner: string) => void;
+	/** The server's refusal of the owner (you can't make repos there), if it refused. */
+	ownerError?: string | null;
 	name: string;
 	setName: (name: string) => void;
+	/** The name's field was left: its whole check applies from now on. */
+	onNameLeft?: () => void;
 	hint: ReactNode;
 	/** What the hint says, in a word: as it says something else (a problem, say), it fades in. */
 	hintKey: string;
+	/** The hint says what's wrong with the name. */
+	nameInvalid?: boolean;
 }) {
-	const { owners, chosen, setOwner, name, setName, hint, hintKey } = props;
+	const { owners, chosen, setOwner, ownerError, name, setName, onNameLeft, hint, hintKey, nameInvalid } = props;
 	const changed = useChanged(hintKey);
 	return (
 		<>
@@ -76,13 +90,20 @@ export function OwnerAndName(props: {
 				<Label htmlFor="new-repo-owner" className="text-body-sm">
 					Owner
 				</Label>
-				<NativeSelect id="new-repo-owner" className={WIDE} value={chosen} onChange={(e) => setOwner(e.target.value)}>
+				<NativeSelect
+					id="new-repo-owner"
+					className={WIDE}
+					value={chosen}
+					onChange={(e) => setOwner(e.target.value)}
+					{...(ownerError ? { "aria-invalid": true, "aria-describedby": "new-repo-owner-hint" } : {})}
+				>
 					{owners.map((o) => (
 						<option key={o.slug} value={o.slug}>
 							{o.personal ? `${o.slug} (you)` : o.slug}
 						</option>
 					))}
 				</NativeSelect>
+				{ownerError ? <FieldError id="new-repo-owner-hint" error={ownerError} /> : null}
 			</Field>
 			<Field>
 				<Label htmlFor="new-repo-name" className="text-body-sm">
@@ -94,10 +115,12 @@ export function OwnerAndName(props: {
 					className={WIDE}
 					value={name}
 					onChange={(e) => setName(e.target.value)}
+					onBlur={onNameLeft}
 					autoComplete="off"
 					spellCheck={false}
 					placeholder="my-project"
 					aria-describedby="new-repo-name-hint"
+					{...(nameInvalid ? { "aria-invalid": true } : {})}
 				/>
 				<FieldHint key={hintKey} id="new-repo-name-hint" className={cn(changed && "animate-fade")}>
 					{hint}
@@ -110,13 +133,13 @@ export function OwnerAndName(props: {
 export type Choice<T> = { value: T; title: string; detail: string };
 
 export const SOURCES: Choice<Source>[] = [
+	{ value: "empty", title: "Start fresh", detail: "A new repository with a first commit, ready for agents." },
 	{
 		value: "import",
 		title: "A Git repository",
 		detail: "Imported from its URL, for example a public GitHub repository.",
 	},
 	{ value: "copy", title: "A copy of a repository here", detail: "Its default branch, in seconds." },
-	{ value: "empty", title: "Start fresh", detail: "A new repository with a first commit, ready for agents." },
 ];
 
 export const VISIBILITIES: Choice<"private" | "public">[] = [
@@ -169,8 +192,10 @@ export function ImportSource(props: {
 	setBranch: (branch: string) => void;
 	token: string;
 	setToken: (token: string) => void;
+	/** Why the import failed, if it did. */
+	error?: string | null;
 }) {
-	const { url, setUrl, branch, setBranch, token, setToken } = props;
+	const { url, setUrl, branch, setBranch, token, setToken, error } = props;
 	return (
 		<div className="grid gap-3">
 			<Field>
@@ -186,7 +211,14 @@ export function ImportSource(props: {
 					placeholder="https://github.com/octocat/Spoon-Knife"
 					autoComplete="off"
 					spellCheck={false}
+					aria-describedby="new-repo-url-hint"
+					{...(error ? { "aria-invalid": true } : {})}
 				/>
+				{error ? (
+					<FieldError id="new-repo-url-hint" error={error} />
+				) : (
+					<FieldHint id="new-repo-url-hint">Its HTTPS address. GitHive copies it with its history.</FieldHint>
+				)}
 			</Field>
 			{/* The URL as wide as the name above it, the branch a short field below. */}
 			<Field>
@@ -237,14 +269,23 @@ export function CopySource(props: {
 	repos: { name: string }[] | undefined;
 	copyFrom: string;
 	setCopyFrom: (name: string) => void;
+	/** Why the copy failed, if it did. */
+	error?: string | null;
 }) {
-	const { repos, copyFrom, setCopyFrom } = props;
+	const { repos, copyFrom, setCopyFrom, error } = props;
 	return (
 		<Field>
 			<Label htmlFor="new-repo-copy" className="text-body-sm">
 				Repository to copy
 			</Label>
-			<NativeSelect id="new-repo-copy" className={WIDE} value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
+			<NativeSelect
+				id="new-repo-copy"
+				className={WIDE}
+				value={copyFrom}
+				onChange={(e) => setCopyFrom(e.target.value)}
+				aria-describedby="new-repo-copy-hint"
+				{...(error ? { "aria-invalid": true } : {})}
+			>
 				<option value="">Choose one…</option>
 				{(repos ?? []).map((r) => (
 					<option key={r.name} value={r.name}>
@@ -252,6 +293,11 @@ export function CopySource(props: {
 					</option>
 				))}
 			</NativeSelect>
+			{error ? (
+				<FieldError id="new-repo-copy-hint" error={error} />
+			) : (
+				<FieldHint id="new-repo-copy-hint">Its default branch, with its history.</FieldHint>
+			)}
 		</Field>
 	);
 }

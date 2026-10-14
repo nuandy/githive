@@ -7,9 +7,9 @@ import { href } from "../lib/routes";
 import { messageOf } from "../lib/errors";
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
-import { Page } from "./Page";
+import { Page, PageHeader } from "./Page";
 import { Badge } from "./ui/badge";
-import { Box, BoxBody, BoxHeader } from "./ui/box";
+import { Box, BoxBody, BoxHeader, BoxTitle } from "./ui/box";
 import { Button } from "./ui/button";
 import { Field, FieldHint, Input, Label } from "./ui/field";
 
@@ -23,14 +23,17 @@ export interface OrgsViewProps {
 /** Your repositories and the organizations you're in, and making an organization. */
 export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 	return (
-		<Page id="main" className="grid gap-5">
-			<header>
-				<h1 className="text-display-sm tracking-[-0.01em]">Your organizations</h1>
-				<p className="mt-1 mb-0 text-muted-foreground">
-					An organization is a shared owner for repositories, with members and teams. You don't need one: your own
-					repositories are under {me.handle}.
-				</p>
-			</header>
+		<Page className="grid gap-5">
+			<PageHeader
+				className="mb-0"
+				title="Your organizations"
+				description={
+					<>
+						An organization is a shared owner for repositories, with members and teams. You don't need one: your own
+						repositories are under {me.handle}.
+					</>
+				}
+			/>
 
 			<OrgList me={me} orgs={orgs} />
 
@@ -52,9 +55,7 @@ function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 	return (
 		<Box aria-labelledby="orgs-title">
 			<BoxHeader>
-				<h2 id="orgs-title" className="text-lead">
-					Where your repositories live
-				</h2>
+				<BoxTitle id="orgs-title">Where your repositories live</BoxTitle>
 			</BoxHeader>
 			<ul className="m-0 list-none p-0">
 				<li className={ROW}>
@@ -72,7 +73,7 @@ function OrgList({ me, orgs }: Pick<OrgsViewProps, "me" | "orgs">) {
 					memberOf.map((org) => (
 						<li key={org.slug} className={cn(ROW, appear)}>
 							<div className={ROW_MAIN}>
-								<Icon name="repo" className="text-muted-foreground" />
+								<Icon name="org" className="text-muted-foreground" />
 								<a href={href.org(org.slug)}>{org.slug}</a>
 								{org.name ? <span className="text-muted-foreground">{org.name}</span> : null}
 							</div>
@@ -110,9 +111,7 @@ function NewOrgForm({ createOrg, onCreated }: Pick<OrgsViewProps, "createOrg" | 
 		<Box asChild>
 			<form onSubmit={submit} aria-labelledby="new-org-title">
 				<BoxHeader>
-					<h2 id="new-org-title" className="text-lead">
-						Create an organization
-					</h2>
+					<BoxTitle id="new-org-title">Create an organization</BoxTitle>
 				</BoxHeader>
 				<BoxBody className="grid gap-4">
 					<Field>

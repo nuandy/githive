@@ -334,7 +334,11 @@ What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `reviews`, `wait`, `vote`, `leave_review` and `credentials` for a change, write for claiming,
-pushing and merging, admin for `settings` and deleting. A repo the
+pushing and merging, admin for `settings` and deleting. Reading a change's
+files (its diff, on its page) is looking, so it needs read: a public repo's
+change previews are served to anyone at `/site/<owner>/<name>/@<change>/`, and
+a change's page shows its conflicts' lines at read already. Review is for
+credentials to a change's fork, which let a reviewer fetch it and run it. A repo the
 caller can't see answers as if it didn't exist. Someone signed out may read a
 public repo, its dashboard pages included; for any other repo, existing or
 not, they're asked to sign in. Anyone who comes through
@@ -346,7 +350,8 @@ writes the teams of the repo's org they're on into the vote, and the stamp
 covers them, so the audit still needs only Git: a vote counts as the role if
 its voter was on the team when they voted. Someone who joins the team counts
 without the grant changing; someone who leaves stops counting from their next
-vote.
+vote. An agent votes with its owner's teams, so a role granted to a team isn't
+one only people may give: a change waiting on it doesn't wait on people.
 
 ## Changes
 
@@ -449,6 +454,13 @@ the floor: no stale release sooner than 30 minutes after the claim's agent last
 claimed. Every release the turn rule allows passes it; the audit can't replay
 the rest (a head lives in its agent's fork, not in the records).
 
+A person who can write may also free a stuck change from its dashboard page,
+whoever holds it, saying why (`POST /repos/<owner>/<name>/changes/<change>/release`,
+`releaseAsPerson`): its paths are free for other agents, its agent hears of it
+with its next reply, and its commits stay on its branch. The release records the
+person and their reason, stamped as them, and isn't marked stale; the audit
+accepts a stamped release by a person, as it does GitHub's give-up.
+
 A release names the merge it follows (`mergedAs`), when it follows one: the
 merge's own release, and any later release of a claim whose change landed while
 it was held. A claim can outlast its landing: in demo run 17 one did for two
@@ -495,7 +507,8 @@ merge, so the project's branch never holds half a feature.
 Within a branch, `after` orders dependent changes: a claim (or a backlog item)
 names the changes it depends on, and `merge` refuses it, saying what it waits
 on, until each has merged into the same branch. A release records the branch a
-change merged into, so a dependency that landed elsewhere doesn't count.
+change merged into, or was to, so a dependency that landed elsewhere doesn't
+count, and a change released unmerged still shows its files against its branch.
 `backlog` lists an item as free only once its pieces have merged, and `merge`
 refuses a change still waiting. A backlog item can instead name pieces it
 lands after (`lands_after`): `backlog` offers it at once, to claim with them
@@ -519,8 +532,11 @@ the other direction: merge the target into the source, then claim again.
 
 On the dashboard, a repo opens on its Hive tab (see Endpoint and dashboard).
 Its Changes tab shows one branch at a time, picked from the
-project's and those changes land on (`?branch=` in the address): its claims,
-what's landing, its territory and its open changes. A change shows where it lands
+project's and those changes land on (`?branch=` in the address): its open
+changes, what needs action first, narrowed by a filter (`?filter=needs-you`,
+`in-review`, `approved`, `building`, `landing`) and a search. Who holds what is
+the Claims tab's map of the project's branch, each claim in its change's state;
+a claim holds its paths on the branch it lands on alone. A change shows where it lands
 (into), the branch it merges (merges) and what it waits on. People who can
 write make a branch from another there (recorded with their name, as a claim
 with `from` would), and merge an approved change that waits on nothing: the
@@ -2056,7 +2072,12 @@ RepoCache, which keeps parsed files and open changes' footprints and is as
 much a hint. A repo's other tabs
 show its changes (one branch at a time; a change's page shows any conflict,
 with the commits on the branch that touched its files and the conflicting
-lines, and the names it alters or uses that other changes touch), what landed on a branch and why
+lines, the names it alters or uses that other changes touch, and its files:
+`GET /repos/<owner>/<name>/changes/<change>/diff`, each file's unified diff from
+the change's merge base with its branch to its head, or, once landed, from the
+landed commit's first parent to it, with files outside its claim flagged; capped
+at 300 files, about 900 KB as JSON and 256 KB a side, binary and too-big files
+marked rather than diffed), what landed on a branch and why
 (History), its claims as a map (each with when it would free up), its code at any branch or commit, its agents,
 the audit, and its settings. The Hive also shows what's landing (the batch
 being checked, and what landed or failed lately). People's Inbox is a page of

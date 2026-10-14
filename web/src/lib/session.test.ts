@@ -10,10 +10,11 @@ import {
 	inviteOf,
 	signInHref,
 	signinErrorMessage,
+	signinAccountOf,
 	signinErrorOf,
 	tokenLabel,
 	withoutSigninError,
-	signedOutScreen,
+	workPrompt,
 } from "./session";
 
 describe("signing in", () => {
@@ -96,11 +97,32 @@ describe("agent tokens", () => {
 	});
 });
 
-describe("what someone signed out sees", () => {
-	it("a public repo they're reading, until they ask to sign in or a sign-in fails; then the sign-in screen", () => {
-		expect(signedOutScreen({ reading: true, signingIn: false, failed: false })).toBe("repo");
-		expect(signedOutScreen({ reading: true, signingIn: true, failed: false })).toBe("sign-in");
-		expect(signedOutScreen({ reading: true, signingIn: false, failed: true })).toBe("sign-in");
-		expect(signedOutScreen({ reading: false, signingIn: false, failed: false })).toBe("sign-in");
+describe("giving a new agent work", () => {
+	it("asks it, through GitHive, for a small piece of work in one of your repos", () => {
+		expect(workPrompt("robin/notes")).toBe("Use GitHive to improve the README in robin/notes.");
+	});
+});
+
+describe("a request to join", () => {
+	it("reads the email it's noted under from the fragment, and drops it with the error", () => {
+		expect(signinAccountOf("#signin-as=eve%40example.com")).toBe("eve@example.com");
+		expect(signinAccountOf("#/repos/acme/docs")).toBeNull();
+		expect(signinAccountOf("")).toBeNull();
+		expect(withoutSigninError("https://githive.app/?signin_error=not-invited#signin-as=eve%40example.com")).toBe("/");
+		expect(withoutSigninError("https://githive.app/?signin_error=expired#/repos/docs")).toBe("/#/repos/docs");
+	});
+
+	it("shows only what looks like an email: one @, no spaces or control characters, at most 254 characters", () => {
+		const as = (account: string) => signinAccountOf(`#signin-as=${encodeURIComponent(account)}`);
+		expect(as(`${"e".repeat(242)}@example.com`)).toBe(`${"e".repeat(242)}@example.com`);
+		expect(as(`${"e".repeat(243)}@example.com`)).toBeNull();
+		expect(as("Your account is locked: call 555-0100")).toBeNull();
+		expect(as("eve@example.com\nnot@ours.com")).toBeNull();
+		expect(as("eve@example.com\u0000")).toBeNull();
+		expect(as("eve@@example.com")).toBeNull();
+		expect(as("eve")).toBeNull();
+		expect(as("@example.com")).toBeNull();
+		expect(as("eve@")).toBeNull();
+		expect(signinAccountOf("#signin-as=%E0%A4%A")).toBeNull();
 	});
 });

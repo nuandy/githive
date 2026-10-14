@@ -10,6 +10,7 @@ import {
 	shardingSummary,
 	votesShardingSummary,
 	recordsBadge,
+	type Vote,
 } from "./claimStatus";
 
 const claim = repoSnapshot.claims[0]!;
@@ -18,11 +19,19 @@ describe("changes", () => {
 	it("derives a claim's status from its head, approvals and hosted agents", () => {
 		expect(claimStatus(claim).kind).toBe("changes-requested");
 		expect(claimStatus({ ...claim, hosted: undefined }).kind).toBe("in-review");
-		expect(claimStatus({ ...claim, head: null, hosted: undefined }).kind).toBe("draft");
+		expect(claimStatus({ ...claim, head: null, hosted: undefined })).toMatchObject({
+			kind: "building",
+			label: "Building",
+		});
 		// An agent asked a person: that comes first.
 		expect(
 			claimStatus({ ...claim, attention: { reason: "reviewers disagree", agent: "agent-c", at: "" } }),
-		).toMatchObject({ kind: "needs-you", description: "agent-c asks you: reviewers disagree" });
+		).toMatchObject({
+			kind: "needs-person",
+			label: "Needs a person",
+			tone: "bad",
+			description: "agent-c asks a person: reviewers disagree",
+		});
 		expect(claimStatus({ ...claim, approval: { ...claim.approval, approved: true }, hosted: undefined }).kind).toBe(
 			"approved",
 		);
@@ -32,7 +41,7 @@ describe("changes", () => {
 		});
 		expect(
 			claimStatus({ ...claim, hosted: { builder: { status: "failed", revisions: 0, error: "boom" }, reviewers: [] } }),
-		).toMatchObject({ kind: "needs-you", description: "The builder failed: boom" });
+		).toMatchObject({ kind: "needs-person", description: "GitHive's builder failed: boom" });
 	});
 
 	it("waits for the roles that can block before calling a claim approved", () => {
@@ -43,7 +52,15 @@ describe("changes", () => {
 		};
 		expect(claimStatus(waiting)).toMatchObject({
 			kind: "in-review",
+			label: "In review",
+			tone: "accent",
 			description: "Waiting for security, which can block it.",
+		});
+		// A role only people may vote as needs a person.
+		const people = { required: 2, vetoes: ["security"], grants: { security: ["person:*"] } };
+		expect(claimStatus(waiting, [], { settings: { policy: people } })).toMatchObject({
+			kind: "needs-person",
+			description: "Waiting for a security vote, which only a person can give.",
 		});
 		expect(claimApprovalLabel(waiting)).toBe("Waiting for security");
 		expect(claimApprovalLabel(claim)).toBe("1/2 approvals");
@@ -58,7 +75,7 @@ describe("changes", () => {
 		expect(claimTitle({ ...claim, intent: "" })).toBe("c-1");
 		const paragraph =
 			"BaseServlet calls exactly one controller method per request: do<HttpMethod> (doGet, doPost, ...) when the " +
-			"controller defines it, otherwise doMain. Previously every public method starting with \"do\" ran.";
+			'controller defines it, otherwise doMain. Previously every public method starting with "do" ran.';
 		expect(claimTitle({ ...claim, intent: paragraph })).toBe(
 			"BaseServlet calls exactly one controller method per request",
 		);
@@ -71,6 +88,70 @@ describe("changes", () => {
 		expect(votesForClaim({ ...claim, head: "b1c2d3e4" }, repoSnapshot.votes)).toHaveLength(1);
 		expect(votesForClaim({ ...claim, head: null }, repoSnapshot.votes)).toEqual([]);
 		expect(votesForClaim(claim, [{ ...repoSnapshot.votes[0]!, commit: "" }])).toEqual([]);
+	});
+});
+
+describe("rejections on the change's head", () => {
+	const approved = { ...claim, hosted: undefined, approval: { ...claim.approval, approved: true, vetoedBy: [] } };
+	const head = approved.head!;
+	const vote = (over: Partial<Vote>): Vote => ({
+		commit: head,
+		reviewer: "githive-checks",
+		role: "checks",
+		verdict: "reject",
+		evidence: "checks failed: npm test exited 1",
+		at: "2026-10-13T10:00:00Z",
+		...over,
+	});
+
+	it("reads an approved change whose checks failed on its head as failed, not approved", () => {
+		expect(claimStatus(approved, [vote({})])).toMatchObject({
+			kind: "checks-failed",
+			label: "Checks failed",
+			tone: "bad",
+		});
+	});
+
+	it("reads a reviewer's rejection on the head as changes requested", () => {
+		expect(claimStatus(approved, [vote({ reviewer: "ines/claude", role: "review" })]).kind).toBe("changes-requested");
+	});
+
+	it("ignores rejections on an earlier head, and the author's own votes", () => {
+		expect(claimStatus(approved, [vote({ commit: "0000000old" })]).kind).toBe("approved");
+		expect(claimStatus(approved, [vote({ reviewer: approved.agent })]).kind).toBe("approved");
+		expect(claimStatus(approved, [vote({ verdict: "approve" })]).kind).toBe("approved");
+	});
+
+	it("reads as before without votes", () => {
+		expect(claimStatus(approved).kind).toBe("approved");
+	});
+
+	it("says it's landing while its head is checked to land", () => {
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
+		expect(claimStatus(approved, [], { landing })).toMatchObject({
+			kind: "landing",
+			label: "Landing",
+			tone: "warn",
+			description: "Being checked to land, with the next batch.",
+		});
+	});
+
+	it("says who asked for changes while it was being checked to land: the batch lands it all the same", () => {
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "c-1", head, agent: "agent-c" }] } };
+		const security = vote({ reviewer: "sec-bot", role: "security", evidence: "token in a log line" });
+		const vetoed = { ...approved, approval: { ...approved.approval, approved: false, vetoedBy: ["sec-bot"] } };
+		expect(claimStatus(vetoed, [security], { landing })).toMatchObject({
+			kind: "landing",
+			description: "Being checked to land; security asked for changes meanwhile.",
+		});
+		const reviewer = vote({ reviewer: "ines/claude", role: "review" });
+		expect(claimStatus(approved, [reviewer, security], { landing }).description).toBe(
+			"Being checked to land; a reviewer and security asked for changes meanwhile.",
+		);
+		// A veto the votes read doesn't show still says whose it is.
+		expect(claimStatus(vetoed, [], { landing }).description).toBe(
+			"Being checked to land; sec-bot asked for changes meanwhile.",
+		);
 	});
 });
 

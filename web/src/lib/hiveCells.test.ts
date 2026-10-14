@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ago, NOW } from "../test/fixtures";
 import type { Goal } from "./goals";
-import { agentChip, hiveCells } from "./hiveCells";
+import { agentChip, agentHue, cellNames, fitLines, hiveCells, middleCut, sansWidth } from "./hiveCells";
 
 const FILES = [
 	"package.json",
@@ -50,11 +50,11 @@ describe("the hive map's cells", () => {
 	it("lights a claimed folder whole, and a cell shared by goals takes the loudest state", () => {
 		const goals = [
 			goal("router", ["lib/router/"], { state: "in-review" }),
-			goal("layer", ["lib/router/layer.js"], { state: "revising", agent: "agent-5" }),
+			goal("layer", ["lib/router/layer.js"], { state: "changes-requested", agent: "agent-5" }),
 		];
 		const cells = cellsOf(hiveCells(FILES, goals, [], NOW));
 		const layer = cells.find((cell) => cell.key === "lib/router/layer.js");
-		expect(layer?.state).toBe("revising");
+		expect(layer?.state).toBe("changes-requested");
 		expect(layer?.goals).toEqual(["layer", "router"]);
 	});
 
@@ -90,5 +90,68 @@ describe("an agent's chip", () => {
 		expect(agentChip("agent-19")).toBe("19");
 		expect(agentChip("githive-forager")).toBe("Fo");
 		expect(agentChip("alice-claude")).toBe("AC");
+	});
+});
+
+describe("a name in a cell", () => {
+	it("is cut in the middle, so its end and extension stay", () => {
+		expect(middleCut("OrderSummary.tsx", 12)).toBe("Ord…mary.tsx");
+		expect(middleCut("index.js", 12)).toBe("index.js");
+		expect(middleCut("content-negotiation", 12)).toBe("con…otiation");
+		expect(middleCut("abcdefghijklmn", 12)).toHaveLength(12);
+	});
+
+	it("keeps a short first word whole where the name has one", () => {
+		expect(middleCut("res.sendFile.js", 12)).toBe("res.…File.js");
+		expect(middleCut("res.download.js", 12)).toBe("res.…load.js");
+	});
+});
+
+describe("names side by side", () => {
+	it("are cut in the middle, unless that leaves two alike: then at the end, where they differ", () => {
+		const swarm = ["res.send.edges.js", "res.sendStatus.edges.js", "req.protocol.edges.js", "index.js"];
+		expect(cellNames(swarm, 12)).toEqual(["res.send.ed…", "res.sendSta…", "req.protoco…", "index.js"]);
+		const mixed = ["res.download.js", "res.sendFile.js", "res.send.js"];
+		expect(cellNames(mixed, 12)).toEqual(["res.…load.js", "res.…File.js", "res.send.js"]);
+	});
+});
+
+describe("a cell's state words", () => {
+	// Ten letters to a line, a space as one: room enough to test the splitting.
+	const width = (text: string) => text.length;
+
+	it("stay on one line when they fit", () => {
+		expect(fitLines("building", [10, 8], width)).toEqual(["building"]);
+	});
+
+	it("break where both lines fit, as evenly as they can", () => {
+		expect(fitLines("changes requested", [10, 9], width)).toEqual(["changes", "requested"]);
+		expect(fitLines("needs a person", [10, 8], width)).toEqual(["needs a", "person"]);
+	});
+
+	it("are cut short rather than overflow", () => {
+		const lines = fitLines("abandoned, free to take", [10, 8], width);
+		expect(lines).toHaveLength(2);
+		lines.forEach((line, index) => expect(line.length).toBeLessThanOrEqual([10, 8][index]!));
+		expect(lines[1]!.endsWith("…")).toBe(true);
+		expect(fitLines("unbreakableword", [10, 8], width)).toEqual(["unbreakab…"]);
+	});
+
+	it("are measured in the map's face, generously", () => {
+		// "needs a person" is about 70px at 10px.
+		expect(sansWidth("needs a person", 10)).toBeGreaterThan(66);
+		expect(sansWidth("needs a person", 10)).toBeLessThan(76);
+		expect(sansWidth("WW", 10)).toBeGreaterThan(sansWidth("ii", 10) * 2);
+	});
+});
+
+describe("an agent's hue", () => {
+	it("is one of the theme's hues that no lamp means anything by, and the same every time", () => {
+		const hues = ["agent-1", "agent-2", "alice-claude", "bob-codex", "githive-forager"].map(agentHue);
+		// hue-1 is amber, hue-5 green and hue-6 red: the lamps' colors.
+		for (const hue of hues) expect([0, 2, 3, 4, 7]).toContain(hue);
+		expect(agentHue("alice-claude")).toBe(hues[2]);
+		// Not all the same.
+		expect(new Set(hues).size).toBeGreaterThan(2);
 	});
 });

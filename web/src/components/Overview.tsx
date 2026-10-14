@@ -1,24 +1,15 @@
 import { messageOf } from "../lib/errors";
 import { useState } from "react";
-import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import type { RepoSnapshot } from "../api";
 import { useChanged } from "../hooks/useChanged";
-import { usePoll } from "../hooks/usePoll";
-import { Territory } from "./Territory";
-import { LAMP_WORDS, lampColor, lampCounts, LAMPS } from "../lib/overview";
 import { href } from "../lib/routes";
 import { cn } from "../lib/utils";
-import { Lamp } from "./ui/badge";
 import { Callout } from "./ui/box";
 import { Button } from "./ui/button";
 import { Input, Label, NativeSelect } from "./ui/field";
 
-/**
- * What the overview reads: the repo's files and, when the server reports it, what's landing. People who can
- * write can also make a branch.
- */
+/** People who can write can make a branch. */
 export interface OverviewApi {
-	tree(repo: string, ref?: string): Promise<RepoTree>;
-	landing?(repo: string, branch: string): Promise<RepoLanding>;
 	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
@@ -180,47 +171,19 @@ function NewBranchForm(props: {
 	);
 }
 
-// A summary in a line: a bold count, then lamp-marked counts beside it.
-const SUMMARY = "m-0 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 text-lead";
-
-/** The claims in force, in a sentence: how many, and where their changes are. */
-function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: RepoLanding }) {
-	const total = snapshot.claims.length;
-	if (!total)
-		return <p className={SUMMARY}>No claims in force. When an agent claims part of the tree, it lights up below.</p>;
-	const counts = lampCounts(snapshot.claims, { landing, votes: snapshot.votes });
-	const parts = LAMPS.filter((lamp) => counts[lamp]).map((lamp) => (
-		<span key={lamp} className="inline-flex items-center gap-1.75 text-muted-foreground">
-			<Lamp color={lampColor(lamp)} />
-			{counts[lamp]} {lamp === "attention" && counts[lamp] > 1 ? "need a person" : LAMP_WORDS[lamp]}
-		</span>
-	));
-	return (
-		<p className={SUMMARY}>
-			<strong>
-				{total} {total === 1 ? "claim" : "claims"} in force
-			</strong>
-			{parts}
-		</p>
-	);
-}
-
 /**
- * A repo at a glance, on one of its branches: the claims on it in a sentence and
- * its territory. What's landing and who works where are on the Hive tab.
+ * Which branch the Changes tab shows, and making another, for a repo with more than its project's branch (or people
+ * who may make one); and a word when the address names a branch the repo hasn't. Who holds what is on the Claims tab,
+ * what's landing and who works where on the Hive's.
  */
 export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
 	const known =
 		asked === undefined || asked === branch || (snapshot.branches ?? []).some((other) => other.name === asked);
 	const shown = asked && known ? asked : branch;
-	const otherBranch = shown === branch ? undefined : shown;
-	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
-	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, otherBranch), 60_000);
-	// Only the claims on this branch, since each change lands on one branch.
-	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === shown) };
 	const manyBranches = (snapshot.branches ?? []).length > 0 || canWrite;
+	if (!manyBranches && known) return null;
 	return (
-		<div className="mb-11 grid gap-9">
+		<div className="mb-6 grid gap-4">
 			{manyBranches ? (
 				<BranchBar
 					repo={repo}
@@ -232,21 +195,11 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 					onBranchMade={onBranchMade}
 				/>
 			) : null}
-			{/* Set apart by a paragraph's margins, as the browser gives one. */}
 			{!known ? (
-				<Callout tone="warn" className="my-3.75">
+				<Callout tone="warn">
 					There's no branch {asked} taking changes here: showing {branch}.
 				</Callout>
 			) : null}
-			<Summary snapshot={onBranch} landing={landing.data} />
-			<Territory
-				repo={repo}
-				branch={shown}
-				snapshot={onBranch}
-				tree={tree.data}
-				error={tree.error}
-				landing={landing.data}
-			/>
 		</div>
 	);
 }

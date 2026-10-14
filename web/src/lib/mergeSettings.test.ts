@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { blockingRolesOf, draftFrom, settingsFrom } from "./mergeSettings";
+import {
+	blockingRolesOf,
+	draftFrom,
+	partDirty,
+	partInput,
+	previewPolicy,
+	problemsOf,
+	rebase,
+	settingsFrom,
+} from "./mergeSettings";
 
 describe("the merge settings form", () => {
 	const policy = {
@@ -73,5 +82,113 @@ describe("the merge settings form", () => {
 		expect(draft.independent).toBe(true);
 		expect(settingsFrom(draft).settings).toMatchObject({ independent: true });
 		expect(settingsFrom({ ...draft, independent: false }).settings).toMatchObject({ independent: false });
+	});
+});
+
+describe("the merge settings, a section at a time", () => {
+	const policy = {
+		required: 1,
+		vetoes: ["security"],
+		escalate: [{ paths: ["package.json"], vetoes: ["ops"] }],
+		grants: { security: ["@acme/security"], ops: ["githive"] },
+	};
+	const base = draftFrom(policy, ["npm test"], ["*.md"]);
+
+	it("puts each problem under its field", () => {
+		const draft = { ...base, required: "two", vetoes: "Security Team", skipChecks: "a b" };
+		draft.escalate = [{ paths: "", required: "x", vetoes: "Ops!" }];
+		expect(problemsOf(draft)).toEqual([
+			{ part: "review", field: "settings-required", text: "Required approvals is a whole number, 0 for none." },
+			{
+				part: "review",
+				field: "settings-vetoes",
+				text: '"Security Team" isn\'t a role name: use lowercase words joined by hyphens, like "security" or "api-design".',
+			},
+			{ part: "path-rules", field: "rule-0-paths", text: "Rule 1 names no paths." },
+			{
+				part: "path-rules",
+				field: "rule-0-required",
+				text: "Rule 1's approvals is a whole number, or blank for the repo's own.",
+			},
+			{
+				part: "path-rules",
+				field: "rule-0-vetoes",
+				text: '"Ops!" isn\'t a role name: use lowercase words joined by hyphens, like "security" or "api-design".',
+			},
+			{
+				part: "checks",
+				field: "skip-checks",
+				text: '"a b" isn\'t a pattern: a path or name, with * for any run of characters (*.md, docs/).',
+			},
+		]);
+	});
+
+	it("is dirty only where it was edited", () => {
+		const draft = { ...base, required: "2" };
+		expect(partDirty("review", draft, base)).toBe(true);
+		expect(partDirty("path-rules", draft, base)).toBe(false);
+		expect(partDirty("checks", draft, base)).toBe(false);
+		expect(partDirty("checks", { ...base, verify: ["npm test", "npm run lint"] }, base)).toBe(true);
+	});
+
+	it("saves only its own fields, keeping who may vote as a role the saved rules still use", () => {
+		const draft = { ...base, required: "2", vetoes: "security, privacy", escalate: [] };
+		draft.grants = { ...draft.grants, privacy: "person:*" };
+		expect(partInput("review", draft, base)).toEqual({
+			input: {
+				required: 2,
+				independent: false,
+				vetoes: ["security", "privacy"],
+				// ops still blocks in the rules as saved, though this draft's rules drop it.
+				grants: { security: ["@acme/security"], privacy: ["person:*"], ops: ["githive"] },
+			},
+			problems: [],
+		});
+		expect(partInput("path-rules", draft, base)).toEqual({ input: { escalate: [] }, problems: [] });
+		expect(partInput("checks", draft, base)).toEqual({
+			input: { verify: ["npm test"], skip_checks: ["*.md"] },
+			problems: [],
+		});
+		expect(partInput("review", { ...draft, required: "x" }, base).problems).toHaveLength(1);
+		// Another section's problem doesn't stop this one saving.
+		expect(partInput("checks", { ...draft, required: "x" }, base).problems).toEqual([]);
+	});
+
+	it("drops who may vote as a role Review no longer has block, unless the saved rules still use it", () => {
+		const draft = { ...base, vetoes: "" };
+		// security blocked repo-wide as saved, and no rule uses it: its grant goes with it, as it did before sections.
+		expect(partInput("review", draft, base).input).toEqual({
+			required: 1,
+			independent: false,
+			vetoes: [],
+			grants: { ops: ["githive"] },
+		});
+		const ruled = { ...base, escalate: [{ paths: "src/", required: "", vetoes: "security" }] };
+		expect(partInput("review", { ...ruled, vetoes: "" }, ruled).input?.grants).toEqual({
+			security: ["@acme/security"],
+		});
+	});
+
+	it("after a save, takes the server's settings where they weren't being edited, keeping edits elsewhere", () => {
+		const editing = { ...base, required: "3", verify: ["npm test", "npm run lint"] };
+		const saved = draftFrom({ ...policy, required: 3, escalate: [] }, ["npm test"], ["*.md"]);
+		const next = rebase(editing, base, saved, "review");
+		expect(next.required).toBe("3");
+		// Path rules weren't being edited: they follow the server.
+		expect(next.escalate).toEqual([]);
+		// Checks were: the edits stay, still unsaved.
+		expect(next.verify).toEqual(["npm test", "npm run lint"]);
+		expect(partDirty("checks", next, saved)).toBe(true);
+	});
+
+	it("words the draft as a policy, as far as it reads, for what it means", () => {
+		const draft = { ...base, required: "2", vetoes: "security, Bad Role" };
+		expect(previewPolicy(draft)).toEqual({
+			required: 2,
+			vetoes: ["security"],
+			escalate: [{ paths: ["package.json"], vetoes: ["ops"] }],
+			grants: { security: ["@acme/security"], ops: ["githive"] },
+		});
+		expect(previewPolicy({ ...draft, required: "" }).required).toBe(0);
 	});
 });

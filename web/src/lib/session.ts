@@ -26,11 +26,31 @@ export function signinErrorOf(search: string): string | null {
 	return new URLSearchParams(search).get("signin_error");
 }
 
-/** The same URL without `signin_error`, for history.replaceState once the message is shown. */
+// A request to join comes back with the email it's noted under in the fragment, which the browser never sends on.
+// Anyone can link here with any fragment, so only what looks like an email is shown.
+const ACCOUNT_FRAGMENT = "#signin-as=";
+/** One @ with something either side, and no whitespace or control characters. */
+const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+$/u;
+/** The longest an email address can be. */
+const EMAIL_MOST = 254;
+
+/** The email a request to join is noted under (`#signin-as=`), if the address carries one. */
+export function signinAccountOf(hash: string): string | null {
+	if (!hash.startsWith(ACCOUNT_FRAGMENT)) return null;
+	try {
+		const account = decodeURIComponent(hash.slice(ACCOUNT_FRAGMENT.length));
+		return account.length <= EMAIL_MOST && EMAIL.test(account) ? account : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The same URL without `signin_error` (or the account a request is noted under), for history.replaceState. */
 export function withoutSigninError(url: string): string {
 	const parsed = new URL(url);
 	parsed.searchParams.delete("signin_error");
-	return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+	const hash = parsed.hash.startsWith(ACCOUNT_FRAGMENT) ? "" : parsed.hash;
+	return `${parsed.pathname}${parsed.search}${hash}`;
 }
 
 /**
@@ -112,6 +132,9 @@ export function connectSteps(client: McpClient, origin: string): ConnectStep[] {
 	];
 }
 
+/** What to ask a new agent first: a small piece of real work, through GitHive, in one of your repos. */
+export const workPrompt = (repo: string) => `Use GitHive to improve the README in ${repo}.`;
+
 /** Connecting a client with an agent token: what to copy, with the token filled in. */
 export function tokenSteps(client: McpClient, origin: string, token: string): ConnectStep[] {
 	const url = `${origin}/mcp`;
@@ -145,14 +168,3 @@ export const tokenLabel = (prefix: string) => `ghv_${prefix}…`;
 
 /** A calendar date for an expiry, as YYYY-MM-DD; "never" for none. */
 export const expiryDate = (iso: string | null) => (iso ? iso.slice(0, 10) : "never");
-
-/**
- * What someone signed out sees: a public repo's pages when the address names one, unless they asked to sign in or
- * a sign-in just failed; the sign-in screen otherwise.
- */
-export function signedOutScreen(at: { reading: boolean; signingIn: boolean; failed: boolean }) {
-	if (!at.reading) return "sign-in";
-	if (at.signingIn) return "sign-in";
-	if (at.failed) return "sign-in";
-	return "repo";
-}

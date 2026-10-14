@@ -68,14 +68,15 @@
 	--muted-foreground: #56636b;
 	--secondary: #eef0ee;
 	--secondary-foreground: var(--foreground);
-	/* shadcn's accent: the surface under a hovered or highlighted item. */
-	--accent: #eef0ee;
+	/* shadcn's accent: the surface under a hovered or highlighted item, a step under the muted ones so it shows on them. */
+	--accent: var(--surface-3);
 	--accent-foreground: var(--foreground);
 	--surface-2: #eef0ee;
 	--surface-3: #e3e7e5;
 	--border: #d3d9d6;
-	--border-strong: #b7c0bc;
-	--input: #b7c0bc;
+	/* A control's edge (a field, a button) and a strong rule: 3:1 on the card and the page, so they're seen. */
+	--border-strong: #858f8b;
+	--input: #858f8b;
 
 	/* A primary action's ink fill. */
 	--primary: #1e2b33;
@@ -85,39 +86,57 @@
 	--link-soft: #e3ecf1;
 	--ring: #23506e;
 
-	/* The lamps. --amber is the lamp itself (the logo's honey); --warn is amber dark enough for text. */
+	/* The lamps. --amber is the lamp itself (the logo's honey); --warn is amber dark enough for text. A lamp's color
+	   as text reads at 4.5:1 on its -soft, on surface-2 and on surface-3 (lib/theme.test.ts). */
 	--amber: #e59a0b;
 	--amber-soft: #fbf0d9;
-	--good: #2e7d5b;
+	--good: #276b4e;
 	--good-soft: #e1efe8;
 	--warn: #8f5800;
 	--warn-soft: #fbf0d9;
-	--bad: #c03a2b;
+	--bad: #b03426;
 	--bad-soft: #f8e4e1;
 	--needs: #b13527;
 	--needs-soft: #f8e4e1;
 	--neutral: #56636b;
 	--neutral-soft: #e8ecea;
 	--destructive: var(--bad);
+	/* Text on a lamp's solid fill (Merge, a solid pill, the inbox count): white, and on dark's brighter lamps, dark. */
+	--good-foreground: #ffffff;
+	--bad-foreground: #ffffff;
+	--warn-foreground: #ffffff;
+	--needs-foreground: #ffffff;
 
 	--diff-add: #e3f2e9;
 	--diff-add-strong: #c6e6d3;
 	--diff-del: #fbe9e6;
 	--diff-del-strong: #f3cdc6;
 
-	/* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
-	--claim-0: #3b82f6;
-	--claim-1: #f59e0b;
-	--claim-2: #14b8a6;
-	--claim-3: #ec4899;
-	--claim-4: #8b5cf6;
-	--claim-5: #22c55e;
-	--claim-6: #ef4444;
-	--claim-7: #06b6d4;
+	/* Agents' hues: each agent's chip on the Hive is ringed in one, the same wherever it shows (agentHue in
+	   lib/hiveCells.ts). Amber, green and red (hue-1, -5, -6) are the lamps' colors, so no agent gets them. Readable on
+	   both themes. */
+	--hue-0: #3b82f6;
+	--hue-1: #f59e0b;
+	--hue-2: #14b8a6;
+	--hue-3: #ec4899;
+	--hue-4: #8b5cf6;
+	--hue-5: #22c55e;
+	--hue-6: #ef4444;
+	--hue-7: #06b6d4;
 
-	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark. */
+	/* Code's syntax colors, in the Code tab: each reads at 4.5:1 or more on the card and surface-2. */
+	--code-keyword: #8a2f8f;
+	--code-string: #2a6630;
+	--code-literal: #9a4a00;
+	--code-comment: #5b676e;
+	--code-title: #1c5a93;
+	--code-type: #00676b;
+	--code-attr: #7a5300;
+
+	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark, and its lamp the logo's honey on both. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;
+	--mark-dot: #e59a0b;
 
 	--shadow-raised: 0 10px 28px rgba(30, 43, 51, 0.18);
 
@@ -132,8 +151,12 @@
 	--stagger-step: 35ms;
 
 	--page-width: 1180px;
-	/* How far the sticky top bar reaches down the window; what sticks under it starts below this. */
-	--topbar-height: 56px;
+	/* The top bar's own height: it's drawn this tall. A repo's tabs stick under it. */
+	--bar-height: 52px;
+	/* How far what sticks at the top reaches down the window; what sticks under it starts below this. Under a repo's
+	   tabs, which stick under the bar too, it's their foot (RepoPage sets it). */
+	--topbar-height: var(--bar-height);
+	--repo-tabs-height: 44px;
 }
 
 .dark {
@@ -144,12 +167,11 @@
 	--muted: #1d282f;
 	--muted-foreground: #9aa8a6;
 	--secondary: #1d282f;
-	--accent: #1d282f;
 	--surface-2: #1d282f;
 	--surface-3: #24313a;
 	--border: #2c3a41;
-	--border-strong: #3d4d55;
-	--input: #3d4d55;
+	--border-strong: #66777f;
+	--input: #66777f;
 
 	--primary: #e4e9e7;
 	--primary-foreground: #121a1f;
@@ -163,17 +185,29 @@
 	--good-soft: #15302a;
 	--warn: #f2b13a;
 	--warn-soft: #33270f;
-	--bad: #e5604f;
+	--bad: #ef7563;
 	--bad-soft: #3a1d1a;
-	--needs: #e5604f;
+	--needs: #ef7563;
 	--needs-soft: #3a1d1a;
 	--neutral: #9aa8a6;
 	--neutral-soft: #232f35;
+	--good-foreground: #121a1f;
+	--bad-foreground: #121a1f;
+	--warn-foreground: #121a1f;
+	--needs-foreground: #121a1f;
 
 	--diff-add: #12261c;
 	--diff-add-strong: #1b3a29;
 	--diff-del: #2c1618;
 	--diff-del-strong: #48201f;
+
+	--code-keyword: #d39be8;
+	--code-string: #9ccc8a;
+	--code-literal: #f0a76a;
+	--code-comment: #8b9a99;
+	--code-title: #8cc4f0;
+	--code-type: #6fcfc5;
+	--code-attr: #e8c17a;
 
 	--mark-tile: #f5f6f4;
 	--mark-line: #1e2b33;
@@ -235,28 +269,40 @@
 	--color-amber-soft: var(--amber-soft);
 	--color-good: var(--good);
 	--color-good-soft: var(--good-soft);
+	--color-good-foreground: var(--good-foreground);
 	--color-warn: var(--warn);
 	--color-warn-soft: var(--warn-soft);
+	--color-warn-foreground: var(--warn-foreground);
 	--color-bad: var(--bad);
 	--color-bad-soft: var(--bad-soft);
+	--color-bad-foreground: var(--bad-foreground);
 	--color-needs: var(--needs);
 	--color-needs-soft: var(--needs-soft);
+	--color-needs-foreground: var(--needs-foreground);
 	--color-neutral: var(--neutral);
 	--color-neutral-soft: var(--neutral-soft);
 	--color-diff-add: var(--diff-add);
 	--color-diff-add-strong: var(--diff-add-strong);
 	--color-diff-del: var(--diff-del);
 	--color-diff-del-strong: var(--diff-del-strong);
-	--color-claim-0: var(--claim-0);
-	--color-claim-1: var(--claim-1);
-	--color-claim-2: var(--claim-2);
-	--color-claim-3: var(--claim-3);
-	--color-claim-4: var(--claim-4);
-	--color-claim-5: var(--claim-5);
-	--color-claim-6: var(--claim-6);
-	--color-claim-7: var(--claim-7);
+	--color-hue-0: var(--hue-0);
+	--color-hue-1: var(--hue-1);
+	--color-hue-2: var(--hue-2);
+	--color-hue-3: var(--hue-3);
+	--color-hue-4: var(--hue-4);
+	--color-hue-5: var(--hue-5);
+	--color-hue-6: var(--hue-6);
+	--color-hue-7: var(--hue-7);
+	--color-code-keyword: var(--code-keyword);
+	--color-code-string: var(--code-string);
+	--color-code-literal: var(--code-literal);
+	--color-code-comment: var(--code-comment);
+	--color-code-title: var(--code-title);
+	--color-code-type: var(--code-type);
+	--color-code-attr: var(--code-attr);
 	--color-mark-tile: var(--mark-tile);
 	--color-mark-line: var(--mark-line);
+	--color-mark-dot: var(--mark-dot);
 
 	/* Corners: steps of --radius, so a theme changes one number. At 4px these are 1, 2, 3, 4, 5, 6, 12 and 14px. */
 	--radius-2xs: calc(var(--radius) * 0.25);
@@ -269,29 +315,30 @@
 	--radius-3xl: calc(var(--radius) * 3.5);
 
 	--shadow-raised: var(--shadow-raised);
-	/* A focused control's ring, drawn as a shadow so it follows the control's corners. */
-	--shadow-focus: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
 @theme {
 	--font-sans: "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-	/* Type: the sizes the dashboard uses, by role. */
+	/* Type: eight sizes, named by role. 11px is for counts only; 12px is the smallest for words, since Overpass's
+	   x-height is small. Roles that share a size are kept apart by weight, color and face. */
 	--text-*: initial;
-	--text-micro: 11.5px;
+	--text-micro: 11px;
 	--text-caption: 12px;
-	--text-meta: 12.5px;
+	--text-meta: 13px;
 	--text-ui: 13px;
-	--text-ui-lg: 13.5px;
+	--text-ui-lg: 14px;
 	--text-body-sm: 14px;
 	--text-body: 15px;
-	--text-lead: 16px;
-	--text-title-sm: 18px;
+	--text-lead: 17px;
+	--text-title-sm: 17px;
 	--text-title: 20px;
-	--text-title-lg: 22px;
-	--text-display-sm: 24px;
+	--text-title-lg: 20px;
+	--text-display-sm: 26px;
 	--text-display: 26px;
+	/* The measure of long-form text (an intent, a review, a question): about 70 characters a line, max-w-measure. */
+	--container-measure: 70ch;
 
 	--ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
 	--ease-in: cubic-bezier(0.4, 0, 1, 1);
@@ -305,10 +352,12 @@
 	/* Going somewhere (a page, a tab, what replaces Loading): a quick fade, no movement, so the page never lurches. */
 	--animate-fade: fade var(--motion-fast) ease-out backwards;
 	--animate-leave: leave var(--motion-base) var(--ease-in) both;
+	/* A changed number swells a little and settles: a nudge to look, not a jump. */
 	--animate-bump: bump 0.6s ease-out;
 	--animate-pop: pop 0.5s var(--ease-pop) backwards;
-	/* The live dot breathing while the page gets live updates: its halo widens and fades, and back. */
-	--animate-live: live-pulse 2s ease-in-out infinite;
+	/* The live dot breathing as the page goes live: its halo widens and fades, and back, three times; then it holds
+	   still, as nothing may blink or pulse for more than a few seconds (WCAG 2.2.2). */
+	--animate-live: live-pulse 2s ease-in-out 3;
 
 	@keyframes appear {
 		from {
@@ -329,7 +378,7 @@
 	}
 	@keyframes bump {
 		0% {
-			transform: scale(1.6);
+			transform: scale(1.15);
 		}
 		100% {
 			transform: none;
@@ -450,14 +499,29 @@
 		color: var(--link);
 		text-decoration: none;
 	}
+	/* A link in running text (a paragraph, a callout, a block marked prose) is underlined, faintly, so more than its
+	   color tells it from the words around it (WCAG 1.4.1). Links that stand on their own (navigation, tabs,
+	   breadcrumbs, pills, a row's title) aren't in running text: a paragraph laid out as a row (flex or grid) isn't
+	   either, and a component (a button as a link) or no-underline says otherwise. */
+	:where(p:not(.flex, .inline-flex, .grid), blockquote, figcaption, [data-slot="callout"], .prose) a:not([data-slot]) {
+		text-decoration-line: underline;
+		text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+		text-underline-offset: 2px;
+	}
 	a:hover {
 		text-decoration: underline;
-		text-underline-offset: 0.18em;
+		text-underline-offset: 2px;
 	}
+	/* One focus ring for everything that takes focus: buttons, fields, links, menus' triggers. Only what sits inside a
+	   group draws it inside itself (a segmented control's choice, a tab), and a menu's items light up instead. */
 	:focus-visible {
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;
 		border-radius: var(--radius);
+	}
+	/* A page's heading takes focus as the page changes, so a screen reader starts there. It isn't a control, so no ring. */
+	h1[tabindex="-1"]:focus {
+		outline: none;
 	}
 	code,
 	pre {
@@ -485,6 +549,28 @@
 	}
 	summary {
 		cursor: pointer;
+	}
+	/* Radios and checkboxes in the link's slate, not the system's blue. */
+	input[type="radio"],
+	input[type="checkbox"] {
+		accent-color: var(--link);
+	}
+	/* On a touch screen, what's small to tap (a small button, a segmented control's choice, the top bar's pills, a radio
+	   or checkbox with its label) takes taps 44px about its middle, without growing, so nothing moves: touch-target. A
+	   utility (absolute, say) still wins over the position this sets. */
+	@media (pointer: coarse) {
+		:where(.touch-target, label:has(> input:is([type="radio"], [type="checkbox"]))) {
+			position: relative;
+		}
+		:where(.touch-target, label:has(> input:is([type="radio"], [type="checkbox"])))::after {
+			content: "";
+			position: absolute;
+			top: 50%;
+			left: 50%;
+			width: max(100%, 44px);
+			height: max(100%, 44px);
+			translate: -50% -50%;
+		}
 	}
 }
 
@@ -543,7 +629,8 @@
 	--animate-goal-flash-bad: goal-flash-bad 1.6s ease-out var(--motion-delay, 0ms) backwards;
 	--animate-goal-flash-good: goal-flash-good 2s ease-out var(--motion-delay, 0ms) backwards;
 	--animate-goal-pop: goal-pop 0.6s var(--ease-pop) var(--motion-delay, 0ms) backwards;
-	--animate-goal-blink: goal-blink 1.1s infinite;
+	/* Blinks three times, then holds still (WCAG 2.2.2), as the map's landing lamp does. */
+	--animate-goal-blink: goal-blink 1.1s 3;
 	/* The map's cells grow in and shrink away, chips pop on, and a cell flashes or pulses with what happened. */
 	--animate-hive-cell-in: hive-cell-in 0.45s var(--ease-spring) backwards;
 	--animate-hive-cell-out: hive-cell-out 0.45s ease-in forwards;
@@ -552,7 +639,7 @@
 	--animate-hive-cell-flash-bad: hive-cell-flash-bad 1.2s ease var(--motion-delay, 0ms) backwards;
 	--animate-hive-cell-flash-good: hive-cell-flash-good 1.4s ease var(--motion-delay, 0ms) backwards;
 	--animate-hive-cell-pulse: hive-cell-pulse 0.8s ease var(--motion-delay, 0ms) backwards;
-	--animate-hive-cell-blink: hive-cell-blink 1s infinite;
+	--animate-hive-cell-blink: hive-cell-blink 1s 3;
 	--animate-hive-cluster-in: hive-cluster-in 0.45s ease-out;
 
 	@keyframes hive-appear {

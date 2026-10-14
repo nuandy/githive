@@ -89,8 +89,9 @@ describe("the conflict panel", () => {
 	it("gives the agent's next commands, with a copy button, for its clone", () => {
 		const html = render(conflict);
 		const text = inlineText(html);
-		expect(text).toContain("The agent's next commands");
-		expect(text).toContain("where origin is the project and fork its copy");
+		// Folded away, for whoever wants to see them.
+		expect(html).toMatch(/<details class="disclosure[^"]*"><summary[^>]*>What the agent will do<\/summary>/);
+		expect(text).toContain("Its next commands, for its own clone, where origin is the project and fork its copy");
 		expect(html).toContain(
 			"<code>git fetch origin main &amp;&amp; git merge origin/main\n# resolve src/billing/invoice.ts README.md so both",
 		);
@@ -98,8 +99,18 @@ describe("the conflict panel", () => {
 		expect(html).toContain("git push fork changes/c-1</code>");
 		expect(html).not.toMatch(/<code>[^<]*call status/);
 		expect(text).toContain("Then: call status; once the new commit is approved, merge again.");
-		expect(html).toMatch(/<button [^>]*type="button" aria-label="Copy commands: git fetch origin main/);
-		expect(html).toContain(">Copy commands</button>");
+		expect(inlineText(html.match(/<button [^>]*type="button"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "")).toBe(
+			"Copy commands",
+		);
+	});
+
+	it("links each file to its lines in the change's Files tab", () => {
+		const html = renderToStaticMarkup(
+			<ConflictPanel merge={conflict} head={HEAD} repo="acme/shop" fileHref={(path) => `#/files/${path}`} />,
+		);
+		expect(html).toContain(
+			'<a href="#/files/README.md" title="Its lines in this change&#x27;s files"><code>README.md</code></a>',
+		);
 	});
 
 	it("says when the change has moved since the check, and shows nothing for a clean merge", () => {
@@ -118,6 +129,6 @@ describe("the conflict panel", () => {
 		expect(many.match(/<code>f\d+\.txt<\/code>/g)).toHaveLength(20);
 		expect(text).toContain("Who changed it on main wasn't found.");
 		expect(text).toContain("And 3 more files.");
-		expect(text).not.toContain("The agent's next commands");
+		expect(text).not.toContain("What the agent will do");
 	});
 });

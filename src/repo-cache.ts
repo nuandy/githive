@@ -43,6 +43,11 @@ interface View {
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
 
+/** How many changes' files (`diff:<change>` views, each up to most of a megabyte) a repo keeps: the last kept. */
+const DIFFS_KEPT = 20;
+/** The names of the changes' files kept, the last kept last. */
+const DIFFS = "diffs-kept";
+
 /** A message for one agent about its change, kept until told (see docs/awareness.md, "The news channel"). */
 export interface Notice {
 	/** "interface", "heads_up", ...: an open set, but never "landed", which marks landed news. */
@@ -118,6 +123,7 @@ const STORAGE_BATCH = 128;
 const KEPT_PREFIXES = [
 	"view:",
 	"building:",
+	DIFFS,
 	"forks:",
 	"landing:",
 	"head:",
@@ -442,8 +448,17 @@ export class RepoCache extends DurableObject<Env> {
 		const at = Date.now();
 		await this.ctx.storage.put<View>(`view:${name}`, { json, writes, at });
 		await this.ctx.storage.delete(`building:${name}`);
+		if (name.startsWith("diff:")) await this.keptDiff(name);
 		await this.publish({ kind: `view:${name}` });
 		return at;
+	}
+
+	// Notes a change's files as kept last, and forgets the oldest past DIFFS_KEPT, to be built again if read again.
+	private async keptDiff(name: string) {
+		const kept = [...((await this.ctx.storage.get<string[]>(DIFFS)) ?? []).filter((each) => each !== name), name];
+		const forgotten = kept.splice(0, Math.max(0, kept.length - DIFFS_KEPT));
+		await this.ctx.storage.put(DIFFS, kept);
+		if (forgotten.length) await this.ctx.storage.delete(forgotten.map((each) => `view:${each}`));
 	}
 
 	async buildFailed(name: string) {

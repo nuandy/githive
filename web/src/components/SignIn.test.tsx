@@ -54,8 +54,44 @@ describe("the sign-in screen with an invite code", () => {
 		expect(withoutCode).toContain("signing in asks an admin to let you in");
 		const html = renderToStaticMarkup(<SignIn providers={["github"]} takesInviteCode invite="hive-2026" />);
 		expect(visibleText(html)).toContain("Invite code, if you have one");
-		expect(visibleText(html)).toContain("Have an invite code? Enter it, then continue.");
 		expect(html).toContain('value="hive-2026"');
 		expect(html).toContain(`href="/auth/github?return=${encodeURIComponent("/")}&amp;invite=hive-2026"`);
+	});
+
+	it("says, above the buttons, that going on without a code asks an admin", () => {
+		const html = renderToStaticMarkup(<SignIn providers={["github"]} takesInviteCode />);
+		const text = visibleText(html);
+		const said = text.indexOf("No code? Continue anyway and we");
+		expect(said).toBeGreaterThan(0);
+		expect(text).toContain("ll ask an admin to let you in.");
+		expect(said).toBeLessThan(text.indexOf("Continue with GitHub"));
+	});
+});
+
+describe("the sign-in screen's other ways in", () => {
+	it("says when a session has ended", () => {
+		const html = renderToStaticMarkup(
+			<SignIn providers={["github"]} notice="Your session ended. Sign in again to continue." />,
+		);
+		expect(html).toContain('role="status"');
+		expect(visibleText(html)).toContain("Your session ended. Sign in again to continue.");
+	});
+
+	it("after a request to join, says the account it's noted under, how they'll hear, and offers the demo", () => {
+		const html = renderToStaticMarkup(
+			<SignIn providers={["github"]} request={{ account: "eve@example.com" }} demoRepo="nuandy/honeycomb" />,
+		);
+		const text = visibleText(html);
+		expect(html).toMatch(/<h1[^>]*>Your request to join is noted<\/h1>/);
+		expect(text).toContain("eve@example.com");
+		expect(text).toContain("An admin lets people in by hand.");
+		expect(text).toContain("sign in again later");
+		expect(html).toMatch(/<a [^>]*href="#\/repos\/nuandy\/honeycomb"[^>]*>Watch a hive build a game<\/a>/);
+		// Signing in again, perhaps as another account, is still there.
+		expect(text).toContain("Continue with GitHub");
+		// Without the account (an older server), it still says the request is noted.
+		expect(visibleText(renderToStaticMarkup(<SignIn providers={["github"]} request={{ account: null }} />))).toContain(
+			"Your request to join is noted",
+		);
 	});
 });
