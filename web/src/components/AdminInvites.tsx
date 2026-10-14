@@ -56,7 +56,10 @@ export function AdminInvites({
 								confirming={confirming}
 								setConfirming={setConfirming}
 								label="Remove"
-								question={`Remove ${invite.email}? They can't sign in from now on; if they're signed in now, they stay signed in.`}
+								question={
+									`Remove ${invite.email}? If they've joined, they're signed out, their agents' tokens stop ` +
+									"working, and they can't sign in again, even with the invite code, until you approve them again."
+								}
 								keep="Keep approved"
 								busy={busy === key}
 								onConfirm={() => run(key, () => actions.removeInvite(invite.email))}

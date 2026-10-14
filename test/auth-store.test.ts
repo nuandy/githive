@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { codeInviteLabel } from "../src/auth/invite-code";
 import { IdentityStore, type ProviderProfile, sha256Hex } from "../src/auth/store";
 import { fakeD1 } from "./fakes/d1";
 
@@ -27,6 +28,47 @@ describe("signing in", () => {
 		await ids.invite("ada@example.com", "person:admin");
 		const signed = await ids.signIn(github);
 		expect(signed).toMatchObject({ user: { handle: "ada", email: "ada@example.com", name: "Ada" } });
+	});
+
+	it("shuts out a person whose invitation is removed, until an admin invites them again", async () => {
+		const { ids } = store();
+		await ids.invite("ada@example.com", "person:admin");
+		const { user } = (await ids.signIn(github)) as { user: { id: string } };
+		const session = await ids.createSession(user.id);
+		const agent = await ids.createAgent(user.id, "builder");
+		const { token } = await ids.createToken(user.id, agent.id);
+		await ids.uninvite("Ada@Example.com", "person:admin");
+		expect(await ids.sessionUser(session)).toBeNull();
+		expect(await ids.tokenPrincipal(token)).toBeNull();
+		expect(await ids.activeAgent(agent.id)).toBeNull();
+		expect(await ids.signIn(github)).toEqual({ refused: "not-invited" });
+		// The admin page no longer lists them as approved; their try to sign in is a request instead.
+		expect((await ids.invites()).map((invite) => invite.email)).toEqual([]);
+		expect((await ids.inviteRequests()).map((request) => request.email)).toEqual(["ada@example.com"]);
+		await ids.invite("ada@example.com", "person:admin");
+		expect(await ids.sessionUser(session)).toMatchObject({ handle: "ada" });
+		expect(await ids.signIn(github)).toMatchObject({ user: { handle: "ada" } });
+	});
+
+	it("doesn't let the invite code bring back a person whose invitation was removed", async () => {
+		const db = fakeD1();
+		const ids = new IdentityStore(db, now, "hive-2026");
+		const label = await codeInviteLabel("hive-2026");
+		await ids.invite("ada@example.com", label);
+		await ids.signIn(github);
+		await ids.uninvite("ada@example.com", "person:admin");
+		await ids.invite("ada@example.com", label);
+		expect(await ids.signIn(github)).toEqual({ refused: "not-invited" });
+	});
+
+	it("simply forgets the invitation of someone who never signed in", async () => {
+		const { ids } = store();
+		await ids.invite("ada@example.com", "person:admin");
+		await ids.uninvite("ada@example.com", "person:admin");
+		expect(await ids.invites()).toEqual([]);
+		expect(await ids.signIn(github)).toEqual({ refused: "not-invited" });
+		await ids.invite("ada@example.com", "person:admin");
+		expect(await ids.signIn(github)).toMatchObject({ user: { handle: "ada" } });
 	});
 
 	it("notes an uninvited sign-in as a request, counting each try, until they're let in or turned down", async () => {

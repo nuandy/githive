@@ -143,7 +143,7 @@ export function changeSigns(input: {
 		approved: !!outcome?.approved,
 		vetoed: !!outcome?.vetoedBy.length,
 		landing: !!head && !!batched,
-		asked: !!openFlag(input.record, claim.change, head),
+		asked: !!openFlag(input.record, claim.change, head, outcome?.awaiting ?? []),
 	};
 }
 

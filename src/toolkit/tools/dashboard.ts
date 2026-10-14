@@ -621,8 +621,7 @@ async function claimSnapshot(
 	const { head, approval, hosted, trusted } = status;
 	// A question stays open until a person votes on the change's commit. For a waiting role's review,
 	// it closes once that role signs off.
-	const asked = openFlag(votes, claim.change, head);
-	const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
+	const flag = openFlag(votes, claim.change, head, approval.awaiting ?? []);
 	// Where it stands, worked out as status does, from the votes changeState already counted. Advice: left out if it
 	// can't be.
 	const policy = branchSettings(state, claim.into).policy;

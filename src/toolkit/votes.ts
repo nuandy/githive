@@ -114,17 +114,24 @@ export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "b
 	);
 }
 
-/** The latest question about `change` that no person has answered with a vote on `head` since. */
+/**
+ * The latest question about `change` still open: no person has voted on `head` since it was asked, and, for a role's
+ * review, that role isn't signed off. Without `awaiting`, a role's flag stays open until a person votes.
+ */
 export function openFlag(
 	state: Pick<Votes, "votes" | "flags"> | null | undefined,
 	change: string,
 	head: string | null,
+	awaiting?: string[],
 ) {
-	const flag = (state?.flags ?? []).filter((f) => f.change === change).at(-1);
-	if (!flag) return null;
 	// Only a person can answer. An agent, even the person's own, can't answer what was put to people.
-	const answered = (state?.votes ?? []).some((v) => isPerson(v.by) && v.commit === head && v.at >= flag.at);
-	return answered ? null : flag;
+	const answered = (flag: FlagRecord) =>
+		(state?.votes ?? []).some((v) => isPerson(v.by) && v.commit === head && v.at >= flag.at);
+	// A flag for a role's review is answered too once that role signs off, when the caller knows what's awaited.
+	const signedOff = (flag: FlagRecord) => !!flag.role && !!awaiting && !awaiting.includes(flag.role);
+	const flags = (state?.flags ?? []).filter((flag) => flag.change === change);
+	// The latest still open, so an answered role flag doesn't hide an earlier question nobody answered.
+	return flags.findLast((flag) => !answered(flag) && !signedOff(flag)) ?? null;
 }
 
 /** Paths whose changes need more review by default: dependencies, CI and deployment. */

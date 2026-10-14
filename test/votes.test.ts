@@ -280,6 +280,24 @@ describe("a person and their agents count as one", () => {
 		expect(openFlag(state(bob), "c", head)).toBeNull();
 	});
 
+	it("closes a role's flag once that role signs off, showing an earlier question nobody answered", () => {
+		const question = { change: "c", agent: "a", reason: "a trade-off", at: "2026-10-09T00:00:00.000Z" };
+		const roleWait = {
+			change: "c",
+			agent: "githive",
+			reason: "security waits",
+			role: "security",
+			at: "2026-10-09T00:10:00.000Z",
+		};
+		const state = { votes: [], flags: [question, roleWait] } as unknown as Votes;
+		expect(openFlag(state, "c", head, ["security"])).toMatchObject({ role: "security" });
+		expect(openFlag(state, "c", head, [])).toMatchObject({ reason: "a trade-off" });
+		const roleOnly = { votes: [], flags: [roleWait] } as unknown as Votes;
+		expect(openFlag(roleOnly, "c", head, [])).toBeNull();
+		// A caller that doesn't know what's awaited keeps it open until a person votes.
+		expect(openFlag(roleOnly, "c", head)).toMatchObject({ role: "security" });
+	});
+
 	it("and a pool of one person's agents isn't people, for the warnings", () => {
 		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: [`${bob}/*`] } })).toContainEqual(
 			expect.stringContaining("no person holds security"),

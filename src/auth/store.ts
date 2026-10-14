@@ -10,9 +10,15 @@ export { sha256Hex };
 /** An invitation made with an invite code (see invite-code.ts). */
 const CODE_INVITED = `invited_by LIKE '${CODE_INVITE}%'`;
 
-/** The person `u` was let in by an invite code that's no longer the site's. It binds the current code's label. */
-const CLOSED_CODE_USER =
-	"EXISTS (SELECT 1 FROM invites i WHERE i.email = u.email " + `AND i.${CODE_INVITED} AND i.invited_by <> ?)`;
+/** How an invitation an admin removed is marked: kept, so it keeps its person out. The admin's name follows. */
+const REMOVED_BY = "removed by ";
+const REMOVED = `invited_by LIKE '${REMOVED_BY}%'`;
+
+/** An invitation that lets no one in: one an admin removed, or one by an invite code that's no longer the site's. */
+const SHUT_OUT = `(${REMOVED} OR (${CODE_INVITED} AND invited_by <> ?))`;
+
+/** The person `u` is shut out by their invitation (see SHUT_OUT). It binds the current code's label. */
+const SHUT_OUT_USER = `EXISTS (SELECT 1 FROM invites WHERE email = u.email AND ${SHUT_OUT})`;
 
 export interface User {
 	id: string;
@@ -141,24 +147,43 @@ export class IdentityStore {
 	async invite(email: string, invitedBy: string) {
 		const address = normalizeEmail(email);
 		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) fail(400, `not an email address: ${email}`);
+		// An invitation by an invite code gives way to any later one, so an admin can keep someone it let in. Only an
+		// admin's invitation undoes a removal: the invite code doesn't let a removed person back in.
+		const replaces = invitedBy.startsWith(CODE_INVITE) ? CODE_INVITED : `${CODE_INVITED} OR ${REMOVED}`;
 		await this.db
-			// An invitation by an invite code gives way to any later one, so an admin can keep someone it let in.
 			.prepare(
 				"INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO UPDATE " +
-					`SET invited_by = excluded.invited_by, created_at = excluded.created_at WHERE ${CODE_INVITED}`,
+					`SET invited_by = excluded.invited_by, created_at = excluded.created_at WHERE ${replaces}`,
 			)
 			.bind(address, invitedBy, this.iso())
 			.run();
 		return address;
 	}
 
-	async uninvite(email: string) {
-		await this.db.prepare("DELETE FROM invites WHERE email = ?").bind(normalizeEmail(email)).run();
+	/**
+	 * Removes an invitation. Someone who never signed in is simply no longer invited. Someone who did is shut out: signed
+	 * out, their agents' tokens and connections stop working, and they can't sign in again, even with the invite code,
+	 * until an admin invites them again.
+	 */
+	async uninvite(email: string, removedBy: string) {
+		const address = normalizeEmail(email);
+		const joined = await this.db.prepare("SELECT 1 FROM users WHERE email = ?").bind(address).first();
+		if (!joined) {
+			await this.db.prepare("DELETE FROM invites WHERE email = ?").bind(address).run();
+			return;
+		}
+		await this.db
+			.prepare(
+				"INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO UPDATE " +
+					"SET invited_by = excluded.invited_by, created_at = excluded.created_at",
+			)
+			.bind(address, `${REMOVED_BY}${removedBy}`, this.iso())
+			.run();
 	}
 
 	async invites() {
 		const { results } = await this.db
-			.prepare("SELECT email, invited_by, created_at FROM invites ORDER BY created_at")
+			.prepare(`SELECT email, invited_by, created_at FROM invites WHERE NOT ${REMOVED} ORDER BY created_at`)
 			.all<Row>();
 		return results.map((r) => ({
 			email: String(r.email),
@@ -195,7 +220,7 @@ export class IdentityStore {
 		const waiting =
 			"SELECT email, provider, name, login, first_at, last_at, tries FROM sign_in_requests " +
 			// Not let in: no invitation but a closed invite code's, and not signed in before unless by that code.
-			`WHERE email NOT IN (SELECT email FROM invites WHERE NOT (${CODE_INVITED} AND invited_by <> ?)) ` +
+			`WHERE email NOT IN (SELECT email FROM invites WHERE NOT ${SHUT_OUT}) ` +
 			"AND (email NOT IN (SELECT email FROM users) OR email IN (SELECT email FROM invites)) ORDER BY first_at";
 		const { results } = await this.db
 			.prepare(waiting)
@@ -272,10 +297,13 @@ export class IdentityStore {
 
 	// Sign-in
 
-	/** A known person, unless an invite code let them in and it's no longer the site's. Then they're a request. */
+	/**
+	 * A known person, unless an admin removed their invitation, or an invite code let them in and it's no longer the
+	 * site's. Then they're a request.
+	 */
 	private async admitted(user: User, profile: ProviderProfile): Promise<{ user: User } | { refused: "not-invited" }> {
 		const closed = await this.db
-			.prepare(`SELECT 1 FROM invites WHERE email = ? AND ${CODE_INVITED} AND invited_by <> ?`)
+			.prepare(`SELECT 1 FROM invites WHERE email = ? AND ${SHUT_OUT}`)
 			.bind(user.email, await this.currentCodeLabel())
 			.first();
 		if (!closed) return { user };
@@ -303,7 +331,7 @@ export class IdentityStore {
 		// Only an admin's approval, or the current invite code, lets someone in; an org's invitation waits for it.
 		// Turned away, they're a request.
 		const invited = await this.db
-			.prepare(`SELECT 1 FROM invites WHERE email = ? AND NOT (${CODE_INVITED} AND invited_by <> ?)`)
+			.prepare(`SELECT 1 FROM invites WHERE email = ? AND NOT ${SHUT_OUT}`)
 			.bind(email, await this.currentCodeLabel())
 			.first();
 		if (!invited) {
@@ -400,7 +428,7 @@ export class IdentityStore {
 		const row = await this.db
 			.prepare(
 				"SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.expires_at > ? " +
-					`AND NOT ${CLOSED_CODE_USER}`,
+					`AND NOT ${SHUT_OUT_USER}`,
 			)
 			.bind(await sha256Hex(secret), this.iso(), await this.currentCodeLabel())
 			.first<Row>();
@@ -475,7 +503,7 @@ export class IdentityStore {
 			.prepare(
 				"SELECT a.id AS agent_id, a.owner_id, a.name AS agent_name, a.created_at AS " +
 					"agent_created_at, u.* FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = ? AND " +
-					`a.revoked_at IS NULL AND NOT ${CLOSED_CODE_USER}`,
+					`a.revoked_at IS NULL AND NOT ${SHUT_OUT_USER}`,
 			)
 			.bind(agentId, await this.currentCodeLabel())
 			.first<Row>();
@@ -546,7 +574,7 @@ export class IdentityStore {
 					"agent_id, a.owner_id, a.name AS agent_name, a.created_at AS agent_created_at, u.* FROM " +
 					"agent_tokens t JOIN agents a ON a.id = t.agent_id JOIN users u ON u.id = a.owner_id WHERE " +
 					"t.token_hash = ? AND t.revoked_at IS NULL AND a.revoked_at IS NULL " +
-					`AND NOT ${CLOSED_CODE_USER}`,
+					`AND NOT ${SHUT_OUT_USER}`,
 			)
 			.bind(await sha256Hex(secret), await this.currentCodeLabel())
 			.first<Row>();

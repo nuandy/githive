@@ -277,8 +277,8 @@ function adminRoutes(app: Hono<AuthEnv>) {
 		return c.json({ invited: await store(c.env).invite(String(email ?? ""), by) }, 201);
 	});
 	app.delete("/admin/invites/:email", async (c) => {
-		requireAdmin(c.get("principal"));
-		await store(c.env).uninvite(c.req.param("email"));
+		const by = requireAdmin(c.get("principal"));
+		await store(c.env).uninvite(c.req.param("email"), by);
 		return c.json({ uninvited: c.req.param("email") });
 	});
 
