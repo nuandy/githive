@@ -56,6 +56,7 @@ export function HiveStrip({
 	now,
 	writes = false,
 	origin = "",
+	loading = false,
 }: {
 	repo: string;
 	goals: Goal[];
@@ -76,6 +77,8 @@ export function HiveStrip({
 	writes?: boolean;
 	/** Where GitHive is, for the command that connects an agent. */
 	origin?: string;
+	/** What landed and the event log aren't read yet: the counts would change, and an empty hive may not be. */
+	loading?: boolean;
 }) {
 	const counts = stageCounts(goals, upNext ?? 0, since);
 	const folded = since < now - range;
@@ -86,7 +89,11 @@ export function HiveStrip({
 	return (
 		<header>
 			<NeedsYou repo={repo} goals={goals} audit={audit} snapshot={snapshot} elsewhere={waitingElsewhere} now={now} />
-			{!goals.length && !justFinished(stretch, now) ? (
+			{loading ? (
+				<p className="m-0 py-2.5 text-muted-foreground" role="status">
+					Reading the hive…
+				</p>
+			) : !goals.length && !justFinished(stretch, now) ? (
 				<EmptyHive repo={repo} stretch={stretch} now={now} writes={writes} origin={origin} />
 			) : (
 				<ol

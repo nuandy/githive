@@ -152,6 +152,19 @@ describe("the Hive tab", () => {
 		);
 	});
 
+	it("says it's reading the hive, not that it's empty, until what landed and the event log are in", () => {
+		const empty = { ...repoSnapshot, claims: [], votes: [] };
+		const reading = visibleText(render({ snapshot: empty, showsLanding: true, showsFeed: true }));
+		expect(reading).toContain("Reading the hive…");
+		expect(reading).not.toContain("No agents in the hive");
+		const read = visibleText(render({ snapshot: empty, showsLanding: true, showsFeed: true, events: [] }));
+		expect(read).toContain("Reading the hive…");
+		const failed = { landingError: "502", events: [] };
+		expect(visibleText(render({ snapshot: empty, showsLanding: true, showsFeed: true, ...failed }))).toContain(
+			"No agents in the hive yet",
+		);
+	});
+
 	it("says how to bring the first agent in when the hive is empty, and when the last work finished", () => {
 		const empty = { ...repoSnapshot, claims: [], votes: [] };
 		expect(visibleText(render({ snapshot: empty }))).toContain("No agents in the hive yet");

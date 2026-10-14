@@ -90,6 +90,15 @@ function PageErrors({ errors }: { errors: string[] }) {
 	);
 }
 
+/** A whole page waiting for what it shows: "Loading…" in its middle. */
+function LoadingPage() {
+	return (
+		<main id="main" className="grid min-h-dvh place-items-center bg-background">
+			<LoadingLine />
+		</main>
+	);
+}
+
 /**
  * The dashboard: who is looking first. Nobody signed in sees the sign-in
  * screen (with why the last sign-in failed, if it did); a session that ends
@@ -145,7 +154,8 @@ export function App() {
 	};
 
 	if (me === undefined) {
-		if (!bootError) return null;
+		// Until GitHive says who's reading, "Loading…" after a moment, rather than an empty page.
+		if (!bootError) return <LoadingPage />;
 		return (
 			<EmptyPage role="alert" title="GitHive didn't answer">
 				<p>{bootError} Reload the page to try again.</p>
@@ -201,13 +211,7 @@ function SignedOut({
 	// Following the card's link to a hive leaves the sign-in screen, even on that repo's page already.
 	const seeHive = () => setAskedAt(null);
 	const signIn = (notice = options.notice) => (
-		<Lazy
-			fallback={
-				<main id="main" className="grid min-h-dvh place-items-center bg-background">
-					<LoadingLine />
-				</main>
-			}
-		>
+		<Lazy fallback={<LoadingPage />}>
 			<SignIn {...options} notice={notice} hash={hash} onSeeHive={seeHive} />
 		</Lazy>
 	);

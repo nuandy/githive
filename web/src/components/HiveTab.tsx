@@ -158,6 +158,7 @@ export function Hive(props: HiveProps) {
 	const update = (patch: HiveQuery) => (props.onQuery ?? setOwnQuery)(tidy({ ...query, ...patch }));
 	const auto = useRef<number | null>(null);
 	const logIn = !props.showsFeed || events !== undefined || props.eventsError !== undefined;
+	const landingIn = !props.showsLanding || landing !== undefined || props.landingError !== undefined;
 	if (auto.current === null && logIn && goals.length) auto.current = chooseRange(goals, now);
 	const range = query.window ?? auto.current ?? DEFAULT_RANGE;
 	// Where the goals' clock starts: the range back from now, and further when quiet stretches fold.
@@ -196,6 +197,7 @@ export function Hive(props: HiveProps) {
 				now={now}
 				{...(props.writes ? { writes: true } : {})}
 				{...(props.origin ? { origin: props.origin } : {})}
+				{...(logIn && landingIn ? {} : { loading: true })}
 			/>
 			{/* The hive beside the goals; on narrow screens, under them. */}
 			<div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start gap-5 to-1100:grid-cols-[minmax(0,1fr)]">
