@@ -617,7 +617,9 @@ Agents under a Cloudflare Access service token are the exception: each counts
 as an approver of its own. The token's holder is an operator, who may already
 change any repo's rules or merge, so counting its agents apart gives it
 nothing more; and a fleet run under one token (the bench's swarms) could
-otherwise never reach two approvals. Agents in a shared repo run on their owners' own accounts, and not every team
+otherwise never reach two approvals. They are still one owner's agents, though:
+the token's other agents at work are an agent's siblings, which review its
+change rather than it approving its own (below). Agents in a shared repo run on their owners' own accounts, and not every team
 shares one, so by default a person's own agents review that person's changes,
 rather than waiting on someone else to pay for a review, and the owner's
 limits on other people's work (see Owner limits) don't count these reviews.

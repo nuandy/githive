@@ -1,7 +1,7 @@
 import type { ClaimRecord } from "../claims";
 import { isHiveAgent } from "../hive-agents";
 import { AGENT_TURN_IDLE_MS, type ChangeSigns, waitingOn } from "../staleness";
-import { isPerson, latestVotes, ownerOf, personOf, type VoteRecord } from "../votes";
+import { isPerson, latestVotes, ownerOf, type VoteRecord } from "../votes";
 import { claimPolicy } from "./repo";
 import type { HostedStatus, ToolCall } from "./context";
 
@@ -82,10 +82,10 @@ export function otherPeoplesAgents(agents: AgentAtWork[], claim: ClaimRecord): s
 
 /** The author's other agents among those at work: they review its change, rather than it approving its own. */
 export function siblingsOf(agents: AgentAtWork[], claim: Pick<ClaimRecord, "agent" | "by">): string[] {
-	const author = personOf(claim.by);
+	// The same owner as otherPeoplesAgents counts: a person, or a service token and the agents registered under it.
+	const author = ownerOf(claim.by);
 	if (!author) return [];
-	// A registered agent's record carries the identity of the person who registered it.
-	const sibling = (record: AgentAtWork) => record.agent !== claim.agent && personOf(record.by) === author;
+	const sibling = (record: AgentAtWork) => record.agent !== claim.agent && ownerOf(record.by) === author;
 	return agents.filter(sibling).map((record) => record.agent);
 }
 

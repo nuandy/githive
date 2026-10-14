@@ -130,6 +130,26 @@ describe("a change only a person can review", { timeout: 60_000 }, () => {
 		expect(status).toMatchObject({ approval: { approved: true, approvals: 1 } });
 	});
 
+	it("treats agents registered under one service token as siblings: they review each other, not themselves", async () => {
+		const key = await generateStampKey();
+		const stamper = (agent?: string) => makeStamper(key.privateKey, agent ? `service:ci/${agent}` : "service:ci");
+		const fleet = toolCalls(() => server, { identity: "service:ci", stamper });
+		await fleet.call("settings", { required: 1 });
+		await fleet.register("agent-1", "agent-2");
+		const claim = { change: "c1", agent: "agent-1", paths: ["src/c1/"], intent: "c1" };
+		await fleet.call("claim", claim, "agent-1");
+		const head = await pushChange(server.url, work, "agent-1", "c1", { "src/c1/x.js": "1\n" });
+		const status = () => fleet.call("status", { change: "c1", agent: "agent-1" }, "agent-1");
+		expect(await status()).not.toMatchObject({ reviewYourself: true });
+		const own = { commit: head, change: "c1", reviewer: "agent-1", role: "review", verdict: "approve" };
+		await expect(fleet.call("vote", { ...own, evidence: "ran it" }, "agent-1")).rejects.toThrow(
+			/c1 is your own change, and your owner's other agents work here too \(agent-2\)/,
+		);
+		const sibling = { ...own, reviewer: "agent-2", evidence: "ran it" };
+		expect(await fleet.call("vote", sibling, "agent-2")).toMatchObject({ ok: true });
+		expect(await status()).toMatchObject({ approval: { approved: true, approvals: 1 } });
+	});
+
 	it("by default has a lone agent review its own change in a fresh context, and counts its approval", async () => {
 		const key = await generateStampKey();
 		const stamper = (agent?: string) => makeStamper(key.privateKey, agent ? `person:alice/${agent}` : "person:alice");
