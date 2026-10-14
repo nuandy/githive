@@ -297,6 +297,12 @@ export class HostedAgent extends DurableObject<Env> {
 		return Math.max(Date.now(), began + AGENT_TURN_GAP_MS);
 	}
 
+	/** Writes the agent's account mid-turn, keeping a stop that arrived meanwhile. */
+	private async keep(state: HostedAgentState) {
+		const stopped = (await this.ctx.storage.get<HostedAgentState>("agent"))?.done;
+		await this.ctx.storage.put("agent", stopped ? { ...state, done: true } : state);
+	}
+
 	/** Sets the next turn for `at`, unless one is already set sooner. */
 	private async turnBy(at: number) {
 		const set = await this.ctx.storage.getAlarm();
@@ -428,6 +434,8 @@ export class HostedAgent extends DurableObject<Env> {
 		try {
 			await this.startBuilder(state.repo, piece);
 			state.change = piece;
+			// Kept at once: the rest of the turn may yet be cut short, and the builder works on regardless.
+			await this.keep(state);
 		} catch (err) {
 			// No builder means nobody would push to the claim: give it up, so the piece is free again.
 			console.error(`${state.name}: starting a builder on ${piece} failed`, statusOf(err).message);

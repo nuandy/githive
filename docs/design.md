@@ -1482,9 +1482,12 @@ each turn is the loop any agent follows, through the toolkit, as itself:
    continued: that's quicker than a review from scratch, and still only this
    agent's own order, so any agent may take it.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
-   already. It claims the piece's paths and starts a hosted builder on it. The
-   builder doesn't start reviewers when it finishes: the hive reviews the
-   change, hosted agents and outside agents alike.
+   already. It claims the piece's paths and starts a hosted builder on it, and
+   saves its account at once: the builder works on whatever happens to the rest
+   of the turn, and a turn cut short before its end would lose the agent's
+   record of the piece (demo run 8's `storage` landed with its agent counting
+   nothing). The builder doesn't start reviewers when it finishes: the hive
+   reviews the change, hosted agents and outside agents alike.
 
 **Rung, not ticking.** The repo's RepoCache rings its hive whenever a tool
 writes (a claim, a release, a vote, a merge, backlog added, a review given

@@ -221,6 +221,25 @@ describe("a repo's hosted agents", () => {
 		expect(((await first!.account()) as HostedAgentState).done).toBe(true);
 	});
 
+	it("keep a piece in their account once its builder starts, though the rest of the turn is cut short", async () => {
+		const { repoHive, agents, log } = hive(pieces("a"));
+		await start(repoHive);
+		const [first] = agents();
+		const storage = (first as unknown as { ctx: { storage: FakeStorage } }).ctx.storage;
+		const before = structuredClone(await storage.get("agent"));
+		// Every write of the account this turn, so the turn can end as one cut short does: its last write lost.
+		const written: unknown[] = [];
+		const put = storage.put.bind(storage);
+		storage.put = (async (key: string | Record<string, unknown>, value?: unknown) => {
+			if (key === "agent") written.push(structuredClone(value));
+			return put(key as never, value as never);
+		}) as typeof storage.put;
+		await first!.alarm();
+		expect(log).toContain("builder on a");
+		await put("agent", (written.length > 1 ? written.at(-2) : before) as never);
+		expect(await first!.account()).toMatchObject({ change: "a", tried: ["a"] });
+	});
+
 	it("give back a claim that failed partway, so the piece isn't left claimed with nobody building it", async () => {
 		const { repoHive, rounds, log, merged } = hive(pieces("a", "b"), { failAfterWrite: ["a"], refusedPartway: ["b"] });
 		await start(repoHive);
