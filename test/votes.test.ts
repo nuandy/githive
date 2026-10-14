@@ -89,7 +89,7 @@ describe("votes", () => {
 	});
 });
 
-describe("votes count per verified identity, never the author's", () => {
+describe("votes count per verified identity", () => {
 	// No veto roles here: these are about whose approvals count.
 	const policy = { required: 2, vetoes: [] as string[] };
 	const cast = (
@@ -109,7 +109,7 @@ describe("votes count per verified identity, never the author's", () => {
 		expect(approval(votes, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
 	});
 
-	it("doesn't count the author's own approval, by verified identity or, unsigned, by name", () => {
+	it("counts the author's own approval once, unless review must be independent", () => {
 		const author = { agent: "agent-a", by: "service:shared/agent-a" };
 		const votes = {
 			votes: [
@@ -118,7 +118,10 @@ describe("votes count per verified identity, never the author's", () => {
 				cast("rev-2", "service:shared/rev-2"),
 			],
 		};
-		expect(approval(votes, head, policy, author)).toEqual({
+		// Its verified identity and its unsigned name are two votes, one per identity as ever.
+		expect(approval(votes, head, policy, author)).toMatchObject({ approved: true, approvals: 3 });
+		// Independent review leaves out the author, by verified identity or, unsigned, by name.
+		expect(approval(votes, head, { ...policy, independent: true }, author)).toEqual({
 			approved: false,
 			approvals: 1,
 			vetoedBy: [],
@@ -158,7 +161,24 @@ describe("a person and their agents count as one", () => {
 	// A change by one of Alice's agents, signed in to GitHive.
 	const author = { agent: "alice/a1", by: `${alice}/alice/a1` };
 
-	it("so one person's agents can't approve each other's changes, but the person can", () => {
+	it("so one person's agents approve each other's changes once between them, and a second needs someone else", () => {
+		const agents = [cast("alice/a2", `${alice}/alice/a2`), cast("alice/a3", `${alice}/alice/a3`)];
+		expect(approval({ votes: agents }, head, policy, author)).toMatchObject({ approved: true, approvals: 1 });
+		// The author agent's own approval is Alice's too, and adds nothing to her agents'.
+		const withOwn = [...agents, cast("alice/a1", `${alice}/alice/a1`)];
+		expect(approval({ votes: withOwn }, head, { ...policy, required: 2 }, author)).toMatchObject({
+			approved: false,
+			approvals: 1,
+		});
+		const withBob = [...withOwn, cast("bob/b1", `${bob}/bob/b1`)];
+		expect(approval({ votes: withBob }, head, { ...policy, required: 2 }, author)).toMatchObject({
+			approved: true,
+			approvals: 2,
+		});
+	});
+
+	it("but under independent review, one person's agents can't approve each other's changes, but the person can", () => {
+		const policy = { required: 1, vetoes: [] as string[], independent: true };
 		const agents = [
 			cast("alice/a2", `${alice}/alice/a2`),
 			cast("alice/a3", `${alice}/alice/a3`),
@@ -184,8 +204,10 @@ describe("a person and their agents count as one", () => {
 		});
 	});
 
-	it("and a person's own change (made as themselves) isn't theirs to approve", () => {
-		expect(approval({ votes: [cast("alice", alice)] }, head, policy, { agent: "alice", by: alice })).toMatchObject({
+	it("and under independent review a person's own change (made as themselves) isn't theirs to approve", () => {
+		const independent = { ...policy, independent: true };
+		const own = { agent: "alice", by: alice };
+		expect(approval({ votes: [cast("alice", alice)] }, head, independent, own)).toMatchObject({
 			approved: false,
 			approvals: 0,
 		});

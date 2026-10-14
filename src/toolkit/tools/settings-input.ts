@@ -12,7 +12,7 @@ import { fail } from "../../errors";
 export const GITHUB_FIELDS = ["github", "github_sync", "github_trust"] as const;
 
 /** The settings arguments that make up the review policy. */
-export const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
+export const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants", "independent"] as const;
 
 /** Parses branch_rules from settings: a pattern each, with the policy fields and checks it overrides. */
 export function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewPolicy>[] {
@@ -52,12 +52,16 @@ export function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	const required = typeof args.required === "number" ? args.required : base.required;
 	if (!Number.isInteger(required) || required < 0) fail(400, "required is a whole number of approvals, 0 for none");
 	const grants = args.grants !== undefined ? validGrants(args.grants) : base.grants;
+	if (args.independent !== undefined && typeof args.independent !== "boolean")
+		fail(400, "independent is true (approvals come from someone other than the author) or false");
+	const independent = typeof args.independent === "boolean" ? args.independent : base.independent;
 	return {
 		required,
 		vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : base.vetoes,
 		escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : base.escalate,
 		// Without grants, every role keeps its default holders.
 		...(grants && Object.keys(grants).length ? { grants } : {}),
+		...(independent ? { independent: true } : {}),
 	};
 }
 

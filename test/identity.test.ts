@@ -232,18 +232,18 @@ describe("GitHive's hosted agents", () => {
 		});
 	});
 
-	it("say, when they won't review a change, how to reach a person instead", async () => {
+	it("say, when they won't review a change, who else can: another agent, its own, or a person", async () => {
 		const nextOf = (ctx: ToolContext, args: Record<string, unknown>) =>
 			callTool("request_review", { repo: "project", ...args }, ctx).then(
 				() => undefined,
 				(err) => statusOf(err).next,
 			);
 		expect(await nextOf(listed(false), { change: "a-1" })).toMatch(
-			/^ask a person to review it: `ask_human` with change a-1 and why, which puts it in their Inbox/,
+			/review it yourself in a fresh context; or ask a person: `ask_human` with change a-1 and why puts it in/,
 		);
 		// Where no hosted reviewer can run at all, the same.
 		const none = { ...listed(true), requestReview: undefined };
 		await call(listed(true), "claim", { ...claimA, agent: "ada/builder" });
-		expect(await nextOf(none, { change: "a-1" })).toMatch(/^ask a person to review it/);
+		expect(await nextOf(none, { change: "a-1" })).toMatch(/^wait for another agent's review/);
 	});
 });

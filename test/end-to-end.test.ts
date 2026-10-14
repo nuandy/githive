@@ -165,10 +165,7 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 		});
 		expect(outcome).toEqual({
 			ok: false,
-			reasons: [
-				"src/elsewhere.txt is outside a-1's claim",
-				`${aHead} has 1 of 2 approvals from reviewers other than its author`,
-			],
+			reasons: ["src/elsewhere.txt is outside a-1's claim", `${aHead} has 1 of 2 approvals`],
 			why: ["outside", "approvals"],
 			outsideClaim: ["src/elsewhere.txt"],
 		});

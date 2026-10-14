@@ -7,6 +7,8 @@ import type { Summaries } from "./lib/repos";
 /** How changes merge, as the settings tool takes it. Fields left out stay as they are. */
 export interface SettingsInput {
 	required?: number;
+	/** Approvals must come from someone other than the change's author and their agents. */
+	independent?: boolean;
 	vetoes?: string[];
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	grants?: Record<string, string[]>;
@@ -95,6 +97,8 @@ export interface RepoSnapshot {
 	 */
 	policy: {
 		required: number;
+		/** Approvals must come from someone other than the change's author; by default their own agents may approve. */
+		independent?: boolean;
 		vetoes: string[];
 		escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 		grants?: Record<string, string[]>;

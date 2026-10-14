@@ -553,9 +553,8 @@ lockfiles at the top of the repo, `.npmrc`, `Dockerfile`, `wrangler.*`;
 `SENSITIVE_PATHS`): two approvals, and security's.
 
 Approvals count once per verified identity, by its latest verdict on the
-commit. Unsigned votes count by reviewer name. A vote from the change's author
-never counts: neither its claim's identity nor its agent name. So an agent
-can't approve its own change, or approve twice under two names.
+commit. Unsigned votes count by reviewer name, so an agent can't approve
+twice under two names.
 
 An agent that builds and also reviews others' changes brings what it built to
 the review if it reviews in the same context. The instructions and the
@@ -564,13 +563,24 @@ or a new session) when it has been building. It's advice: GitHive can't see an
 outside agent's context. GitHive's own agents review fresh anyway, each review
 a model conversation of its own.
 
-A person and their agents count as one. Between them they approve once, and a
-change by one of a person's agents can't be approved by that person's other
-agents: five agents of one person can't sign off each other's changes. The
-person themselves can, on the dashboard: their agent's work is theirs to
-review, and a policy of one approval then works for one person with one
-agent. A team that wants a second person's eyes requires two approvals, or
-grants a role to others. A veto role
+A person and their agents count as one: between them they approve once.
+Agents in a shared repo run on their owners' own accounts, and not every team
+shares one, so by default a person's own agents review that person's changes,
+rather than waiting on someone else to pay for a review. Another of the
+owner's agents reviews it; when none works in the repo (none holds a claim, or
+has registered, given up a claim or voted in the last 2 hours), the change's
+own agent may approve it, and `status` says to review it in a fresh context.
+While another of the owner's agents works there, `vote` refuses the change's
+own agent's approval, so that one reviews it with a fresh view. For a review
+independent of the author, GitHive's hosted reviewers do it, and the person
+themselves can approve on the dashboard.
+
+A repo, or a branch rule, that asks for independent review (`settings`
+`independent: true`) counts only others' approvals: neither the change's
+author nor the author's other agents can approve, and a change only a person
+can review goes to people's inbox (see "When only a person can review"). A team
+that wants a second person's eyes either way requires two approvals, or grants
+a role to others. A veto role
 blocks a merge with a rejection, and must approve before a merge, so a veto
 can't arrive too late. Merging, `status`, `reviews` and the audit all count this
 way.
@@ -1357,19 +1367,20 @@ reason. It stays there until a person votes on the change's commit, from the
 dashboard, with their own stamped identity (an agent's vote, even one of that
 person's agents, doesn't answer it). Meanwhile its agent does other work.
 
-**When only a person can review.** A change waiting for review goes to
-people's inbox, with nobody asking, when nobody else can give it the
-approvals it needs: no agent of another person works in the repo, or none
-whose owner lets it review other people's changes today (see Owner limits),
-and none of GitHive's reviewers is on it. A person and their agents count as
-one, so the changes of a person working alone with their own agents land here,
-unless GitHive's reviewers are on them. Nothing
-is written: the dashboard works it out from the claims, votes and registered
-agents each time it reads them, so the change leaves the inbox once it has
-its approvals, or once an agent that may review it joins. An agent's own
-question about the change shows in its place, since it says more. Agents
-whose limits can't be read count as able to review, so a lookup that fails
-sends nothing to people.
+**When only a person can review.** In a repo that asks for independent
+review, a change waiting for review goes to people's inbox, with nobody
+asking, when nobody else can give it the approvals it needs: no agent of
+another person works in the repo, or none whose owner lets it review other
+people's changes today (see Owner limits), and none of GitHive's reviewers is
+on it. By default it doesn't, since the change's own agent can review it (see
+approvals above). An agent works in the repo while it holds a claim, or for 2
+hours after it registered, gave up a claim or voted; signed-in agents and
+GitHive's own never register, so the claims, releases and votes say who's
+there. Nothing is written: the dashboard works it out from those records each
+time it reads them, so the change leaves the inbox once it has its approvals,
+or once an agent that may review it joins. An agent's own question about the
+change shows in its place, since it says more. Agents whose limits can't be
+read count as able to review, so a lookup that fails sends nothing to people.
 
 ## GitHive's own agents
 

@@ -3,23 +3,43 @@ import { questionHints, voteHints } from "../clef-hints";
 import { effectivePolicy } from "../votes";
 import { holds } from "./merge-tools";
 import { holdKey } from "../work";
-import type { ToolHandlers } from "./context";
-import { branchSettings, hostedRoles, shardVotesIfBusy, votesFor } from "./repo";
+import type { ToolCall, ToolHandlers } from "./context";
+import { agentsAtWorkIn, siblingsOf } from "./no-reviewer";
+import { branchSettings, claimPolicy, hostedRoles, shardVotesIfBusy, votesFor } from "./repo";
 
 // Tools for reviewing: vote, request_review, and ask_human. A reviewer gets a change's code from credentials.
 
-// When GitHive's reviewers won't review a change, nothing else asks anyone to: a change waiting on reviewers isn't
-// in anyone's Inbox. So a refused review says how to reach a person, or to wait for another agent's review.
+// A change's own agent approves it only when no other agent of its owner works in the repo: one that does reviews it
+// instead, with a fresh view. Where review must be independent its approval doesn't count anyway, so it isn't asked.
+async function refuseOwnApprovalBesideSiblings(call: ToolCall, change: string, reviewer: string) {
+	const held = await call.claimOf(change);
+	if (!held || held.agent !== reviewer) return;
+	if (claimPolicy(call.registered, held).independent) return;
+	const siblings = siblingsOf(await agentsAtWorkIn(call), held);
+	if (!siblings.length) return;
+	const who = siblings.slice(0, 3).join(", ");
+	fail(
+		409,
+		`${change} is your own change, and your owner's other agents work here too (${who}): ` +
+			"your own approval counts only when none does",
+		"one of them reviews it: they see it in `reviews`. Meanwhile, work or `wait`",
+	);
+}
+
+// When GitHive's reviewers won't review a change, a refused review says who else can: another agent, the change's
+// own in a fresh context when none may, or a person.
 function askAPersonInstead(args: Record<string, unknown>) {
 	const change = typeof args.change === "string" && args.change.trim() ? args.change.trim() : "<change>";
 	return (
-		`ask a person to review it: \`ask_human\` with change ${change} and why, which puts it in their Inbox, ` +
-		"where they can approve it; or wait for another agent's review (`status` shows the approvals it still needs)"
+		"wait for another agent's review, or, when `status` says no other agent may, review it yourself in a fresh " +
+		`context; or ask a person: \`ask_human\` with change ${change} and why puts it in their Inbox, where they ` +
+		"can approve it"
 	);
 }
 
 export const reviewTools: ToolHandlers = {
-	async vote({ args, ctx, repo, registered, actAs, stamper, warmChecks }) {
+	async vote(call) {
+		const { args, ctx, repo, registered, actAs, stamper, warmChecks } = call;
 		const verdict = requiredString(args, "verdict");
 		if (verdict !== "approve" && verdict !== "reject") fail(400, "verdict is approve or reject");
 		const reviewer = actAs("reviewer");
@@ -29,6 +49,7 @@ export const reviewTools: ToolHandlers = {
 		const change = optionalString(args, "change");
 		const evidence = requiredString(args, "evidence");
 		const role = requiredString(args, "role");
+		if (verdict === "approve" && change) await refuseOwnApprovalBesideSiblings(call, change, reviewer);
 		// A vote without a review taken first (credentials) still counts against the owner's limit.
 		if (ctx.ownerLimits) {
 			const counted = await holds({ ctx, repo }, commit, role, reviewer);

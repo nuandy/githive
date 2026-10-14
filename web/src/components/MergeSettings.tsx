@@ -198,8 +198,25 @@ function ReviewPolicy({ draft, update, busy }: DraftSectionProps) {
 						disabled={busy}
 					/>
 					<SettingHint>
-						From reviewers other than the change's author. 0 merges a change on its checks alone (a role that can block
-						must still approve).
+						A person and their agents approve once between them. 0 merges a change on its checks alone (a role that can
+						block must still approve).
+					</SettingHint>
+				</SettingField>
+				<SettingField>
+					<Label className="flex items-center gap-2 font-normal">
+						{/* The browser's own margins about a checkbox. */}
+						<input
+							type="checkbox"
+							className="mt-0.75 mr-0.75 mb-0.75 ml-1"
+							checked={draft.independent}
+							onChange={(event) => update({ independent: event.target.checked })}
+							disabled={busy}
+						/>{" "}
+						Independent review: approvals come from someone other than the change's author
+					</Label>
+					<SettingHint>
+						Off, a person's agents may approve each other's changes, and a lone agent its own, reviewed in a fresh
+						context. For an independent review either way, GitHive's reviewers can review it.
 					</SettingHint>
 				</SettingField>
 				<SettingField>

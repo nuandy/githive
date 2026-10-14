@@ -139,9 +139,12 @@ describe("the audit", () => {
 		]);
 	});
 
-	it("reports a merge whose approvals came from its author, or from one identity under two names", async () => {
+	it("reports a merge whose approvals came from its author under independent review, or from one identity twice", async () => {
 		const self = { tip: "v3", state: { votes: [approve("agent-a", "tests"), approve("rev-2", "security")] } };
-		expect(await audit({ ...records([merge({ votesTip: "v3" })]), votes: [self] })).toEqual([
+		// Its author's own approval counts, unless review must be independent.
+		expect(await audit({ ...records([merge({ votesTip: "v3" })]), votes: [self] })).toEqual([]);
+		const independent = { ...records([merge({ votesTip: "v3" })]), policy: { ...policy, independent: true } };
+		expect(await audit({ ...independent, votes: [self] })).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 1 of 2 approvals at v3" },
 		]);
 		const twice = {

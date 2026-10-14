@@ -281,13 +281,10 @@ function approvalRefusals(
 	const outcome = approval({ votes: counted }, head, input.policy, own, files);
 	const { required } = effectivePolicy(input.policy, files);
 	if (outcome.vetoedBy.length) refuse(refusal, "changes-asked", `${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-	else if (outcome.approvals < required)
-		refuse(
-			refusal,
-			"approvals",
-			`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`,
-		);
-	else if (outcome.awaiting.length)
+	else if (outcome.approvals < required) {
+		const from = input.policy.independent ? " from reviewers other than its author" : "";
+		refuse(refusal, "approvals", `${head} has ${outcome.approvals} of ${required} approvals${from}`);
+	} else if (outcome.awaiting.length)
 		refuse(refusal, "approvals", `${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
 }
 

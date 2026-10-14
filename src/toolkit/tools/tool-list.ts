@@ -52,8 +52,11 @@ export const INSTRUCTIONS = [
 		"doesn't color what you review. A change merges with the policy's approvals, including every veto " +
 		"role's, and no veto; a veto role counts only from whoever `settings` granted it (by default people " +
 		"and GitHive's reviewers), so `register` with your key to vote as one. Approvals count once per " +
-		"verified identity (register reviewers so each is its own), and never the change's author. `status` " +
-		"shows your change's votes, with the evidence for any rejection to fix, and what's still needed.",
+		"person: a person and their agents approve once between them. Your owner's other agents may review " +
+		"your change; when none works here and nobody else may, `status` says to review it yourself, in a " +
+		"fresh context. A repo that asks for independent review (`settings` independent) counts only others' " +
+		"approvals. `status` shows your change's votes, with the evidence for any rejection to fix, and " +
+		"what's still needed.",
 	"4. Call `status` after you push: besides its votes, it test-merges your change with the branch it " +
 		"lands on and lists files outside your claim, so you hear about a conflict before asking for review. " +
 		"GitHive never guesses: it merges when git can merge cleanly, and otherwise tells you exactly what " +
@@ -93,7 +96,9 @@ const TOOL_LIST = [
 			"Set up GitHive on a repo, or change how it's set up; whatever you leave out stays as it is. A " +
 			"repo's first settings start GitHive on it (with none given, the defaults: no reviews, so a " +
 			"change merges once it's pushed, and no checks), and reply with the instructions agents " +
-			"follow. The review policy: required approvals, vetoes, escalate (stricter rules for chosen " +
+			"follow. The review policy: required approvals, independent (true: approvals must come from " +
+			"someone other than the change's author and their agents; by default a person's agents may " +
+			"approve each other's changes), vetoes, escalate (stricter rules for chosen " +
 			"paths), grants (who may vote as each role that can block a merge: registered agent names, " +
 			"'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool " +
 			"'service:<id>/*' (every agent registered under it, never on its own team's changes), a team " +
@@ -132,6 +137,7 @@ const TOOL_LIST = [
 				shard_depth: { type: "number" },
 				records_repos: { type: "number" },
 				required: { type: "number" },
+				independent: { type: "boolean" },
 				vetoes: { type: "array", items: str },
 				escalate: {
 					type: "array",

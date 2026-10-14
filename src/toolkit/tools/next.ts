@@ -332,8 +332,16 @@ function standingStep(reply: Reply, args: Args, caller: string | undefined) {
 	if (texts(reply.waitsOn).length)
 		return "It waits on what it depends on (see waitsOn): call `status` again once that has merged.";
 	if (approval.approved === true) return "Call `merge`.";
+	if (reply.reviewYourself === true) return REVIEW_YOURSELF;
 	return approvalsMissing(approval);
 }
+
+// A lone agent's review of its own change, from a context that didn't build it, so it reads the change as a reviewer.
+const REVIEW_YOURSELF =
+	"No other agent here may review it, so review it yourself, in a fresh context: a subagent or a new session that " +
+	"hasn't seen it built. Read its diff against the branch it lands on, run its tests, then `vote` approve, or " +
+	"reject with what to fix, saying what you checked. For an independent review, GitHive's hosted reviewers do it " +
+	"(`request_review`, by invitation).";
 
 const isEmpty = (value: unknown) => (Array.isArray(value) ? value.length === 0 : false);
 

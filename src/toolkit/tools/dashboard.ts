@@ -415,6 +415,8 @@ function limitsOnce(ctx: ToolContext, atWork: AgentAtWork[]) {
 	};
 }
 
+const independence = (policy: ReviewPolicy) => (policy.independent ? { independent: true } : {});
+
 /** The batch being checked on each of these branches, read once a branch; null where it can't be read. */
 async function landingViews(ctx: ToolContext, repo: string, branches: string[]) {
 	const views = new Map<string, LandingView | null>();
@@ -450,18 +452,21 @@ async function claimSnapshot(
 	const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
 	// Where it stands, worked out as status does, from the votes changeState already counted. Advice: left out if it
 	// can't be.
+	const policy = branchSettings(state, claim.into).policy;
 	const signs = await Promise.resolve()
-		.then(() => {
-			const policy = branchSettings(state, claim.into).policy;
-			return changeSigns({ claim, head, counted, record: votes, landing, policy });
-		})
+		.then(() => changeSigns({ claim, head, counted, record: votes, landing, policy }))
 		.catch((err: unknown) => {
 			console.error(`working out where ${claim.change} stands for the dashboard failed`, String(err));
 			return undefined;
 		});
 	const { atWork, notReviewing } = reviewers;
 	const onlyAPerson = signs
-		? await onlyAPersonCanReview(claim, { signs, approval, hosted, trusted }, atWork, notReviewing)
+		? await onlyAPersonCanReview(
+				claim,
+				{ signs, approval, hosted, trusted, ...independence(policy) },
+				atWork,
+				notReviewing,
+			)
 		: null;
 	const attention = attentionFor(flag, hosted, claim, onlyAPerson);
 	// Dependencies not yet merged into the branch this change lands on.

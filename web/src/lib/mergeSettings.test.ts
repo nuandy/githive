@@ -13,6 +13,7 @@ describe("the merge settings form", () => {
 		expect(settingsFrom(draftFrom(policy, ["npm ci", "npm test"], ["*.md", "docs/"]))).toEqual({
 			settings: {
 				required: 1,
+				independent: false,
 				vetoes: ["security"],
 				escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }],
 				grants: { security: ["@acme/security", "githive"] },
@@ -65,5 +66,12 @@ describe("the merge settings form", () => {
 		const { DEFAULT_SKIP_CHECKS } = await import("../../../src/toolkit/check-scope");
 		expect(settingsFrom(draftFrom(policy, ["npm test"])).settings?.skip_checks).toEqual(DEFAULT_SKIP_CHECKS);
 		expect(settingsFrom({ ...draftFrom(policy, ["npm test"]), skipChecks: "" }).settings?.skip_checks).toEqual([]);
+	});
+
+	it("keeps independent review on, and sends it off once unticked", () => {
+		const draft = draftFrom({ ...policy, independent: true }, []);
+		expect(draft.independent).toBe(true);
+		expect(settingsFrom(draft).settings).toMatchObject({ independent: true });
+		expect(settingsFrom({ ...draft, independent: false }).settings).toMatchObject({ independent: false });
 	});
 });

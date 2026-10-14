@@ -154,6 +154,11 @@ export interface ReviewPolicy {
 	 * ("service:<id>/*"), an org team ("@<org>/<team>") or "githive". Unlisted roles use DEFAULT_GRANT.
 	 */
 	grants?: Record<string, string[]>;
+	/**
+	 * Whether approvals must come from someone other than the change's author: another person, their agents, or
+	 * GitHive's reviewers. Off by default, so a person's agents may approve each other's changes.
+	 */
+	independent?: boolean;
 }
 
 /** Who holds a veto role the policy doesn't grant: people, and GitHive's own reviewers. */
@@ -264,9 +269,10 @@ export interface Author {
 }
 
 /**
- * Whether `commit` may merge under `policy`. Each identity counts once by its latest verdict, a person and their
- * agents approve once between them, and neither the author nor the author's sibling agents can approve. Every veto
- * role must approve through someone granted it (see holdsRole), so a veto can always stop a merge.
+ * Whether `commit` may merge under `policy`. Each identity counts once by its latest verdict, and a person and their
+ * agents approve once between them. The author's own agents may approve, unless the policy asks for independent
+ * review: then neither the author nor the author's sibling agents can. Every veto role must approve through someone
+ * granted it (see holdsRole), so a veto can always stop a merge.
  */
 export function approval(
 	state: Pick<Votes, "votes"> | null | undefined,
@@ -287,7 +293,8 @@ export function approval(
 		((!!vote.by && vote.by === author.by) ||
 			vote.reviewer === author.agent ||
 			(!!authorPerson && personOf(vote.by) === authorPerson && !isPerson(vote.by)));
-	const approving = verdicts.filter((vote) => vote.verdict === "approve" && !isAuthor(vote));
+	const counts = (vote: VoteRecord) => !base.independent || !isAuthor(vote);
+	const approving = verdicts.filter((vote) => vote.verdict === "approve" && counts(vote));
 	// One approval per person, however many of their agents approve.
 	const approvals = new Set(approving.map((vote) => personOf(vote.by) ?? vote.by ?? `name:${vote.reviewer}`)).size;
 	const asRole = (vote: VoteRecord) => policy.vetoes.includes(vote.role) && holdsRole(base, vote.role, vote, author);

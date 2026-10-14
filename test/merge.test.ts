@@ -6,7 +6,7 @@ import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/toolkit/claim-store";
 import { claim, startRepo, type Registry } from "../src/toolkit/claims";
 import { type CheckRunner, mergeChange } from "../src/toolkit/merge";
-import { vote, type Votes } from "../src/toolkit/votes";
+import { type ReviewPolicy, vote, type Votes } from "../src/toolkit/votes";
 import { voteStore } from "../src/toolkit/vote-store";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -22,7 +22,7 @@ let work: string;
 const remote = () => ({ url: server.url, token: "unused" });
 const claims = () => new GitCasLog<Registry>(async () => remote(), "t1", "refs/notes/githive-claims/t1");
 const votes = () => new GitCasLog<Votes>(async () => remote(), "t1", "refs/notes/githive-votes/t1");
-const policy = { required: 1, vetoes: [] };
+const policy: ReviewPolicy = { required: 1, vetoes: [] };
 const passing: CheckRunner = vi.fn(async () => ({
 	passed: true,
 	results: [{ command: "npm test", exitCode: 0, output: "ok" }],
@@ -36,14 +36,14 @@ async function readyChange(change: string, files: Record<string, string>) {
 	return head;
 }
 
-const merge = (change: string, runChecks: CheckRunner = passing) =>
+const merge = (change: string, runChecks: CheckRunner = passing, reviewPolicy: ReviewPolicy = policy) =>
 	mergeChange({
 		remote: remote(),
 		batchGit: memoryBatchGit(remote()),
 		branch: "main",
 		store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }),
 		votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
-		policy,
+		policy: reviewPolicy,
 		verify: ["npm test"],
 		runChecks,
 		change,
@@ -103,7 +103,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
 
-	it("refuses a change approved only by its own author", async () => {
+	it("lands a change its own author approved, unless review must be independent", async () => {
 		await claim(claims(), { change: "a-1", agent: "agent-a-1", paths: ["src/a.txt"], intent: "a" });
 		const head = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
 		await vote(votes(), {
@@ -113,11 +113,12 @@ describe("merge", { timeout: 60_000 }, () => {
 			verdict: "approve",
 			evidence: "I checked my own work",
 		});
-		expect(await merge("a-1")).toEqual({
+		expect(await merge("a-1", passing, { ...policy, independent: true })).toEqual({
 			ok: false,
 			reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`],
 			why: ["approvals"],
 		});
+		expect(await merge("a-1")).toMatchObject({ ok: true });
 	});
 
 	it("runs the checks on main plus the change, and refuses to merge when they fail twice", async () => {

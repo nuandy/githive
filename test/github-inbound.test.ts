@@ -221,7 +221,7 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		const merge = { repo: "p", change, agent: GITHUB_AGENT };
 		expect(await callTool("merge", merge, githubAgent())).toMatchObject({
 			ok: false,
-			reasons: [expect.stringContaining("approvals from reviewers")],
+			reasons: [expect.stringMatching(/has 0 of \d+ approvals$/)],
 		});
 		expect(await call("audit", {})).toMatchObject({ open: 0 });
 	});
@@ -600,7 +600,7 @@ describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, (
 	};
 	const mergeAs = (change: string, agent: string, as: ToolContext) =>
 		callTool("merge", { repo: "p", change, agent }, as) as Promise<Record<string, unknown>>;
-	const needsVotes = { ok: false, reasons: [expect.stringContaining("approvals from reviewers")] };
+	const needsVotes = { ok: false, reasons: [expect.stringMatching(/has 0 of \d+ approvals$/)] };
 
 	/** GitHub's commit pushed there and imported by the job, which stops before it claims. */
 	async function imported() {
@@ -653,7 +653,7 @@ describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, (
 		expect(await callTool("claim", claim, job)).toMatchObject({ ok: true });
 		expect(await mergeAs(older, GITHUB_AGENT, job)).toMatchObject({
 			ok: false,
-			reasons: expect.arrayContaining([expect.stringContaining("approvals from reviewers")]),
+			reasons: expect.arrayContaining([expect.stringMatching(/has 0 of \d+ approvals$/)]),
 		});
 	});
 

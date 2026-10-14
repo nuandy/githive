@@ -13,6 +13,8 @@ export const ROLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** The form's fields: lists as comma- or line-separated text. */
 export interface MergeDraft {
 	required: string;
+	/** Approvals must come from someone other than the change's author and their agents. */
+	independent: boolean;
 	/** Roles that can block any change. */
 	vetoes: string;
 	/** Who may vote as each role that can block: blank for the default (people and GitHive's reviewers). */
@@ -43,6 +45,7 @@ export function draftFrom(policy: Policy, verify: string[], skipChecks: string[]
 	return {
 		skipChecks: skipChecks.join("\n"),
 		required: String(policy.required),
+		independent: !!policy.independent,
 		vetoes: policy.vetoes.join(", "),
 		grants: Object.fromEntries(
 			Object.entries(policy.grants ?? {}).map(([role, holders]) => [role, holders.join(", ")]),
@@ -108,5 +111,7 @@ export function settingsFrom(
 		if (!/^[A-Za-z0-9._/*@+-]+$/.test(pattern))
 			errors.push(`"${pattern}" isn't a pattern: a path or name, with * for any run of characters (*.md, docs/).`);
 	if (errors.length) return { errors: [...new Set(errors)] };
-	return { settings: { required: required!, vetoes, escalate, grants, verify, skip_checks: skipChecks }, errors: [] };
+	const { independent } = draft;
+	const settings = { required: required!, independent, vetoes, escalate, grants, verify, skip_checks: skipChecks };
+	return { settings, errors: [] };
 }

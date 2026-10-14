@@ -15,6 +15,7 @@ import { changeSigns, changeStatus } from "./change-state";
 import { changeList, workItemFrom } from "./claim-input";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
+import { onlyItsAgentCanReview } from "./no-reviewer";
 import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
 
 // Tools agents use to choose their work: reviews, backlog, add_work, and status.
@@ -128,6 +129,9 @@ export const workTools: ToolHandlers = {
 		if (failedHere && likelyEnvironment(failedHere)) reply.checksEnvironment = failedHere.environment;
 		if (waits.length) reply.waitsOn = waits;
 		Object.assign(reply, status);
+		// When nobody else may give it the approvals it needs, its agent reviews it itself, in a fresh context.
+		const alone = held && !landed ? await onlyItsAgentCanReview(call, held, status).catch(() => false) : false;
+		if (alone) reply.reviewYourself = true;
 		// How long the claim lasts if its agent goes quiet. Advice: a failed read leaves it out.
 		if (held && !landed)
 			reply.lease = await leaseOf(call, held, status.head, landing, votesFor).catch((err) => {

@@ -15,8 +15,9 @@ import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
-// A change waiting for review goes to people's inbox when no one but a person can review it: no other person's
-// agent works in the repo, or none is allowed to review. Nothing writes it there; the dashboard works it out.
+// Where review must be independent, a change waiting for review goes to people's inbox when no one but a person can
+// review it: no other person's agent works in the repo, or none is allowed to review. Nothing writes it there; the
+// dashboard works it out. By default its own agent reviews it instead, in a fresh context, as status says.
 
 let server: GitServer;
 let work: string;
@@ -45,7 +46,7 @@ describe("a change only a person can review", { timeout: 60_000 }, () => {
 		});
 		const alice = toolCalls(() => server, as("person:alice"));
 		const bob = toolCalls(() => server, as("person:bob"));
-		await alice.call("settings", { required: 1 });
+		await alice.call("settings", { required: 1, independent: true });
 		await alice.register("alice-agent", "alice-helper");
 		await alice.call(
 			"claim",
@@ -108,6 +109,46 @@ describe("a change only a person can review", { timeout: 60_000 }, () => {
 		expect(await attention({ notReviewing: barred })).toMatchObject({ reason: expect.stringMatching(NOT_ALLOWED) });
 	});
 
+	it("by default stays out of the inbox, and leaves the review to its owner's other agent", async () => {
+		const { alice, attention } = await aliceAndBob();
+		await alice.call("settings", { independent: false });
+		expect(await attention()).toBeUndefined();
+		const status = await alice.call("status", { change: "c1", agent: "alice-agent" }, "alice-agent");
+		expect(status).not.toHaveProperty("reviewYourself");
+	});
+
+	it("by default refuses an agent's approval of its own change while its owner's other agent works here", async () => {
+		const { alice, head } = await aliceAndBob();
+		await alice.call("settings", { independent: false });
+		const own = { commit: head, change: "c1", reviewer: "alice-agent", role: "review", verdict: "approve" };
+		await expect(alice.call("vote", { ...own, evidence: "ran it" }, "alice-agent")).rejects.toThrow(
+			/c1 is your own change, and your owner's other agents work here too \(alice-helper\)/,
+		);
+		const helper = { ...own, reviewer: "alice-helper", evidence: "ran it" };
+		expect(await alice.call("vote", helper, "alice-helper")).toMatchObject({ ok: true });
+		const status = await alice.call("status", { change: "c1", agent: "alice-agent" }, "alice-agent");
+		expect(status).toMatchObject({ approval: { approved: true, approvals: 1 } });
+	});
+
+	it("by default has a lone agent review its own change in a fresh context, and counts its approval", async () => {
+		const key = await generateStampKey();
+		const stamper = (agent?: string) => makeStamper(key.privateKey, agent ? `person:alice/${agent}` : "person:alice");
+		const alice = toolCalls(() => server, { identity: "person:alice", stamper });
+		await alice.call("settings", { required: 1 });
+		await alice.register("alice-agent");
+		const claim = { change: "c1", agent: "alice-agent", paths: ["src/c1/"], intent: "c1" };
+		await alice.call("claim", claim, "alice-agent");
+		const head = await pushChange(server.url, work, "alice-agent", "c1", { "src/c1/x.js": "1\n" });
+		const status = () => alice.call("status", { change: "c1", agent: "alice-agent" }, "alice-agent");
+		expect(await status()).toMatchObject({
+			reviewYourself: true,
+			next: expect.stringMatching(/^No other agent here may review it, so review it yourself, in a fresh context/),
+		});
+		const vote = { commit: head, change: "c1", reviewer: "alice-agent", role: "review", verdict: "approve" };
+		expect(await alice.call("vote", { ...vote, evidence: "ran its tests" }, "alice-agent")).toMatchObject({ ok: true });
+		expect(await status()).toMatchObject({ approval: { approved: true }, next: "Call `merge`." });
+	});
+
 	it("doesn't count before anything is pushed", async () => {
 		const alice = toolCalls(() => server, { identity: "person:alice" });
 		await alice.call("settings", { required: 1 });
@@ -134,17 +175,32 @@ describe("who else could review a change", () => {
 		expect(otherPeoplesAgents(agents, claim)).toEqual(["bob/claude", "githive-scout", "unsigned-agent"]);
 	});
 
-	it("are found in the registry, claims, releases and votes, once each, people left out", () => {
-		const found = agentsAtWork({
-			registered: [agent("keyed")],
-			claims: [agent("githive-scout", "service:githive-scout"), agent("bob/claude", "person:bob")],
-			released: [agent("githive-scout")],
-			votes: [{ reviewer: "githive-nurse", by: "service:githive-nurse" }, { reviewer: "person:alice" }],
-		});
+	it("are those holding claims, or registered, giving up a claim or voting lately, once each, people left out", () => {
+		const now = Date.parse("2026-10-14T12:00:00Z");
+		const lately = "2026-10-14T11:00:00Z";
+		const longAgo = "2026-10-13T12:00:00Z";
+		const found = agentsAtWork(
+			{
+				registered: [
+					{ agent: "keyed", at: lately },
+					{ agent: "keyed-long-ago", at: longAgo },
+				],
+				claims: [agent("githive-scout", "service:githive-scout"), agent("bob/claude", "person:bob")],
+				released: [
+					{ agent: "githive-scout", at: lately },
+					{ agent: "alice/old", by: "person:alice", at: longAgo },
+				],
+				votes: [
+					{ reviewer: "githive-nurse", by: "service:githive-nurse", at: lately },
+					{ reviewer: "person:alice", at: lately },
+				],
+			},
+			now,
+		);
 		expect(found.map(({ agent: name, by }) => [name, by])).toEqual([
-			["keyed", undefined],
 			["githive-scout", "service:githive-scout"],
 			["bob/claude", "person:bob"],
+			["keyed", undefined],
 			["githive-nurse", "service:githive-nurse"],
 		]);
 	});
@@ -157,9 +213,11 @@ describe("who else could review a change", () => {
 
 	it("isn't needed while a hosted reviewer is on it, or once it has its approvals", async () => {
 		const signs = { active: "", head: "abc", votes: [], approved: false, landing: false, asked: false };
-		const waiting: ReviewState = { signs, approval: { approvals: 0, required: 1 } };
+		const waiting: ReviewState = { signs, approval: { approvals: 0, required: 1 }, independent: true };
 		const none = async () => new Set<string>();
 		expect(await onlyAPersonCanReview(claim, waiting, [], none)).toMatch(NO_ONE);
+		// Unless review must be independent, the change's own agent can review it.
+		expect(await onlyAPersonCanReview(claim, { ...waiting, independent: false }, [], none)).toBeNull();
 		const reviewing = { ...waiting, hosted: { reviewers: [{ role: "review", status: "reviewing" }] } };
 		expect(await onlyAPersonCanReview(claim, reviewing, [], none)).toBeNull();
 		const failed = { ...waiting, hosted: { reviewers: [{ role: "review", status: "failed" }] } };

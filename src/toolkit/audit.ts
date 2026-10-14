@@ -486,8 +486,8 @@ async function trustedImport(
 	});
 }
 
-// The merged commit needs the policy's approvals from reviewers other than its author, every veto role's included,
-// and no veto, in the votes the merge cites.
+// The merged commit needs the policy's approvals, from reviewers other than its author when review must be
+// independent, every veto role's included, and no veto, in the votes the merge cites.
 function checkApproved(
 	records: AuditRecords,
 	policy: ReviewPolicy | undefined,
