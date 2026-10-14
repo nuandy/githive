@@ -32,6 +32,13 @@ const AUTHOR = { name: DEMO_AGENT, email: `${DEMO_AGENT}@agents.githive.app` };
 /** The context the demo's own calls run in. */
 export const demoContext = (env: Env) => toolContextFor(env, `service:${DEMO_AGENT}`, { hosted: true });
 
+/** The demo repo's full name (owner/name), or undefined when this GitHive has none. */
+export function demoRepoOf(env: Env) {
+	const [owner, name, ...rest] = (env.DEMO_REPO ?? "").split("/");
+	if (!owner || !name || rest.length) return undefined;
+	return `${owner}/${name}`;
+}
+
 /** The demo repo's owner and name, from DEMO_REPO. */
 export function demoRepoName(env: Env) {
 	const [owner, name, ...rest] = (env.DEMO_REPO ?? "").split("/");

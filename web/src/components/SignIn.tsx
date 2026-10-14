@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useChanged } from "../hooks/useChanged";
+import { href } from "../lib/routes";
 import { PROVIDER_NAMES, type Provider, signInHref } from "../lib/session";
 import { cn } from "../lib/utils";
 import { HiveMark } from "./HiveMark";
@@ -132,6 +133,7 @@ export function SignIn({
 	hash = "",
 	takesInviteCode = false,
 	invite: linkedInvite = "",
+	demoRepo,
 }: {
 	providers: Provider[] | undefined;
 	error?: string | null;
@@ -140,6 +142,8 @@ export function SignIn({
 	takesInviteCode?: boolean;
 	/** The invite code the link carried, filled in. */
 	invite?: string;
+	/** A public repo where GitHive's own agents work, readable signed out: the card links to it. */
+	demoRepo?: string;
 }) {
 	const [invite, setInvite] = useState(linkedInvite);
 	return (
@@ -163,6 +167,7 @@ export function SignIn({
 					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
 					recorded in Git.
 				</p>
+				{demoRepo ? <a href={href.repo(demoRepo)}>See a hive at work →</a> : null}
 				{error ? (
 					<p className="mt-1 mb-0 w-full rounded-md bg-warn-soft px-3 py-2.5 text-left text-warn" role="alert">
 						{error}

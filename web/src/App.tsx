@@ -113,6 +113,7 @@ export function App() {
 	const [bootError, setBootError] = useState<string | null>(null);
 	const [providers, setProviders] = useState<Provider[] | undefined>(undefined);
 	const [takesInviteCode, setTakesInviteCode] = useState(false);
+	const [demoRepo, setDemoRepo] = useState<string | undefined>(undefined);
 	// Read once, then dropped from the address bar so a reload doesn't show it again.
 	const [signinError] = useState(() => signinErrorMessage(signinErrorOf(window.location.search)));
 	useEffect(() => {
@@ -133,6 +134,7 @@ export function App() {
 			(answer) => {
 				setProviders(answer.providers);
 				setTakesInviteCode(!!answer.inviteCode);
+				setDemoRepo(answer.demoRepo);
 			},
 			() => setProviders([]),
 		);
@@ -152,7 +154,8 @@ export function App() {
 		);
 	}
 	if (me === null) {
-		const signIn = { providers, error: signinError, takesInviteCode, invite: inviteOf(window.location.search) };
+		const invite = inviteOf(window.location.search);
+		const signIn = { providers, error: signinError, takesInviteCode, invite, ...(demoRepo ? { demoRepo } : {}) };
 		return <SignedOut signIn={signIn} />;
 	}
 	return <Dashboard me={me} onSignOut={signOut} />;

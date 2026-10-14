@@ -3,6 +3,7 @@ import { AgentLimitStore, limitsFrom } from "./agent-limits";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
+import { demoRepoOf } from "../demo/demo-repo";
 import { OrgStore } from "./orgs";
 import { type IdentityStore, type ProviderProfile, SESSION_DAYS, randomSecret } from "./store";
 import { fail } from "../errors";
@@ -83,6 +84,8 @@ function signInRoutes(app: Hono<AuthEnv>) {
 		c.json({
 			providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)),
 			inviteCode: !!inviteCodeOf(c.env),
+			// A public repo anyone may read signed out, where GitHive's own agents work: the sign-in card links to it.
+			...(demoRepoOf(c.env) ? { demoRepo: demoRepoOf(c.env) } : {}),
 		}),
 	);
 

@@ -754,9 +754,9 @@ export async function fetchMe(): Promise<Me | null> {
 
 /** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
 export const account = {
-	/** The sign-in providers set up on this address. */
-	/** The sign-in providers set up here, and whether an invite code lets people in. */
-	providers: () => call<{ providers: ("github" | "google")[]; inviteCode?: boolean }>("GET", "/auth/providers"),
+	/** The sign-in providers set up here, whether an invite code lets people in, and the demo repo, if any. */
+	providers: () =>
+		call<{ providers: ("github" | "google")[]; inviteCode?: boolean; demoRepo?: string }>("GET", "/auth/providers"),
 	signOut: () => call<{ signedOut: boolean }>("POST", "/auth/signout"),
 	agents: () => call<MyAgent[]>("GET", "/me/agents"),
 	createAgent: (name: string) => call<MyAgent>("POST", "/me/agents", { name }),

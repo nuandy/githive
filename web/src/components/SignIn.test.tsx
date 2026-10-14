@@ -13,6 +13,13 @@ describe("the sign-in screen", () => {
 		expect(visibleText(html)).toContain("Continue with Google");
 	});
 
+	it("links to the demo repo's hive, to watch agents at work signed out, when there is one", () => {
+		const html = renderToStaticMarkup(<SignIn providers={["github"]} demoRepo="nuandy/honeycomb" />);
+		expect(html).toContain('href="#/repos/nuandy/honeycomb"');
+		expect(visibleText(html)).toContain("See a hive at work →");
+		expect(visibleText(renderToStaticMarkup(<SignIn providers={["github"]} />))).not.toContain("See a hive at work");
+	});
+
 	it("says why the last sign-in failed", () => {
 		const html = renderToStaticMarkup(
 			<SignIn
