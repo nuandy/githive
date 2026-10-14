@@ -83,7 +83,7 @@ export function UserMenu({
 					/>
 				) : (
 					<span
-						className="grid size-5.5 shrink-0 place-items-center rounded-full bg-primary pt-[3px] text-micro font-bold text-primary-foreground"
+						className="grid size-5.5 shrink-0 place-items-center rounded-full bg-primary text-micro font-bold text-primary-foreground"
 						aria-hidden="true"
 					>
 						{initial}
@@ -165,11 +165,10 @@ function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefin
 function PillCount({ children, quiet = false }: { children: number; quiet?: boolean }) {
 	const changed = useChanged(children);
 	return (
-		// Overpass's digits sit high in their line: a line 2px taller than the badge centers them in it.
 		<span
 			key={children}
 			className={cn(
-				"h-4.5 min-w-4.5 rounded-full px-1.5 text-center text-micro leading-5 font-bold",
+				"h-4.5 min-w-4.5 rounded-full px-1.5 text-center text-micro leading-4.5 font-bold",
 				quiet ? "bg-surface-3 text-foreground" : "bg-needs text-needs-foreground",
 				changed && "animate-bump",
 			)}

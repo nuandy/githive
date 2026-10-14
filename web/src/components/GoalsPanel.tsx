@@ -881,7 +881,7 @@ const endClass = (kind: "landed" | "released", pops = false) =>
 	cn(
 		"absolute top-1/2 -mt-[7.5px] -ml-[7.5px] grid size-[15px] place-items-center rounded-full text-[9px] font-extrabold",
 		GLIDES,
-		// The ✓ sits high in its line, so top padding brings it to the circle's middle; the × sits there already.
+		// The ✓ comes from a fallback face, whose mark sits high in its line, so top padding brings it to the middle.
 		kind === "landed"
 			? "bg-good pt-[2px] text-background"
 			: "border-[1.5px] border-muted-foreground bg-background text-muted-foreground",

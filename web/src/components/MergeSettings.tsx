@@ -213,10 +213,10 @@ export function ReviewSection(context: SettingsContext) {
 					</SettingField>
 					<SettingField>
 						<Label className="flex items-start gap-2 font-normal">
-							{/* On the first line's letters, which sit high in their line, however many lines the text takes. */}
+							{/* Centred on the first line, however many lines the text takes. */}
 							<input
 								type="checkbox"
-								className="m-0 mt-0.75 shrink-0"
+								className="m-0 mt-[calc(0.5lh-6.5px)] shrink-0"
 								checked={draft.independent}
 								onChange={(event) => update({ independent: event.target.checked })}
 							/>
