@@ -225,16 +225,29 @@ describe("the registry's running slot", () => {
 					return began.includes(id);
 				}
 			}
-			return new TestRegistry({ storage: new FakeStorage() } as never, {} as never);
+			const ctx = { storage: new FakeStorage(), blockConcurrencyWhile: <T>(work: () => Promise<T>) => work() };
+			return new TestRegistry(ctx as never, {} as never);
 		};
 		const going = registryWith(["run-1"]);
 		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW })).slot?.id).toBe("run-1");
 		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).refused).toMatch(/going already/);
 		expect((await going.runs()).running?.id).toBe("run-1");
-		// Here run-1 never began: the next run takes the slot.
+		// Here run-1 never began: once its request has had time to begin it, the next run takes the slot.
 		const lost = registryWith([]);
 		await lost.reserve({ fullName: "ada/honeycomb", since: NOW });
 		expect((await lost.runs()).running).toBeUndefined();
-		expect((await lost.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).slot?.id).toBe("run-2");
+		expect((await lost.reserve({ fullName: "ada/honeycomb", since: NOW + 61_000 })).slot?.id).toBe("run-2");
+	});
+
+	it("isn't taken by a second request while the first is still beginning its run", async () => {
+		class Beginning extends DemoRun {
+			protected override async runBegan() {
+				return false;
+			}
+		}
+		const ctx = { storage: new FakeStorage(), blockConcurrencyWhile: <T>(work: () => Promise<T>) => work() };
+		const registry = new Beginning(ctx as never, {} as never);
+		expect((await registry.reserve({ fullName: "ada/honeycomb", since: NOW })).slot?.id).toBe("run-1");
+		expect((await registry.reserve({ fullName: "ada/honeycomb", since: NOW + 500 })).refused).toMatch(/going already/);
 	});
 });

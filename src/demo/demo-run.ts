@@ -28,25 +28,36 @@ import {
 //   for the run, so a request cut short leaves nothing half done.
 
 const EMPTY_REGISTRY: Registry = { day: { date: "", started: 0 }, recent: [] };
+/** How long a new slot is held for its run to begin, which the request that took it does at once. */
+const BEGIN_WITHIN_MS = 60_000;
 
 export class DemoRun extends DurableObject<Env> {
 	// The registry.
 
 	/**
 	 * Takes the running slot for a new run, numbering it, or says why it can't start. A slot whose run never began, its
-	 * request having failed before it could, holds nothing.
+	 * request having failed before it could, holds nothing. One reservation at a time, since asking whether a run
+	 * began lets other requests in.
 	 */
 	async reserve(input: Pick<RunSlot, "fullName" | "since">): Promise<{ refused?: string; slot?: RunSlot }> {
-		const kept = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
-		const holder = kept.running;
-		const neverBegan = holder ? !(await this.runBegan(holder.id)) : false;
-		const registry = neverBegan ? ended(kept, holder!.id) : kept;
-		const reason = refusal(registry, input.since);
-		if (reason) return { refused: reason };
-		const number = nextRun(registry);
-		const slot: RunSlot = { ...input, id: `run-${number}`, number };
-		await this.ctx.storage.put("registry", started(registry, slot));
-		return { slot };
+		return this.ctx.blockConcurrencyWhile(async () => {
+			const registry = await this.withoutLostRun(input.since);
+			const reason = refusal(registry, input.since);
+			if (reason) return { refused: reason };
+			const number = nextRun(registry);
+			const slot: RunSlot = { ...input, id: `run-${number}`, number };
+			await this.ctx.storage.put("registry", started(registry, slot));
+			return { slot };
+		});
+	}
+
+	// The registry, with its running slot freed if that run never began. A slot just taken isn't asked about: its
+	// request begins the run a moment later, and a second request in between would start a run beside it.
+	private async withoutLostRun(now: number): Promise<Registry> {
+		const registry = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
+		const holder = registry.running;
+		if (!holder || now - holder.since <= BEGIN_WITHIN_MS) return registry;
+		return (await this.runBegan(holder.id)) ? registry : ended(registry, holder.id);
 	}
 
 	/** Frees the running slot once run `id` has ended (or never got going). */
@@ -57,10 +68,7 @@ export class DemoRun extends DurableObject<Env> {
 
 	/** The run going now, if any, and the latest ones; a run that never began isn't going. */
 	async runs() {
-		const registry = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
-		const holder = registry.running;
-		const neverBegan = holder ? !(await this.runBegan(holder.id)) : false;
-		return neverBegan ? ended(registry, holder!.id) : registry;
+		return this.withoutLostRun(Date.now());
 	}
 
 	/** Whether run `id` began (tests answer it instead). */
