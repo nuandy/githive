@@ -134,6 +134,13 @@ const PATHS = {
 		</>
 	),
 	activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+	// Three cells of a honeycomb, pointy-topped as the Hive's map draws them: one above, two below.
+	hive: (
+		<>
+			<path d="M12 3.25l4.33 2.5v5l4.33 2.5v5l-4.33 2.5L12 18.25l-4.33 2.5-4.33-2.5v-5l4.33-2.5v-5Z" />
+			<path d="M7.67 10.75 12 13.25l4.33-2.5M12 13.25v5" />
+		</>
+	),
 	settings: (
 		<>
 			<path d="M20 7h-9M14 17H5" />

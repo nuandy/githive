@@ -485,7 +485,7 @@ export function repoTabs(
 	const notStarted = snapshot === null;
 	const unavailable = notStarted ? { unavailable: NOT_STARTED_TAB } : {};
 	return [
-		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
+		{ id: "hive", label: "Hive", icon: "hive", href: href.repo(repo) },
 		{
 			id: "changes",
 			label: "Changes",
