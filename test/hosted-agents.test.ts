@@ -169,21 +169,29 @@ describe("GitHive's builder", () => {
 	it("finishes only with everything pushed and checked, then asks the hosted reviewers, who merge once approved", async () => {
 		const unpushed = builder({ "rev-list --count": "2" });
 		unpushed.state.pushes = 1;
-		expect(await unpushed.run("finish", { summary: "done" })).toMatch(/not pushed/i);
+		expect(await unpushed.run("finish", { summary: "done", checked: [] })).toMatch(/not pushed/i);
 		expect(hosted.startHostedReviewers).not.toHaveBeenCalled();
 
 		const b = builder({ "rev-list --count": "0" });
 		b.state.pushes = 1;
-		// The first finish asks it to check its own change as a reviewer would; the next one hands it on.
-		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/^Not yet: first review your change yourself/);
+		// The first finish asks it to check its own change as a reviewer would, against the repo's rules and edge
+		// cases; one with nothing listed as checked is asked for the list; then it hands the change on.
+		const first = await b.run("finish", { summary: "adds stats", checked: [] });
+		expect(first).toMatch(/^Not yet: first review your change yourself/);
+		expect(first).toMatch(/SPEC\.md, AGENTS\.md/);
+		expect(first).toMatch(/constructor, toString, __proto__/);
+		expect(await b.run("finish", { summary: "adds stats", checked: [] })).toMatch(/^Not yet: `checked` is empty/);
 		expect(hosted.startHostedReviewers).not.toHaveBeenCalled();
-		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/reviewers review the change/i);
+		const checked = ["SPEC.md: stats are per day, by a test", "an empty log gives zero stats, by a test"];
+		expect(await b.run("finish", { summary: "adds stats", checked })).toMatch(/reviewers review the change/i);
 		expect(hosted.startHostedReviewers).toHaveBeenCalledWith(
 			env,
 			expect.objectContaining({
 				repo: "project",
 				change: "stats-1a2b",
-				summary: "adds stats",
+				summary:
+					"adds stats\n\nChecked before finishing:\n- SPEC.md: stats are per day, by a test\n" +
+					"- an empty log gives zero stats, by a test",
 				mergeWhenApproved: true,
 			}),
 		);

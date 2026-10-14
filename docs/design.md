@@ -1613,9 +1613,15 @@ in the fork of the agent holding the claim, and its records are stamped
   starts the hosted reviewers, asked to merge once approved, unless a hosted
   agent started it: the hive reviews those changes. The first time in
   each round of work (the first build, and each revision), it's refused once
-  more with a request to review the change itself, against its brief and the
-  repo's contract, as its reviewer will: a rejection costs a round of fixing and
-  reviewing, and the look costs a turn. Until it finishes, `reviews` doesn't
+  more with a request to review the change itself, as its reviewer will: every
+  rule its brief and the repo's own docs (a SPEC.md, AGENTS.md, the README)
+  state about what it touches, and edge cases on what it adds (empty input,
+  unknown keys, names an object already has). The next `finish` lists in
+  `checked` what it checked and how, one line each, and is refused once if the
+  list is empty; the list goes to the reviewers with the summary. A rejection
+  costs a round of fixing and reviewing, and the look a turn or two: in demo run
+  9, the two rejections were a rule the spec stated outright and an unknown key
+  that was also a built-in property name. Until it finishes, `reviews` doesn't
   offer the change: the builder pushes as it works, and a review of a commit its
   next push replaces is wasted. Finishing rings the hive, since no record says
   the change is ready.

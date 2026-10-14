@@ -35,6 +35,8 @@ export interface BuilderState extends AgentState {
 	lastReport?: { outOfLane: string[]; conflicts: string[] };
 	/** Whether it has checked this round of work as a reviewer would, which finish asks for once a round. */
 	selfChecked?: boolean;
+	/** Whether finish has asked once this round for the list of what the self-check checked. */
+	checklistAsked?: boolean;
 }
 
 const PushArgs = z.strictObject({ message: z.string().describe("Commit message") });
@@ -42,6 +44,12 @@ const NoArgs = z.strictObject({});
 const ExtendArgs = z.strictObject({ paths: z.array(z.string()).describe("Paths to add to your claim") });
 const FinishArgs = z.strictObject({
 	summary: z.string().describe("What you built and how you verified it, for the reviewers"),
+	checked: z
+		.array(z.string())
+		.describe(
+			"After reviewing your own change: each rule of the brief or the repo's spec it touches, and each edge " +
+				"case you tried, with how you checked it, one line each. Empty before that review.",
+		),
 });
 
 export class Builder extends SandboxAgent<BuildJob, BuilderState> {
@@ -125,6 +133,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		state.turnsAtRunStart = state.turns;
 		state.revisions++;
 		state.selfChecked = false;
+		state.checklistAsked = false;
 		// The model is still owed the finish call's output, so that goes first.
 		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
 		this.note(state, `sent back (revision ${state.revisions}): ${firstLine(feedback).slice(0, 160)}`);
@@ -305,7 +314,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 					"Declare the change complete: only when everything is pushed and inside your claim. " +
 					"GitHive's reviewers then review it, and it merges once approved and checked.",
 				schema: FinishArgs,
-				run: async ({ summary }) => {
+				run: async ({ summary, checked }) => {
 					const refusal = await this.handOffRefusal(state);
 					if (refusal) return refusal;
 					// A reviewer's rejection costs a whole round of fixing and reviewing; a look first costs a turn.
@@ -314,8 +323,16 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 						this.note(state, "checking its own change before finishing");
 						return selfCheck(state.revisions > 0);
 					}
+					// The list is the review done: a finish without one hasn't checked the rules it was asked to.
+					if (!checked.length) {
+						if (!state.checklistAsked) {
+							state.checklistAsked = true;
+							return NO_CHECKLIST;
+						}
+					}
+					this.note(state, `finishing, having checked: ${checked.length}`);
 					state.status = "done";
-					state.summary = summary;
+					state.summary = withChecklist(summary, checked);
 					this.note(state, "finished");
 					// Its change is ready to review now, which no record says: ring the hive.
 					await this.toolContext()
@@ -326,7 +343,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 						const { reviewers } = await startHostedReviewers(this.env, {
 							repo: job.project,
 							change: job.change,
-							summary,
+							summary: state.summary,
 							mergeWhenApproved: true,
 						});
 						this.note(state, `review started: ${reviewers.join(", ")}`);
@@ -438,10 +455,25 @@ function selfCheck(revising: boolean) {
 	const findings = revising ? " Check first that every one of the reviewer's findings is fixed." : "";
 	return [
 		"Not yet: first review your change yourself, as its reviewer will." + findings,
-		"- Read your whole change, every commit of it, against your brief and any contract the repo keeps (a " +
-			"SPEC.md, the README's rules, whatever the brief points to). Reviewers reject for a requirement that " +
-			"isn't met, so check each one the brief and the contract state, including edge cases they name.",
+		"- Find the rules your change must keep: in your brief, and in what the repo keeps about itself (a " +
+			"SPEC.md, AGENTS.md, the README's rules, whatever the brief points to). Note each one that names something " +
+			"your change touches: a file, a function, a value, a pair that must or mustn't go together, a word like " +
+			"must, never, don't or only. Reviewers reject most for one of these, so check each against your change.",
+		"- Try edge cases on everything your change adds: empty and missing input, unknown keys and values, names " +
+			"an object already has (constructor, toString, __proto__), the smallest and largest sizes. Fix what breaks, " +
+			"and add a test for it.",
 		"- Check your tests cover what's asked, and that they pass.",
-		"If you find anything, fix it, push with commit_and_push, then call finish again. If not, call finish again.",
+		"If you find anything, fix it and push with commit_and_push. Then call finish again, with `checked` listing " +
+			"each rule and edge case you checked and how, one line each.",
 	].join("\n");
+}
+
+const NO_CHECKLIST =
+	"Not yet: `checked` is empty. List each rule of your brief and the repo's spec that your change touches, and " +
+	"each edge case you tried, with how you checked it, one line each, then call finish again.";
+
+// The summary the reviewers read, with what the builder checked, so they can look where it didn't.
+function withChecklist(summary: string, checked: string[]) {
+	if (!checked.length) return summary;
+	return [summary, "", "Checked before finishing:", ...checked.map((line) => `- ${line}`)].join("\n");
 }
