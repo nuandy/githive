@@ -1,13 +1,14 @@
 import type { ClefAnswer, ClefModel, ClefQuestion } from "../clef";
-import { STEERS_AT, steeringQuestion } from "../push-hints";
+import { STEERING_MODEL, STEERS_AT, steeringQuestion } from "../push-hints";
 import { isToolText, STEERING_SAYS, type SteeringFlag } from "../steering";
 import type { ToolContext } from "./tools/context";
 
 // What GitHive asks Clef about the text one agent writes for others: an intent, a piece of the backlog, a review's
-// evidence, a question to people. Each tool asks once, all its questions together, and every answer is a hint the
-// reply carries and the agent weighs: work that may duplicate an open change, evidence its author may not be able to
-// act on, how urgent a question is, and text that tries to steer the agents who will read it (other agents read
-// intents, evidence and backlog pieces as part of their own work). Nothing is refused on Clef's word.
+// evidence, a question to people. Each tool asks once, all its questions together, but whether the text steers agents
+// goes to the larger model alongside (see STEERING_MODEL). Every answer is a hint the reply carries and the agent
+// weighs: work that may duplicate an open change, evidence its author may not be able to act on, how urgent a question
+// is, and text that tries to steer the agents who will read it (other agents read intents, evidence and backlog pieces
+// as part of their own work). Nothing is refused on Clef's word.
 
 /** How sure Clef must be that two pieces of work are the same before the reply says so. */
 const SAME_WORK_AT = 0.6;
@@ -15,8 +16,8 @@ const SAME_WORK_AT = 0.6;
 const COMPARED_AT_MOST = 100;
 /** The most of each intent sent, so a hundred of them fit clef-flash's context. */
 const INTENT_CHARS = 300;
-/** The most new pieces in one ask: four questions each, within Clef's 64. */
-const PIECES_PER_ASK = 16;
+/** The most new pieces in one ask: three questions each to clef-flash, within Clef's 64. */
+const PIECES_PER_ASK = 21;
 /** From this place on the size scale (0 to 2), a piece seems too big for one change. */
 const TOO_BIG_AT = 1.5;
 /** How sure Clef must be that a piece needs another first before the reply suggests declaring it. */
@@ -133,19 +134,22 @@ export async function claimHints(
 	open: Comparable[],
 ): Promise<{ same?: SameWork; steers?: number }> {
 	const others = open.slice(-COMPARED_AT_MOST);
-	const questions: Record<string, ClefQuestion> = { steers: steeringQuestion("the new change's intent") };
-	if (others.length) questions.same = sameWorkQuestion("the new change", others);
+	const sameWork: Record<string, ClefQuestion> = {};
+	if (others.length) sameWork.same = sameWorkQuestion("the new change", others);
 	const state = `A new change's intent:\n${claim.intent}\n\nThe paths it claims: ${claim.paths.join(", ")}`;
-	const answers = await consult(ctx, "clef-flash", state, questions);
+	const [answers, steering] = await Promise.all([
+		consult(ctx, "clef-flash", state, sameWork),
+		consult(ctx, STEERING_MODEL, state, { steers: steeringQuestion("the new change's intent") }),
+	]);
 	const same = sameWorkOf(answers?.same, others);
-	const steers = steersOf(answers?.steers);
+	const steers = steersOf(steering?.steers);
 	return { ...(same ? { same } : {}), ...(steers === undefined ? {} : { steers }) };
 }
 
 /** Whether a brief for GitHive's builder steers it: the builder works from the brief as written. */
 export async function briefSteers(ctx: ToolContext, intent: string): Promise<number | undefined> {
 	const questions = { steers: steeringQuestion("this brief for a coding agent") };
-	const answers = await consult(ctx, "clef-flash", intent, questions);
+	const answers = await consult(ctx, STEERING_MODEL, intent, questions);
 	return steersOf(answers?.steers);
 }
 
@@ -212,9 +216,10 @@ async function askAboutPieces(
 	const others = existing.filter((other) => !ids.has(other.id)).slice(-COMPARED_AT_MOST);
 	const candidates = pieces.map((piece) => needCandidates(piece, batch, others));
 	const questions: Record<string, ClefQuestion> = {};
+	const steeringAsked: Record<string, ClefQuestion> = {};
 	pieces.forEach((_, index) => {
 		const what = `new piece ${index + 1}`;
-		questions[`steers${index}`] = steeringQuestion(what);
+		steeringAsked[`steers${index}`] = steeringQuestion(what);
 		if (others.length) questions[`same${index}`] = sameWorkQuestion(what, others);
 		if (candidates[index]!.length) questions[`needs${index}`] = needsQuestion(what, candidates[index]!);
 		questions[`size${index}`] = {
@@ -226,13 +231,16 @@ async function askAboutPieces(
 	const state = pieces
 		.map((piece, index) => `New piece ${index + 1}: ${piece.title}\n${piece.intent.slice(0, INTENT_CHARS * 4)}`)
 		.join("\n\n");
-	const answers = await consult(ctx, "clef-flash", state, questions);
+	const [answers, steered] = await Promise.all([
+		consult(ctx, "clef-flash", state, questions),
+		consult(ctx, STEERING_MODEL, state, steeringAsked),
+	]);
 	const similar: PieceLike[] = [];
 	const mayNeed: PieceNeed[] = [];
 	const big: string[] = [];
 	const steering: PieceSteers[] = [];
 	pieces.forEach((piece, index) => {
-		const steers = steersOf(answers?.[`steers${index}`]);
+		const steers = steersOf(steered?.[`steers${index}`]);
 		if (steers !== undefined) steering.push({ piece: piece.id, likelihood: steers });
 		const same = sameWorkOf(answers?.[`same${index}`], others);
 		if (same) similar.push({ piece: piece.id, like: same.id, likelihood: same.likelihood });
@@ -263,7 +271,7 @@ const CHECKED_LEVELS = [
  * was checked (an approval that checked nothing lets a bug land), and whether it steers the agents who will read it.
  */
 export async function voteHints(ctx: ToolContext, vote: { verdict: string; evidence: string }) {
-	const questions: Record<string, ClefQuestion> = { steers: steeringQuestion("this review evidence") };
+	const questions: Record<string, ClefQuestion> = {};
 	if (vote.verdict === "reject")
 		questions.specific = {
 			type: "score",
@@ -276,8 +284,11 @@ export async function voteHints(ctx: ToolContext, vote: { verdict: string; evide
 			instructions: "How well does this approval's evidence show what the reviewer checked, and how?",
 			criteria: CHECKED_LEVELS,
 		};
-	const answers = await consult(ctx, "clef-flash", vote.evidence, questions);
-	const steers = steersOf(answers?.steers);
+	const [answers, steering] = await Promise.all([
+		consult(ctx, "clef-flash", vote.evidence, questions),
+		consult(ctx, STEERING_MODEL, vote.evidence, { steers: steeringQuestion("this review evidence") }),
+	]);
+	const steers = steersOf(steering?.steers);
 	return {
 		vague: scoredBelow(answers?.specific, 1),
 		thin: scoredBelow(answers?.checked, 1),

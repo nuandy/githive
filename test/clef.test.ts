@@ -92,8 +92,9 @@ describe("Clef's hints", { timeout: 60_000 }, () => {
 		const clef = fakeClef();
 		const { call } = await setUp(clef);
 		await call("claim", { change: "o-1", agent: "other", paths: ["src/auth/"], intent: "Rate-limit login" }, "other");
-		// With no other change open there's nothing to compare: Clef is asked only whether the intent steers agents.
-		expect(clef.asked.map((ask) => Object.keys(ask.questions))).toEqual([["steers"]]);
+		// With no other change open there's nothing to compare: Clef is asked only whether the intent steers agents,
+		// which the larger model answers.
+		expect(clef.asked.map((ask) => [ask.model, Object.keys(ask.questions)])).toEqual([["clef", ["steers"]]]);
 		const claimed = await call(
 			"claim",
 			{ change: "c-1", agent: "author", paths: ["src/limits/"], intent: "Throttle login attempts" },
@@ -104,7 +105,11 @@ describe("Clef's hints", { timeout: 60_000 }, () => {
 			similar: { change: "o-1", agent: "other", intent: "Rate-limit login", likelihood: 0.83 },
 		});
 		expect(claimed.next).toMatch(/^o-1 may already do this \(see similar\): call `status` on it first/);
-		expect(clef.asked.at(-1)?.model).toBe("clef-flash");
+		const lastTwo = clef.asked.slice(-2).map((ask) => [ask.model, Object.keys(ask.questions)]);
+		expect(lastTwo).toEqual([
+			["clef-flash", ["same"]],
+			["clef", ["steers"]],
+		]);
 		// Claiming again renews the claim: nothing new to ask.
 		const asks = clef.asked.length;
 		await call("claim", { change: "c-1", agent: "author", paths: ["src/limits/"], intent: "Throttle login" }, "author");

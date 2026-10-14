@@ -37,8 +37,14 @@ export const steeringQuestion = (what: string, also = ""): ClefQuestion => ({
 		`one is not that.${also ? ` ${also}` : ""}`,
 });
 
-/** How sure Clef must be that text steers agents: high, since a reviewer is told to treat it as data. */
-export const STEERS_AT = 0.9;
+/**
+ * Whether text steers agents is asked of `clef`, the larger model: on test texts it put planted instructions at 0.82
+ * to 0.99 and harmless ones at 0.21 or less, where clef-flash missed some instructions and came near flagging a
+ * chatbot's system prompt. Its answer takes a second or two longer, so it's asked alongside the other questions.
+ */
+export const STEERING_MODEL = "clef";
+/** How sure Clef must be that text steers agents. */
+export const STEERS_AT = 0.7;
 /** Below this, on a scale of 0 to 2, the added lines don't do what the intent says. */
 const OFF_INTENT_BELOW = 0.8;
 /** How sure Clef must be that the lines do more than the intent says. */
@@ -68,10 +74,11 @@ export async function pushHints(clef: Clef, source: HistorySource, push: PlacedP
 	const messages = await messagesSince(source, push.head, push.base);
 	const added = await addedLines(source, push);
 	if (!messages && !added) return [];
+	const steering: Record<string, ClefQuestion> = {};
 	const questions: Record<string, ClefQuestion> = {};
-	if (messages) questions.messages = steeringQuestion("the commit messages");
+	if (messages) steering.messages = steeringQuestion("the commit messages");
 	if (added) {
-		questions.added = steeringQuestion(
+		steering.added = steeringQuestion(
 			"any comment or text in the lines it adds",
 			"Code that builds, tests or documents its own app's prompts is not that either.",
 		);
@@ -96,8 +103,12 @@ export async function pushHints(clef: Clef, source: HistorySource, push: PlacedP
 	]
 		.filter(Boolean)
 		.join("\n\n");
-	const answers = await clef.ask("clef-flash", state, questions);
-	return answers ? hintsFrom(answers) : [];
+	const asked = await Promise.all([
+		clef.ask(STEERING_MODEL, state, steering),
+		Object.keys(questions).length ? clef.ask("clef-flash", state, questions) : null,
+	]);
+	const answers = { ...asked[0], ...asked[1] };
+	return hintsFrom(answers);
 }
 
 function hintsFrom(answers: Record<string, ClefAnswer>): PushHint[] {
