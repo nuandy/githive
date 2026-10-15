@@ -37,7 +37,8 @@ export { HostedAgent } from "./hosted-agents";
 const app = new Hono<AppEnv>();
 
 const PUBLIC_PATHS = ["/", "/index.html", "/authorize"];
-const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/", "/site/"];
+// Demo runs answer visitors too: watching is public, and starting one checks for itself (see routes/demo.ts).
+const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/", "/site/", "/demo/runs"];
 
 const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 

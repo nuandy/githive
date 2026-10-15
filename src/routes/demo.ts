@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { BACKLOG } from "../demo/backlog";
 import { repoIdFor } from "../auth/orgs";
 import { demoRepoName } from "../demo/demo-repo";
@@ -7,21 +7,30 @@ import { fail, statusOf } from "../errors";
 import { rpc } from "../rpc";
 import type { AppEnv } from "./shared";
 
-// Honeycomb demo runs, for anyone signed in: GitHive's hosted agents build a small word game in the one public demo
-// repo while they watch its Hive tab (see demo/demo-repo.ts and demo/demo-run.ts). One runs at a time and up to 100 a
-// day, since every run spends GitHive's model account.
+// Honeycomb demo runs: GitHive's hosted agents build a small word game in the one public demo repo while whoever
+// started it watches its Hive tab (see demo/demo-repo.ts and demo/demo-run.ts). Anyone may start one, signed in or not,
+// so judges and visitors see a hive at work. One runs at a time and up to 100 a day, since every run spends GitHive's
+// model account.
+
+/** Who started a run, as the dashboard names them: a person signed in, or a visitor. */
+function starter(c: Context<AppEnv>): string {
+	const principal = c.get("principal");
+	if (principal?.kind === "user") return principal.user.handle;
+	// An agent's token or the admin door: a run is for someone watching the dashboard.
+	if (principal) fail(403, "a demo run is started from GitHive's dashboard, signed in or not");
+	return "a visitor";
+}
 
 export function demoRoutes(app: Hono<AppEnv>) {
 	app.post("/demo/runs", async (c) => {
-		const principal = c.get("principal");
-		if (principal?.kind !== "user") fail(403, "a demo run is started by a person, signed in to GitHive");
+		const by = starter(c);
 		const { owner, name, fullName } = demoRepoName(c.env);
 		const registry = c.env.DEMO_RUN.getByName("registry");
 		const reserved = await rpc(registry.reserve({ fullName, since: Date.now() }));
 		if (!reserved.slot) fail(429, reserved.refused ?? "a demo run can't start now");
 		const { id, number } = reserved.slot;
 		// The run sets itself up in its own object, so a request cut short can't leave it half done.
-		const begin = { id, number, repo: repoIdFor(owner, name), fullName, by: principal.user.handle };
+		const begin = { id, number, repo: repoIdFor(owner, name), fullName, by };
 		await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).begin(begin)).catch(async (err) => {
 			await rpc(registry.release(id)).catch(() => undefined);
 			console.error(`starting demo run ${number} failed`, statusOf(err).message);

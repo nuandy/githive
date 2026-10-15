@@ -23,6 +23,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { RepoList } from "./components/RepoList";
 import { RepoPage, type RepoView } from "./components/RepoPage";
 import { TopBar, type Crumb } from "./components/TopBar";
+import { VisitorDemo } from "./components/VisitorDemo";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
 import { replaceHash, routePlace, useHashRoute } from "./hooks/useHashRoute";
@@ -225,6 +226,9 @@ function SignedOut({
 	return <Visitor route={route} onSignIn={askToSignIn} signIn={signIn} />;
 }
 
+// Starting a demo run signed out: which repo is the demo comes with the sign-in providers.
+const visitorDemoApi = { providers: account.providers, runs: demo.runs, start: demo.start };
+
 /** A public repo, read by someone signed out. A repo they can't read asks them to sign in, saying why. */
 function Visitor({
 	route,
@@ -250,6 +254,7 @@ function Visitor({
 		<Shell>
 			<SkipLink />
 			<TopBar crumbs={trail} onSignIn={onSignIn} />
+			{view?.kind === "repo" && view.tab === "hive" ? <VisitorDemo repo={route.repo} api={visitorDemoApi} /> : null}
 			<PageBoundary key={routePlace(route)}>
 				{view ? <RepoRoute repo={route.repo} view={view} data={data} visitor /> : <PageNotFound />}
 			</PageBoundary>
