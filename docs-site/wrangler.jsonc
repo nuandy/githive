@@ -2,6 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "githive-docs",
   "compatibility_date": "2026-10-06",
+  // Served at docs.githive.app; deploying attaches the domain and its certificate.
+  "routes": [{ "pattern": "docs.githive.app", "custom_domain": true }],
   "assets": {
     "directory": "./dist",
     "not_found_handling": "404-page"
