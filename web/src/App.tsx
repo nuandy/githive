@@ -23,7 +23,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { RepoList } from "./components/RepoList";
 import { RepoPage, type RepoView } from "./components/RepoPage";
 import { TopBar, type Crumb } from "./components/TopBar";
-import { VisitorDemo } from "./components/VisitorDemo";
+import { DemoStart } from "./components/DemoStart";
 import { Collapse } from "./components/ui/collapse";
 import { useChanged } from "./hooks/useChanged";
 import { replaceHash, routePlace, useHashRoute } from "./hooks/useHashRoute";
@@ -226,8 +226,8 @@ function SignedOut({
 	return <Visitor route={route} onSignIn={askToSignIn} signIn={signIn} />;
 }
 
-// Starting a demo run signed out: which repo is the demo comes with the sign-in providers.
-const visitorDemoApi = { providers: account.providers, runs: demo.runs, start: demo.start };
+// Starting a demo run from the hive: which repo is the demo comes with the sign-in providers.
+const demoStartApi = { providers: account.providers, runs: demo.runs, start: demo.start };
 
 /** A public repo, read by someone signed out. A repo they can't read asks them to sign in, saying why. */
 function Visitor({
@@ -254,8 +254,10 @@ function Visitor({
 		<Shell>
 			<SkipLink />
 			<TopBar crumbs={trail} onSignIn={onSignIn} />
-			{view?.kind === "repo" && view.tab === "hive" ? <VisitorDemo repo={route.repo} api={visitorDemoApi} /> : null}
 			<PageBoundary key={routePlace(route)}>
+				{view?.kind === "repo" && view.tab === "hive" ? (
+					<DemoStart repo={route.repo} api={demoStartApi} signedIn={false} />
+				) : null}
 				{view ? <RepoRoute repo={route.repo} view={view} data={data} visitor /> : <PageNotFound />}
 			</PageBoundary>
 		</Shell>
@@ -332,13 +334,16 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		);
 	} else if (repoName !== null && view) {
 		page = (
-			<RepoRoute
-				repo={repoName}
-				view={view}
-				data={{ liveStatus, snapshot, audit, access, change }}
-				refreshSummaries={summaries.refresh}
-				{...(lastStretch ? { lastStretch } : {})}
-			/>
+			<>
+				{view.kind === "repo" && view.tab === "hive" ? <DemoStart repo={repoName} api={demoStartApi} signedIn /> : null}
+				<RepoRoute
+					repo={repoName}
+					view={view}
+					data={{ liveStatus, snapshot, audit, access, change }}
+					refreshSummaries={summaries.refresh}
+					{...(lastStretch ? { lastStretch } : {})}
+				/>
+			</>
 		);
 	} else {
 		page = <PageNotFound />;
