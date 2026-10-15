@@ -93,7 +93,8 @@ describe("the Changes list", () => {
 
 	it("gathers what went back to its agent, or its agent left, under Needs work", () => {
 		expect(ids("needs-work")).toEqual(["failed", "blocked"]);
-		const left = claim("left", { head: null, active: minutesAgo(3 * 24 * 60) });
+		// Asked whether it's still there, it didn't answer in time.
+		const left = claim("left", { head: null, active: minutesAgo(3 * 24 * 60), challenged: minutesAgo(10) });
 		const listed = changeList([...claims, left], context, { filter: "needs-work", query: "" });
 		expect(listed.shown.map((each) => [each.claim.change, each.state])).toEqual([
 			["failed", "checks-failed"],

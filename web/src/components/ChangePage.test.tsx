@@ -157,6 +157,8 @@ describe("the decision box", () => {
 			...waiting,
 			head: null,
 			active: ago(90),
+			// Asked whether it's still there, and it didn't answer in time.
+			challenged: ago(10),
 			approval: { approved: false, approvals: 0, required: 2, vetoedBy: [], awaiting: ["security"] },
 		};
 		expect(visibleText(box(render({ claim: left, history: { ...historyFixture, commits: [] } })))).toContain(
