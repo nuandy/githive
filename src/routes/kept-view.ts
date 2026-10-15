@@ -53,16 +53,21 @@ export async function keptView(
 		if (shared) c.executionCtx.waitUntil(share(shared, json));
 		return c.body(json, 200, { "Content-Type": "application/json", "Server-Timing": timing });
 	};
+	const keptJson = kept.json;
+	const mustBuild = wantsFresh || keptJson === undefined;
 	const tooOld = kept.version !== undefined && Date.now() - kept.version > TOO_OLD_MS;
-	if (kept.json !== undefined && !wantsFresh && !tooOld) {
+	// A view too old to serve is built by the one reader that takes its build; others meanwhile get it as it is, so a
+	// crowd arriving after a quiet hour builds it once.
+	const buildsTooOld = !mustBuild && tooOld && (await cache.startBuild(name));
+	if (keptJson !== undefined && !mustBuild && !buildsTooOld) {
 		if (!kept.fresh && !kept.building && (await cache.startBuild(name)))
 			c.executionCtx.waitUntil(
 				rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))),
 			);
-		return send(kept.json, `view;desc=${kept.fresh ? "fresh" : "stale"}`);
+		return send(keptJson, `view;desc=${kept.fresh ? "fresh" : "stale"}`);
 	}
 	const timing = new Timing();
-	await cache.startBuild(name);
+	if (mustBuild) await cache.startBuild(name);
 	const json = await rebuild(timing);
 	return send(json, `view;desc=built, ${timing.header()}`);
 }
