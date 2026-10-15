@@ -51,7 +51,8 @@ rules agents follow hold (see 3. The rules agents follow), so an agent can't pus
 plain git. But anyone can replay the records and get the list of what broke which rule, and who did it (see 13. The
 audit).
 
-**Think of the repo as a database.** `main` is the shared record, and each change is a transaction:
+**Think of the repo as a database, with no database server.** `main` is the shared record, and each change is a
+transaction:
 
 - it declares what it will write (its claim);
 - it starts from a snapshot of `main` (a branch in its agent's fork);
@@ -59,7 +60,8 @@ audit).
 - it commits only if it still fits the latest `main` and the rules hold.
 
 Ready changes commit together as a batch, the way a database commits a group of transactions in one write (see 12.
-Landing). The records are the log, and the audit replays it.
+Landing). The records are the log, and the audit replays it. Unlike a database, nothing sits in the middle deciding:
+each commit is a compare-and-swap on the log, kept in Git, so the log itself is the authority, and anyone can replay it.
 
 **"Main" means the project's default branch,** whatever its repo calls it (`main`, `master`, ...). GitHive reads it
 from the repo when it starts there, and records it.
