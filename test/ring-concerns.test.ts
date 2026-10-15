@@ -32,3 +32,36 @@ describe("whom a write concerns", () => {
 		expect(await concernsOf("settings_of_some_kind", { repo: "p" }, ctx)).toBeUndefined();
 	});
 });
+
+describe("whom a release concerns", () => {
+	/** A context whose backlog holds `items`. */
+	const withBacklog = (items: object[]) =>
+		({
+			...ctx,
+			records: () => ({ read: async () => ({ commit: { state: { items } } }) }),
+		}) as unknown as ToolContext;
+	const release = (context: ToolContext, reply: object, change = "c-1") =>
+		concernsOf("release", { repo: "p", change }, context, { ok: true, ...reply });
+
+	it("wakes no one when it can't free a backlog piece", async () => {
+		expect(await release(withBacklog([]), { freed: ["src/a.ts"] })).toEqual({ for: [] });
+		const elsewhere = withBacklog([{ id: "docs", title: "Docs", intent: "", paths: ["docs/"] }]);
+		expect(await release(elsewhere, { freed: ["src/a.ts"] })).toEqual({ for: [] });
+	});
+
+	it("opens for the piece it was, a piece its paths held back, and once merged, a piece that waited on it", async () => {
+		const backlog = withBacklog([
+			{ id: "c-1", title: "One", intent: "" },
+			{ id: "styles", title: "Styles", intent: "", paths: ["src/styles/"] },
+			{ id: "wire", title: "Wire", intent: "", after: ["c-9"] },
+		]);
+		expect(await release(backlog, { freed: ["src/x.ts"] }, "c-1")).toEqual({ opens: true });
+		expect(await release(backlog, { freed: ["src/styles/board.css"] }, "c-2")).toEqual({ opens: true });
+		expect(await release(backlog, { freed: ["src/x.ts"] }, "c-9")).toEqual({ for: [] });
+		expect(await release(backlog, { freed: ["src/x.ts"], merged: true }, "c-9")).toEqual({ opens: true });
+	});
+
+	it("opens as before when it says nothing of what it freed", async () => {
+		expect(await release(withBacklog([]), {})).toEqual({ opens: true });
+	});
+});

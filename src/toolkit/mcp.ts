@@ -83,7 +83,7 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 	const wrote = WRITES.has(written.name) && (result as { ok?: boolean } | null)?.ok !== false;
 	const event = wrote ? toolEvent(written.name, written.args, ctx.agent) : null;
 	if (wrote) {
-		const whom = await concernsOf(written.name, written.args, ctx).catch(() => undefined);
+		const whom = await concernsOf(written.name, written.args, ctx, reply).catch(() => undefined);
 		await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, written.name, whom).catch(() => undefined);
 	}
 	if (ctx.summarize && wrote) {

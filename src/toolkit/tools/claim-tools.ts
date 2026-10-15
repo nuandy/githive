@@ -52,7 +52,13 @@ export const claimTools: ToolHandlers = {
 		const mergedAs = held ? await landedAs(call, held) : undefined;
 		// Still the caller's when it's written: another agent may take the name over meanwhile.
 		const holder = held ? { holder: held.agent } : {};
-		return store.release({ change, agent, reason, ...holder, ...(mergedAs ? { mergedAs } : {}) }, stamper);
+		const released = await store.release(
+			{ change, agent, reason, ...holder, ...(mergedAs ? { mergedAs } : {}) },
+			stamper,
+		);
+		// What it freed, so the repo wakes only agents it may offer work (see ring-concerns.ts).
+		if (!held || !released.ok) return released;
+		return { ...released, freed: held.paths, ...(mergedAs ? { merged: true } : {}) };
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
 		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");

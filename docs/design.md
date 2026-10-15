@@ -1508,9 +1508,16 @@ recipients, a vote its change's agent and its voter, a review given back the
 agent that held it (and opens it to others), a landing each change's agent (and
 opens what waited on it); a claim, a build, a merge or a question to people
 concerns no agent waiting (they only take work away, which an agent finds when
-it next looks, and a merge's landing rings for itself); a release, backlog
-added, a push, settings or a revert opens. A ring that says neither, such as a
-write from the dashboard, concerns everyone. RepoCache logs its last 500 rings
+it next looks, and a merge's landing rings for itself); backlog added, a push,
+settings or a revert opens. A release opens only when it may free a backlog
+piece: the piece it was, one its paths held back, or, once merged, one that
+waited on it. Any other release concerns no agent waiting, since the backlog
+is the only work it can offer one; one that can't say what it freed opens, as
+before. Before this, every release woke every waiting agent to read the repo
+and find nothing new: with 10 agents writing and 1,000 waiting, RepoCache took
+630 requests a write (against 7 with none waiting), votes slowed fivefold and
+782 calls failed in three minutes (`bench-results/notifications/`). A ring that
+says neither, such as a write from the dashboard, concerns everyone. RepoCache logs its last 500 rings
 with that. Beyond that, a ring says only that something changed, with the tool
 that changed it; the agent then reads and chooses as always, so nothing it's
 told decides for it. An agent takes at most one turn every 5 seconds however

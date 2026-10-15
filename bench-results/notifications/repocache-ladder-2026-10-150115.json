@@ -1,0 +1,252 @@
+{
+	"label": "repocache-ladder",
+	"script": "blueprint-bench",
+	"writers": 10,
+	"minutes": 3,
+	"ladder": [
+		0,
+		250,
+		1000
+	],
+	"stages": [
+		{
+			"start": "2026-10-15T01:15:55.616Z",
+			"end": "2026-10-15T01:19:18.131Z",
+			"waiters": 0,
+			"writes": 264,
+			"waits": 0,
+			"woke": 0,
+			"took": {
+				"claim": {
+					"calls": 88,
+					"p50": 6447,
+					"p95": 16638,
+					"most": 35490
+				},
+				"vote": {
+					"calls": 88,
+					"p50": 6563,
+					"p95": 19429,
+					"most": 28215
+				},
+				"release": {
+					"calls": 88,
+					"p50": 3808,
+					"p95": 20997,
+					"most": 34878
+				}
+			},
+			"wake": null,
+			"failures": {
+				"claim: the record kept moving (refs/notes/githive-claims/nuandy--wait-probe-mv8uk7un); ": 1,
+				"release: the record kept moving (refs/notes/githive-claims/nuandy--wait-probe-mv8uk7un); ": 1
+			},
+			"use": {
+				"RecordCache": {
+					"requests": 1757,
+					"wallMs": 15164,
+					"activeMs": 17758
+				},
+				"RepoCache": {
+					"requests": 1778,
+					"wallMs": 2337319,
+					"activeMs": 178265
+				},
+				"RepoIndex": {
+					"requests": 113,
+					"wallMs": 1322,
+					"activeMs": 1482
+				},
+				"TokenCache": {
+					"requests": 353,
+					"wallMs": 1656,
+					"activeMs": 3988
+				}
+			},
+			"perWrite": {
+				"RecordCache": {
+					"requests": 6.66,
+					"activeMs": 67.3
+				},
+				"RepoCache": {
+					"requests": 6.73,
+					"activeMs": 675.2
+				},
+				"RepoIndex": {
+					"requests": 0.43,
+					"activeMs": 5.6
+				},
+				"TokenCache": {
+					"requests": 1.34,
+					"activeMs": 15.1
+				}
+			}
+		},
+		{
+			"start": "2026-10-15T01:19:18.133Z",
+			"end": "2026-10-15T01:22:38.867Z",
+			"waiters": 250,
+			"writes": 144,
+			"waits": 1370,
+			"woke": 0,
+			"took": {
+				"claim": {
+					"calls": 48,
+					"p50": 6311,
+					"p95": 12500,
+					"most": 14393
+				},
+				"vote": {
+					"calls": 48,
+					"p50": 19150,
+					"p95": 83864,
+					"most": 98846
+				},
+				"release": {
+					"calls": 48,
+					"p50": 4979,
+					"p95": 6491,
+					"most": 10060
+				},
+				"wait": {
+					"calls": 1371,
+					"p50": 41929,
+					"p95": 48333,
+					"most": 50900
+				}
+			},
+			"wake": null,
+			"failures": {
+				"vote: the record kept moving (refs/notes/githive-vote-buckets/nuandy--wait-probe-mv8uk": 2,
+				"wait: fetch failed: 500 Internal Server Error": 1
+			},
+			"use": {
+				"RecordCache": {
+					"requests": 30893,
+					"wallMs": 887930,
+					"activeMs": 76128
+				},
+				"RepoCache": {
+					"requests": 39338,
+					"wallMs": 10130568,
+					"activeMs": 202224
+				},
+				"RepoIndex": {
+					"requests": 88,
+					"wallMs": 1331,
+					"activeMs": 1123
+				},
+				"TokenCache": {
+					"requests": 8433,
+					"wallMs": 855082,
+					"activeMs": 4812
+				}
+			},
+			"perWrite": {
+				"RecordCache": {
+					"requests": 214.53,
+					"activeMs": 528.7
+				},
+				"RepoCache": {
+					"requests": 273.18,
+					"activeMs": 1404.3
+				},
+				"RepoIndex": {
+					"requests": 0.61,
+					"activeMs": 7.8
+				},
+				"TokenCache": {
+					"requests": 58.56,
+					"activeMs": 33.4
+				}
+			}
+		},
+		{
+			"start": "2026-10-15T01:22:38.872Z",
+			"end": "2026-10-15T01:26:00.460Z",
+			"waiters": 1000,
+			"writes": 102,
+			"waits": 5234,
+			"woke": 0,
+			"took": {
+				"claim": {
+					"calls": 34,
+					"p50": 9938,
+					"p95": 30596,
+					"most": 51116
+				},
+				"wait": {
+					"calls": 5998,
+					"p50": 30521,
+					"p95": 52154,
+					"most": 68662
+				},
+				"vote": {
+					"calls": 34,
+					"p50": 34356,
+					"p95": 126829,
+					"most": 170220
+				},
+				"release": {
+					"calls": 34,
+					"p50": 3106,
+					"p95": 22003,
+					"most": 28525
+				}
+			},
+			"wake": null,
+			"failures": {
+				"wait: fetch failed: 500 Internal Server Error": 562,
+				"vote: fetch failed: 500 Internal Server Error": 10,
+				"wait: HTTP Error: 500 Internal Server Error (records--nuandy--wait-probe-mv8uk7un--8, ": 158,
+				"vote: HTTP Error: 500 Internal Server Error (records--nuandy--wait-probe-mv8uk7un--8, ": 2,
+				"claim: fetch failed: 500 Internal Server Error": 1,
+				"vote: push to refs/notes/githive-vote-buckets/nuandy--wait-probe-mv8uk7un/0 failed: In": 3,
+				"wait: HTTP Error: 503 Service Unavailable (records--nuandy--wait-probe-mv8uk7un--8, 5 ": 4,
+				"wait: HTTP Error: 503 Service Unavailable (records--nuandy--wait-probe-mv8uk7un--3, 5 ": 3,
+				"wait: fetch failed: 503 Service unavailable": 37,
+				"release: fetch failed: 500 Internal Server Error": 2
+			},
+			"use": {
+				"RecordCache": {
+					"requests": 47685,
+					"wallMs": 12221880,
+					"activeMs": 402384
+				},
+				"RepoCache": {
+					"requests": 64292,
+					"wallMs": 29344243,
+					"activeMs": 116164
+				},
+				"RepoIndex": {
+					"requests": 60,
+					"wallMs": 12604,
+					"activeMs": 10561
+				},
+				"TokenCache": {
+					"requests": 25190,
+					"wallMs": 35934241,
+					"activeMs": 71458
+				}
+			},
+			"perWrite": {
+				"RecordCache": {
+					"requests": 467.5,
+					"activeMs": 3944.9
+				},
+				"RepoCache": {
+					"requests": 630.31,
+					"activeMs": 1138.9
+				},
+				"RepoIndex": {
+					"requests": 0.59,
+					"activeMs": 103.5
+				},
+				"TokenCache": {
+					"requests": 246.96,
+					"activeMs": 700.6
+				}
+			}
+		}
+	]
+}
