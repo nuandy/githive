@@ -24,3 +24,7 @@ two people's runs never slow each other down. Deploy a commit once its run has p
 How the dashboard (`web/`) is styled, with its theme and components, is in [docs/dashboard-ui.md](https://github.com/nuandy/githive/blob/main/docs/dashboard-ui.md).
 
 Records in Git outlive the code that wrote them. To change a record's shape, bump `RECORD_FORMAT` in `src/record-format.ts`, add an upgrade from the old format, and run `UPDATE_RECORD_SHAPES=1 npx vitest run test/record-shapes.test.ts` to pin the new shape. Database migrations only add: the tests refuse one that drops, deletes or rewrites data.
+
+How to propose a change, name your branch and use AI tools is in
+[CONTRIBUTING.md](https://github.com/nuandy/githive/blob/main/CONTRIBUTING.md). To report a vulnerability privately,
+see [SECURITY.md](https://github.com/nuandy/githive/blob/main/SECURITY.md).

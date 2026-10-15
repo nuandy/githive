@@ -65,6 +65,11 @@ read them here:
 
 The design in depth, with the reasons behind it, is in [docs/design.md](docs/design.md).
 
+## Contributing and security
+
+How to propose a change, the branches and the tests are in [CONTRIBUTING.md](CONTRIBUTING.md). To report a
+vulnerability privately, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT
