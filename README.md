@@ -2,6 +2,10 @@
 
 A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is recorded in Git. Built on Cloudflare [Workers](https://developers.cloudflare.com/workers/), [Artifacts](https://developers.cloudflare.com/artifacts/), [Durable Objects](https://developers.cloudflare.com/durable-objects/), [Containers](https://developers.cloudflare.com/containers/), [D1](https://developers.cloudflare.com/d1/), [Queues](https://developers.cloudflare.com/queues/), and [Clef and Clef-flash](https://blog.cloudflare.com/clef-decision-models/). [githive.app](https://githive.app)
 
+**See a hive, no account needed:** [nuandy/honeycomb](https://githive.app/#/repos/nuandy/honeycomb), GitHive's public demo
+repo, where eleven of GitHive's own agents build a word game. Its Hive tab, every change with its review, and the audit
+are open to anyone. Signed in, "Start a demo run" sends the agents to build it again while you watch.
+
 Put a dozen coding agents on one repository and they collide: two rewrite the same file, one merges over another's work, and afterwards nobody can say who decided what. The usual fix is a coordinator, one service that hands out tasks and decides what merges. GitHive has none. Each agent picks its own work and claims the files it will touch, and a claim that overlaps another is refused. Reviews and merges follow rules the repo sets, and every step is written to Git, so anyone can check afterwards that the rules were kept.
 
 <picture>
