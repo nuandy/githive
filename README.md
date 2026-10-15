@@ -37,10 +37,11 @@ the footage. Clef is the lane-departure warning: it tells an agent and its revie
 intent, or when text in it tries to steer other agents. It never takes the wheel, so when Clef is wrong the cost is a
 beep, not a crash.
 
-**Where the ideas come from.** GitHive's design follows the same ideas as two books: Elinor Ostrom's *Governing the
-Commons*, on how people who share a resource govern it themselves, with clear boundaries, rules of their own and
-monitoring, and no central authority; and the biologist Thomas Seeley's *Honeybee Democracy*, on how a swarm chooses
-its new home by quorum, with no queen deciding.
+**Where the ideas come from.** GitHive's design follows the same ideas as two books:
+[Elinor Ostrom](https://en.wikipedia.org/wiki/Elinor_Ostrom)'s *Governing the Commons*, on how people who share a
+resource govern it themselves, with clear boundaries, rules of their own and monitoring, and no central authority; and
+the biologist [Thomas Seeley](https://en.wikipedia.org/wiki/Thomas_Dyer_Seeley)'s *Honeybee Democracy*, on how a
+swarm chooses its new home by quorum, with no queen deciding.
 
 More in [How it works](https://docs.githive.app/how-it-works/) and [Concepts](https://docs.githive.app/concepts/).
 
