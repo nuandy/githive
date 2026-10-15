@@ -17,10 +17,13 @@ type Entry =
 			kind: "file";
 			data: Uint8Array;
 			mtimeMs: number;
+			executable?: boolean;
 	  };
 
 class MemoryStats {
 	entry: Entry;
+	/** isomorphic-git sets a checked-out file's mode from its tree before it indexes the file, so mode is writable. */
+	private given?: number;
 
 	constructor(entry: Entry) {
 		this.entry = entry;
@@ -39,7 +42,13 @@ class MemoryStats {
 	}
 
 	get mode() {
-		return this.entry.kind === "file" ? 0o100644 : 0o040000;
+		if (this.given !== undefined) return this.given;
+		if (this.entry.kind === "dir") return 0o040000;
+		return this.entry.executable ? 0o100755 : 0o100644;
+	}
+
+	set mode(mode: number) {
+		this.given = mode;
 	}
 
 	isFile() {
@@ -159,14 +168,22 @@ export class MemoryFS {
 		this.requireDir(parent).children.add(this.basename(target));
 	}
 
-	async writeFile(path: string, data: string | Uint8Array | ArrayBuffer) {
+	async writeFile(
+		path: string,
+		data: string | Uint8Array | ArrayBuffer,
+		options?: string | { mode?: number; encoding?: string },
+	) {
 		const target = this.normalize(path);
 		await this.mkdir(this.parent(target), { recursive: true });
+		// isomorphic-git writes an executable file with mode 0o777, and only that says it's executable.
+		const mode = typeof options === "object" ? options.mode : undefined;
+		const executable = mode !== undefined && (mode & 0o111) !== 0;
 
 		this.entries.set(target, {
 			kind: "file",
 			data: this.toBytes(data),
 			mtimeMs: Date.now(),
+			...(executable ? { executable } : {}),
 		});
 
 		this.requireDir(this.parent(target)).children.add(this.basename(target));
