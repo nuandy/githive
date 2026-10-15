@@ -6,7 +6,7 @@ import { presentClaim } from "../branch-scope";
 import { type ClaimStore, claimStore } from "../claim-store";
 import { type ClaimRecord, type Registry, shardClaims, shardingReason } from "../claims";
 import { trustedClaim } from "../github-settings";
-import { BUILDING_IDLE_MS } from "../staleness";
+import { CHALLENGE_WINDOW_MS } from "../staleness";
 import { VOTE_BUCKETS, type VoteStore, voteStore } from "../vote-store";
 import { type ReviewPolicy, shardVotes, type Votes, votesShardingReason } from "../votes";
 import type { ClaimsAdvice, ToolContext } from "./context";
@@ -25,8 +25,11 @@ export const DEFAULT_SHARD_DEPTH = 2;
 export const DEFAULT_RECORDS_REPOS = 16;
 export const MOST_RECORDS_REPOS = 64;
 
-/** No claim goes stale sooner than this after its agent last claimed (see staleness.ts). */
-export const STALE_AFTER_MS = BUILDING_IDLE_MS;
+/**
+ * No claim goes stale sooner than this after its agent last claimed: the window a challenge gives its holder, which
+ * a claim since the challenge would have answered (see staleness.ts).
+ */
+export const STALE_AFTER_MS = CHALLENGE_WINDOW_MS;
 
 /** The most reviews or backlog items a call lists; the rest are only counted. */
 export const LISTED_AT_MOST = 40;

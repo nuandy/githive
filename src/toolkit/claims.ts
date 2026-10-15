@@ -45,6 +45,8 @@ export interface ReleaseRecord {
 	stale?: boolean;
 	/** The holder's last activity, which the audit checks a stale release against. */
 	lastActive: string;
+	/** For a stale release, when its holder was asked whether it was still there and didn't answer (challenges.ts). */
+	challengedAt?: string;
 	/** The releaser's verified identity, set when the release is written through the toolkit. */
 	verifiedBy?: string;
 	stamp?: string;
@@ -322,8 +324,10 @@ export async function claim(
 		const freedClaims = state.claims.filter((held) => stale.has(held.change));
 		released = freedClaims.map((held) => held.change);
 		const releases: ReleaseRecord[] = [];
-		for (const held of freedClaims)
-			releases.push(await stamped("release", staleRelease(held, wanted.agent, now), stamper, "verifiedBy"));
+		for (const held of freedClaims) {
+			const release = staleRelease(held, wanted.agent, now, stale.get(held.change));
+			releases.push(await stamped("release", release, stamper, "verifiedBy"));
+		}
 		const remaining = state.claims.filter((held) => !freedClaims.includes(held));
 		const existing = remaining.find((held) => held.change === wanted.change);
 		// A change belongs to its agent; another agent claiming under its name would extend someone else's claim.
@@ -346,38 +350,36 @@ export async function claim(
 	return outcome.ok ? { ...outcome, previous, seen, released } : { ok: false as const, conflicts: outcome.refused };
 }
 
-// The changes in the way, by conflicting or by taking the same name, whose claims are stale. Stale means idle past
-// the floor and, when the caller can tell, abandoned on its agent's turn. An abandoned change under the same name
-// can be taken over this way too.
+// The changes in the way, by conflicting or by taking the same name, whose claims are stale, each with the challenge
+// its holder didn't answer, if the caller says. Stale means idle past the floor and, when the caller can tell,
+// abandoned on its agent's turn. An abandoned change under the same name can be taken over this way too.
 async function staleInTheWay(
 	state: Registry,
 	conflicts: Conflict[],
 	wanted: { change: string; agent: string },
 	options: { nowMs: number; staleAfterMs?: number; abandoned?: Abandoned },
-): Promise<Set<string>> {
+): Promise<Map<string, string | undefined>> {
 	const { nowMs, staleAfterMs, abandoned } = options;
 	const sameName = state.claims.find((held) => held.change === wanted.change && held.agent !== wanted.agent);
 	const inTheWay = new Set([...conflicts.map((conflict) => conflict.change), ...(sameName ? [sameName.change] : [])]);
-	const stale = new Set<string>();
+	const stale = new Map<string, string | undefined>();
 	for (const change of inTheWay) {
 		const held = state.claims.find((claim) => claim.change === change)!;
-		if (
-			staleAfterMs !== undefined &&
-			nowMs - Date.parse(held.active) > staleAfterMs &&
-			(!abandoned || (await abandoned(held)).abandoned)
-		)
-			stale.add(change);
+		if (staleAfterMs === undefined || nowMs - Date.parse(held.active) <= staleAfterMs) continue;
+		const judged = abandoned ? await abandoned(held) : { abandoned: true };
+		if (judged.abandoned) stale.set(change, "challengedAt" in judged ? judged.challengedAt : undefined);
 	}
 	return stale;
 }
 
-const staleRelease = (held: ClaimRecord, by: string, at: string): ReleaseRecord => {
+const staleRelease = (held: ClaimRecord, by: string, at: string, challengedAt?: string): ReleaseRecord => {
 	const into = scopedInto(held.paths);
 	return {
 		change: held.change,
 		agent: held.agent,
 		by,
 		at,
+		...(challengedAt ? { challengedAt } : {}),
 		reason: "stale",
 		stale: true,
 		lastActive: held.active,
@@ -467,13 +469,24 @@ export interface ReleaseInput {
 	holder?: string;
 }
 
-/** Whether a claim is abandoned (see staleness.ts). The caller decides, since the claims don't know heads or votes. */
-export type Abandoned = (claim: ClaimRecord) => Promise<{ abandoned: boolean; why: string }>;
+/**
+ * Whether a claim is abandoned (see staleness.ts), and if so, the challenge its holder didn't answer. The caller
+ * decides, since the claims don't know heads, votes or challenges.
+ */
+export type Abandoned = (claim: ClaimRecord) => Promise<{ abandoned: boolean; why: string; challengedAt?: string }>;
 
 /** Releases another agent's claim if it has been idle past `staleAfterMs` and, if the caller can tell, abandoned. */
 export function releaseStale(
 	log: CasLog<Registry>,
-	input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
+	input: {
+		change: string;
+		agent: string;
+		staleAfterMs: number;
+		abandoned?: Abandoned;
+		/** The challenge its holder didn't answer, when the caller judged it abandoned already. */
+		challengedAt?: string;
+		now?: number;
+	},
 	stamper?: Stamper,
 ) {
 	const now = input.now ?? Date.now();
@@ -485,14 +498,13 @@ export function releaseStale(
 			return { refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
 		const turn = input.abandoned ? await input.abandoned(held) : undefined;
 		if (turn && !turn.abandoned) return { refused: `${input.change} isn't abandoned: it ${turn.why}` };
+		const challengedAt = turn?.challengedAt ?? input.challengedAt;
+		const release = staleRelease(held, input.agent, new Date(now).toISOString(), challengedAt);
 		return {
 			state: {
 				...state,
 				claims: state.claims.filter((c) => c.change !== input.change),
-				released: [
-					...state.released,
-					await stamped("release", staleRelease(held, input.agent, new Date(now).toISOString()), stamper, "verifiedBy"),
-				],
+				released: [...state.released, await stamped("release", release, stamper, "verifiedBy")],
 			},
 			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
 		};

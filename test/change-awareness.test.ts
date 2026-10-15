@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Footprint } from "../src/footprint-cache";
 import { changeHistory, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
-import { BUILDING_IDLE_MS } from "../src/toolkit/staleness";
+import { challenge, CHALLENGE_WINDOW_MS, type Challenges, challengesRef } from "../src/toolkit/challenges";
+import { recordLog } from "../src/toolkit/tools/repo";
 import { FakeStorage } from "./fakes/env";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -325,12 +326,17 @@ describe("the dashboard's claims", { timeout: 60_000 }, () => {
 				(await repoSnapshot(ctx(), "p")).claims.map((claim) => [claim.change, [claim.active, claim.lease]]),
 			);
 		const first = await leases();
-		// Nothing pushed: free 30 minutes after its agent last claimed. Pushed: it waits on review, and lasts.
-		expect(first["a-1"]![1]).toEqual({
-			waitingOn: "agent",
-			freeAfter: at(first["a-1"]![0] as string, BUILDING_IDLE_MS),
-		});
+		// Nothing pushed, and nobody has asked whether its agent is still there: it lasts. Pushed: it waits on review.
+		expect(first["a-1"]![1]).toEqual({ waitingOn: "agent" });
 		expect(first["b-1"]![1]).toEqual({ waitingOn: "reviewers" });
+		// Asked, it frees up once its agent's time to answer is up.
+		const held = { change: "a-1", agent: "a", active: first["a-1"]![0] as string };
+		const { challenge: asked } = await challenge(recordLog<Challenges>(ctx(), "p", challengesRef("p")), held, "b");
+		const challenged = (await repoSnapshot(ctx(), "p")).claims.find((claim) => claim.change === "a-1")!;
+		expect(challenged).toMatchObject({
+			challenged: asked.at,
+			lease: { waitingOn: "agent", freeAfter: at(asked.at, CHALLENGE_WINDOW_MS) },
+		});
 		// In the batch being checked, it waits on the landing.
 		checking = [{ change: "b-1", head, agent: "b" }];
 		expect((await leases())["b-1"]![1]).toEqual({ waitingOn: "landing" });

@@ -7,6 +7,7 @@ import { concernsOf } from "./ring-concerns";
 import { type Args, openCall, presentedKey, type ToolContext, type ToolHandlers, verifiedAgent } from "./tools/context";
 import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
+import { answerChallenges } from "./tools/answer-challenges";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
 import { claimWorkTools } from "./tools/claim-work";
@@ -136,6 +137,7 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 	const delivery = name === "wait" ? waitDelivery(args, result) : undefined;
 	const news = await ctx.news(repo, branch, agent, delivery).catch((): NewsItem[] => []);
 	if (!news.length) return result;
+	const answered = await answerChallenges(ctx, repo, registry.commit.state, agent, news);
 	const says = (landed: LandedNews) => {
 		const more = landed.filesMore ? ` and ${landed.filesMore} more` : "";
 		const intent = landed.intent ? `, "${landed.intent}"` : "";
@@ -144,7 +146,10 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 	// Landings are told in a line made here; notices come with their own `says` and `next`.
 	return {
 		...(result as Record<string, unknown>),
-		news: news.map((item) => (isLanded(item) ? { ...item, says: says(item) } : item)),
+		news: news.map((item) => {
+			if (isLanded(item)) return { ...item, says: says(item) };
+			return item.change && answered.has(item.change) ? { ...item, answered: ANSWERED } : item;
+		}),
 	};
 }
 
@@ -155,6 +160,8 @@ function waitDelivery(args: Args, result: object) {
 	const through = seenRings((result as { seen?: unknown }).seen);
 	return { ...(ack === undefined ? {} : { ack }), ...(through === undefined ? {} : { through }) };
 }
+
+const ANSWERED = "GitHive answered for you by claiming the change again: its claim stays yours.";
 
 type LandedNews = Extract<NewsItem, { kind: "landed" }>;
 const isLanded = (item: NewsItem): item is LandedNews => item.kind === "landed";

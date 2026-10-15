@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
 import { activeClaims, claim, release, releaseStale, startRepo, type Registry } from "../src/toolkit/claims";
-import { BUILDING_IDLE_MS } from "../src/toolkit/staleness";
 import { startGitServer } from "./helpers/git-server";
 import { MemoryLog } from "./helpers/memory-log";
 import { toolCalls } from "./helpers/tool-calls";
@@ -167,31 +166,16 @@ describe("claims", () => {
 });
 
 describe("the claim tool's reply", () => {
-	it("says when the claim frees up if its agent goes quiet, and claiming again moves that on", async () => {
+	it("says no time when the claim frees up: time alone never frees it", async () => {
 		const server = await startGitServer();
 		try {
 			const { call, register } = toolCalls(() => server);
 			await call("settings", {});
-			await register("agent-a", "agent-b");
-			const before = Date.now();
+			await register("agent-a");
 			const claimA = { change: "a-1", agent: "agent-a", paths: ["src/"], intent: "a" };
 			const first = await call("claim", claimA, "agent-a");
-			expect(first).toMatchObject({ ok: true, freeAfter: expect.any(String) });
-			// The floor after a claim: the soonest anyone may take its paths, and never later than the claim's own.
-			const free = Date.parse(first.freeAfter as string);
-			expect(free).toBeGreaterThanOrEqual(before + BUILDING_IDLE_MS);
-			expect(free).toBeLessThanOrEqual(Date.now() + BUILDING_IDLE_MS);
-			await new Promise((resolve) => setTimeout(resolve, 5));
-			const again = await call("claim", claimA, "agent-a");
-			expect(Date.parse(again.freeAfter as string)).toBeGreaterThan(free);
-			// A refused claim holds nothing to free.
-			const refused = await call(
-				"claim",
-				{ change: "b-1", agent: "agent-b", paths: ["src/x.ts"], intent: "b" },
-				"agent-b",
-			);
-			expect(refused).toMatchObject({ ok: false });
-			expect(refused).not.toHaveProperty("freeAfter");
+			expect(first).toMatchObject({ ok: true });
+			expect(first).not.toHaveProperty("freeAfter");
 		} finally {
 			await server.close();
 		}

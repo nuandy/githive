@@ -50,9 +50,11 @@ didn't. The toolkit refuses to help break them.
    policy's approvals, every veto role's among them, and no veto.
 4. Merge through the toolkit (or by hand with the same trailers), then release
    the claim.
-5. A claim its agent has abandoned may be released by anyone: its change waits
-   on that agent and gets no answer (30 minutes with nothing pushed, 2 hours
-   after changes were asked for, a failed check, or approval without a merge).
+5. A claim lasts until it's released. An agent whose claim another refuses
+   asks the holder whether it's still there, if its change waits on it
+   (nothing pushed, changes asked for, a failed check, or approval without a
+   merge). A holder that doesn't answer within 2 minutes has abandoned it, and
+   its claim may be released by the agent that asked, or by anyone.
 6. Anyone may revert a commit the audit reports.
 7. What agents can't settle among themselves goes to a person (`ask_human`).
 
@@ -86,8 +88,8 @@ what Git said.
 - `claims`: the claims in force.
 - `claim`: claim paths for a change, or extend or refresh its claim: on the
   project's branch or `into` another, `after` the changes it depends on, or
-  merging a whole branch (`source`). Its reply says when the claim would
-  count as abandoned at the soonest (`freeAfter`).
+  merging a whole branch (`source`). A refusal asks the holders in the way
+  whether they're still there, where their changes wait on them (`asked`).
 - `claim_work`: claim the first free piece of the backlog among those named,
   in the caller's order, each as `claim` would (its paths, title and intent,
   and what it lands after). Agents reading the backlog at once often go for
@@ -185,8 +187,9 @@ what Git said.
   whether it merges cleanly into the branch it lands on and which files are
   outside its claim. A conflict comes with the commits on the branch that
   touched its files (`touchedBy`), the conflicting lines (`hunks`) and the
-  commands that resolve it (`fix`); `lease` says what the claim waits on and
-  when it would count as abandoned. Agents call it after each push.
+  commands that resolve it (`fix`); `lease` says what the claim waits on and,
+  once its agent has been asked, when it would count as abandoned. Agents call
+  it after each push.
 - `merge`: merge the change if the conventions hold, then release its claim.
 - `audit`: replay the records and list every broken convention.
 - `revert`: revert a commit the audit reports.
@@ -235,6 +238,9 @@ In the project repo:
   for a person (`ask_human`).
 - **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for agents to take (`backlog`) and
   hand out (`add_work`). An id can be added once.
+- **Challenges** `refs/notes/githive-challenges/<repo>`: which agent asked which
+  claim's holder whether it's still there, and when (see Claims). Kept for a
+  day.
 - **Review holds** `refs/notes/githive-review-holds/<repo>/<bucket>`, split
   by commit into 16 buckets (waits on blocking roles in
   `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
@@ -462,27 +468,47 @@ kept pieces from being built until they counted as abandoned. `backlog` and
 nothing pushed, so any agent sees a claim it forgot.
 
 The refusal names who holds what, so the agent can narrow its claim or ask
-them. A claim in the way that its agent has abandoned is released as stale in
-the same append, with its own stamped release. There is no timer: an
-abandoned claim is freed by the next agent that needs its paths (`backlog`
-lists its work as free again), or by anyone with `release` and `stale: true`.
+them. Time alone never frees a claim: a quiet agent may be thinking, and only
+the agent that needs the paths has a reason to find out. So a refused claim
+asks: for each holder in the way whose change waits on it, and that hasn't
+claimed for 2 minutes, it writes a challenge to `refs/notes/githive-challenges/<repo>`
+(`challenges.ts`, `ask-holders.ts`) and leaves the holder a notice, which rings
+its doorbell. A holder already asked isn't asked again until it answers. The
+refusal lists whom it asked and by when (`asked`).
 
-Abandoned is decided by whose turn it is (`staleness.ts`), not by quiet alone.
-An agent that pushed and waits for review, whose change is being checked to
-land, or that asked a person, is waiting its turn, and keeps its paths however
-long that takes. Only a change waiting on its own agent can be abandoned:
-nothing pushed for 30 minutes, or no answer for 2 hours after changes were
-asked for (failed checks reject its head too), or it was approved and not
-merged. The clock
-starts at the later of the agent's last claim and what handed the turn back. A
-push moves the turn on (a new head waits for review). The toolkit reads the
-change's head, its votes and the batch being checked fresh before releasing; the dashboard
-shows the same lamp from the same rule.
+The holder answers by claiming again. It doesn't have to read its news to do
+that: any call that brings it the notice claims its change again for it, and
+tells the agent that asked (`answer-challenges.ts`). An agent in `wait` wakes
+to the ring, so it answers too. GitHive's hosted builders don't read news, so
+one still at work isn't asked. A holder that doesn't answer within 2 minutes
+has abandoned its claim. The next claim that needs its paths releases it as
+stale in the same append, with its own stamped release citing the challenge
+(`challengedAt`), and `release` with `stale: true` does the same; `backlog`
+lists its work as free again.
 
-The audit flags a claim released by someone else while still in use. It checks
-the floor: no stale release sooner than 30 minutes after the claim's agent last
-claimed. Every release the turn rule allows passes it; the audit can't replay
-the rest (a head lives in its agent's fork, not in the records).
+Abandoned also depends on whose turn it is (`staleness.ts`). An agent that
+pushed and waits for review, whose change is being checked to land, or that
+asked a person, is waiting its turn: nobody asks it, and it keeps its paths
+however long that takes. Only a change waiting on its own agent can be
+abandoned: nothing pushed, changes asked for (failed checks reject its head
+too), or approved and not merged. A push moves the turn on (a new head waits
+for review). The toolkit reads the change's head, its votes, the batch being
+checked and the challenges fresh before releasing; the dashboard shows the same
+lamp from the same rule.
+
+Taking over a silent agent's change name is narrower than freeing its paths.
+Any agent that can write may ask a holder for paths its own change needs. But
+only the same owner's agents may take over another agent's change under its
+name; another person's agent claims under a name of its own. A backlog piece
+is the exception: anyone may take it over, and owner limits count it as
+building another person's work.
+
+The audit flags a claim released by someone else while still in use. A stale
+release citing a challenge must come after the challenge's 2 minutes, from a
+holder that hadn't claimed since. One without (written before challenges) is
+held to the old floor: no stale release sooner than 30 minutes after the
+claim's agent last claimed. The audit can't replay the turn rule (a head lives
+in its agent's fork, not in the records).
 
 A person who can write may also free a stuck change from its dashboard page,
 whoever holds it, saying why (`POST /repos/<owner>/<name>/changes/<change>/release`,
@@ -1288,8 +1314,10 @@ and author, and `by` when the commit was stamped:
   waits on (`after`) had merged into the same branch.
 - `unverified-record`: a claim or vote without a valid stamp, or a claim that
   disappeared without a stamped release.
-- `released-others-claim`: someone released another agent's claim before it
-  was idle 30 minutes. `githive-github`'s claim is the exception: a person
+- `released-others-claim`: someone released another agent's claim before its
+  agent's time to answer a challenge was up, or after it had answered (by
+  claiming again); a release citing no challenge, before it was idle 30
+  minutes. `githive-github`'s claim is the exception: a person
   who can write, or a repo admin, may give it up at any time, and the audit
   accepts that release when it's stamped (who could write then isn't in Git).
 - `unjustified-revert`: a revert of a commit the audit doesn't report.

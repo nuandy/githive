@@ -2,10 +2,11 @@ import { fail, statusOf } from "../../errors";
 import { branchHead, type Remote } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { presentClaim } from "../branch-scope";
+import { type Challenges, challengesRef, openChallenge } from "../challenges";
 import type { Abandoned, ClaimRecord, Registry } from "../claims";
 import { trustedClaim } from "../github-settings";
 import type { LandingView } from "../landing";
-import { abandoned, type ChangeSigns } from "../staleness";
+import { abandoned, type ChangeSigns, type Turn } from "../staleness";
 import type { VoteStore } from "../vote-store";
 import {
 	approval,
@@ -18,7 +19,7 @@ import {
 	type Votes,
 } from "../votes";
 import type { ToolContext } from "./context";
-import { branchSettings, claimPolicy, hostedRoles } from "./repo";
+import { branchSettings, claimPolicy, hostedRoles, recordLog } from "./repo";
 
 // Where a change stands: where its branch lives, its pushed head, its votes against the policy,
 // and whether it has been abandoned.
@@ -127,8 +128,11 @@ export function changeSigns(input: {
 	record: Pick<Votes, "votes" | "flags">;
 	landing?: Pick<LandingView, "checking"> | null;
 	policy: ReviewPolicy;
+	/** The repo's challenges, for one open on this claim (see challenges.ts). */
+	challenges?: Challenges | undefined;
 }): ChangeSigns {
 	const { claim, head } = input;
+	const challenge = openChallenge(input.challenges, claim);
 	const onHead = head ? latestVotes(input.counted.filter((v) => v.commit === head)) : [];
 	const counted = onHead.filter((v) => v.reviewer !== claim.agent);
 	const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
@@ -145,8 +149,20 @@ export function changeSigns(input: {
 		vetoed: !!outcome?.vetoedBy.length,
 		landing: !!head && !!batched,
 		asked: !!openFlag(input.record, claim.change, head, outcome?.awaiting ?? []),
+		...(challenge ? { challenged: challenge.at } : {}),
 	};
 }
+
+/** The repo's challenges, or none when they can't be read: then no claim counts as challenged, so none is freed. */
+export async function readChallenges(ctx: ToolContext, repo: string): Promise<Challenges | undefined> {
+	const head = await recordLog<Challenges>(ctx, repo, challengesRef(repo))
+		.read()
+		.catch(() => null);
+	return head?.commit.state;
+}
+
+/** The abandoned rule, also saying whose turn the claim's change is on: only its agent's can be challenged. */
+export type Judge = (claim: ClaimRecord) => Promise<Awaited<ReturnType<Abandoned>> & { turn?: Turn }>;
 
 /**
  * Decides whether a claim that's in the way, or asked to be released as stale, is abandoned.
@@ -157,7 +173,9 @@ export function abandonedRule(
 	repo: string,
 	registered: Registry | null | undefined,
 	votes: VoteStore,
-): Abandoned {
+): Judge {
+	// Read once for the rule, when it's first asked: most claims are never in anyone's way.
+	let challenges: Promise<Challenges | undefined> | undefined;
 	return async (claim) => {
 		// A failed read isn't "nothing pushed", which could release live work. Only a missing fork (409),
 		// or no forks at all (501), means nothing is pushed.
@@ -184,8 +202,15 @@ export function abandonedRule(
 			record: view,
 			landing,
 			policy: claimPolicy(registered, shown),
+			challenges: await (challenges ??= readChallenges(ctx, repo)),
 		});
 		const outcome = abandoned(signs, Date.now());
-		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
+		const challengedAt = outcome.abandoned ? signs.challenged : undefined;
+		return {
+			abandoned: outcome.abandoned,
+			why: outcome.why,
+			turn: outcome.waiting.turn,
+			...(challengedAt ? { challengedAt } : {}),
+		};
 	};
 }

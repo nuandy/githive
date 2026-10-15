@@ -5,14 +5,14 @@ import type { ClaimRecord } from "../claims";
 import { likelyEnvironment } from "../failure-hints";
 import { type LandingView, lastLandedOn, type Settled } from "../landing";
 import { conflictFix } from "../merge-ready";
-import { leaseFor } from "../staleness";
+import { leaseFor, waitingOn } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes, ownPersonsWork } from "../votes";
 import { keepSteering, pieceHints, writtenSteering } from "../clef-hints";
 import { STEERING_SAYS } from "../../steering";
 import { addDependencies, addWork, addWorks } from "../backlog-records";
 import { type BacklogView, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
-import { changeSigns, changeStatus } from "./change-state";
+import { changeSigns, changeStatus, readChallenges } from "./change-state";
 import { changeList, workItemFrom } from "./claim-input";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
@@ -275,8 +275,8 @@ export async function reviewOptions(ctx: ToolContext, repo: string, state: WorkI
 const RENEW = "claim the same paths again";
 
 /**
- * How long a claim lasts if its agent goes quiet: whose turn its change is on, and, on its agent's turn, the time
- * after which its paths are free for anyone (see staleness.ts). Waiting on reviewers, a landing or a person, it lasts.
+ * How long a claim lasts: whose turn its change is on, and, when another agent has asked its agent whether it's still
+ * there, the time after which its paths are free for that agent (see staleness.ts). Otherwise it lasts.
  */
 async function leaseOf(
 	call: ToolCall,
@@ -285,12 +285,15 @@ async function leaseOf(
 	landing: LandingView | null,
 	votesFor: (head: string | null) => Promise<VotesView>,
 ) {
-	const { registered } = call;
+	const { ctx, repo, registered } = call;
 	const record = await votesFor(head);
 	const onHead = head ? record.votes.filter((vote) => vote.commit === head) : [];
 	const counted = await countedVotes(onHead, registered?.stampKey);
 	const policy = claimPolicy(registered, claim);
-	return { ...leaseFor(changeSigns({ claim, head, counted, record, landing, policy })), renew: RENEW };
+	const signs = changeSigns({ claim, head, counted, record, landing, policy });
+	// Only a change on its agent's turn can be challenged, so the challenges are read only then.
+	const challenges = waitingOn(signs).turn === "agent" ? await readChallenges(ctx, repo) : undefined;
+	return { ...leaseFor(changeSigns({ claim, head, counted, record, landing, policy, challenges })), renew: RENEW };
 }
 
 /**

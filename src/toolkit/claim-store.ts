@@ -90,7 +90,14 @@ export interface ClaimStore {
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
 	release(input: ReleaseInput, stamper?: Stamper): Promise<ReleaseOutcome>;
 	releaseStale(
-		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
+		input: {
+			change: string;
+			agent: string;
+			staleAfterMs: number;
+			abandoned?: Abandoned;
+			challengedAt?: string;
+			now?: number;
+		},
 		stamper?: Stamper,
 	): Promise<ReleaseOutcome>;
 	/** Releases another agent's claim on `agent`'s word, idle or not (see claims.ts giveUp). */
@@ -483,13 +490,15 @@ class Claims implements ClaimStore {
 			return `takes over ${input.change} (released by ${owner})`;
 		}
 		// Still held and not abandoned, so the change is that agent's.
-		if (!(await staleFor(input, held.own))) throw new Error(changeTaken(input.change, held.own.agent));
+		const judged = await staleFor(input, held.own);
+		if (!judged.stale) throw new Error(changeTaken(input.change, held.own.agent));
 		// Abandoned: release it in every shard it holds, not only those this claim reaches.
 		await this.releaseStale(
 			{
 				change: input.change,
 				agent: input.agent,
 				staleAfterMs: input.staleAfterMs!,
+				...(judged.challengedAt ? { challengedAt: judged.challengedAt } : {}),
 				...(input.now !== undefined ? { now: input.now } : {}),
 			},
 			stamper,
@@ -593,7 +602,14 @@ class Claims implements ClaimStore {
 	}
 
 	async releaseStale(
-		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
+		input: {
+			change: string;
+			agent: string;
+			staleAfterMs: number;
+			abandoned?: Abandoned;
+			challengedAt?: string;
+			now?: number;
+		},
 		stamper?: Stamper,
 	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
@@ -608,7 +624,10 @@ class Claims implements ClaimStore {
 		const turn = input.abandoned ? await input.abandoned(held.own) : undefined;
 		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		const { abandoned: _abandoned, ...rest } = input;
-		const released = await this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+		// Judged once, so each shard's release records the same unanswered challenge.
+		const challengedAt = turn?.challengedAt ?? input.challengedAt;
+		const judged = { ...rest, ...(challengedAt ? { challengedAt } : {}) };
+		const released = await this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), judged, stamper));
 		if (released.ok) await this.forgetAttempts(input.change);
 		return released;
 	}
@@ -673,10 +692,13 @@ function idleTooLong(input: Pick<ClaimInput, "staleAfterMs" | "now">, held: Clai
 	return (input.now ?? Date.now()) - Date.parse(held.active) > input.staleAfterMs;
 }
 
-// Whether `held` is stale for this claim: idle past the floor and, when the caller can tell, abandoned.
-async function staleFor(input: ClaimInput, held: ClaimRecord): Promise<boolean> {
-	if (!idleTooLong(input, held)) return false;
-	return !input.abandoned || (await input.abandoned(held)).abandoned;
+// Whether `held` is stale for this claim: idle past the floor and, when the caller can tell, abandoned, with the
+// challenge its holder didn't answer.
+async function staleFor(input: ClaimInput, held: ClaimRecord): Promise<{ stale: boolean; challengedAt?: string }> {
+	if (!idleTooLong(input, held)) return { stale: false };
+	if (!input.abandoned) return { stale: true };
+	const judged = await input.abandoned(held);
+	return { stale: judged.abandoned, ...(judged.challengedAt ? { challengedAt: judged.challengedAt } : {}) };
 }
 
 // A change's records across shards as one claim: all its paths, its first claim and its latest activity.

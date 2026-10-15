@@ -5,12 +5,13 @@ import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } 
 import { briefSteers, claimHints, keepSteering, steeringReply } from "../clef-hints";
 import { giveBackPartClaim, withoutLeftovers } from "./claim-leftovers";
 import { abandonedRule } from "./change-state";
+import { askHolders, type Judged, keepingJudged } from "./ask-holders";
 import { branchMerge, changeList, dependencyLoop, newChangeId, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
 import type { ClaimRecord } from "../claims";
-import { BUILDING_IDLE_MS } from "../staleness";
 import type { Args, ToolCall, ToolHandlers } from "./context";
 import { giveUpGitHubChange } from "./github-tools";
+import { ownerOf } from "../votes";
 import type { Work } from "../work";
 import { containerChecks, recordLog, shardIfBusy, STALE_AFTER_MS, storeFor, workRef } from "./repo";
 
@@ -98,6 +99,8 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 	const source = optionalString(args, "source");
 	refuseGitHubBranches(args, agent);
 	refuseGitHubChangeName(change, agent);
+	const holder = await call.claimOf(change);
+	if (holder && holder.agent !== agent) await refuseOthersChange(call, holder);
 	const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 	const reserved = given.find(isReservedPath);
 	if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
@@ -112,6 +115,8 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 	if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
 	const intent = requiredString(args, "intent");
 	const { similar, steers } = await asClefSees(call, { change, agent, intent, paths });
+	// The claims in the way that the claim judges, so a refusal can ask their holders whether they're still there.
+	const judged = new Map<string, Judged>();
 	const input = {
 		change,
 		agent,
@@ -120,12 +125,10 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 		...(after.length ? { after } : {}),
 		...(source ? { source } : {}),
 		staleAfterMs: STALE_AFTER_MS,
-		abandoned: abandonedRule(ctx, repo, registered, votes),
+		abandoned: keepingJudged(abandonedRule(ctx, repo, registered, votes), judged),
 	};
 	// If one record would hold agents up, shard first, then claim in the shards.
 	const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
-	// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
-	const claimedAt = Date.now();
 	// Asked before claiming: claiming again renews what was counted then.
 	const renewing = (await call.claimOf(change))?.agent === agent;
 	const claimStore = sharded ? storeFor(ctx, repo, sharded) : store;
@@ -134,7 +137,7 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 		// A store can answer an error after the claim is written; a new claim is given back, so it doesn't sit
 		// in the agent's name unbuilt. A renewal stays: the change was the agent's already.
 		if (!renewing) await giveBack("its claim failed partway");
-		throw err;
+		throw await askingHolderOfName(call, judged, change, err);
 	});
 	const outcome = await withoutLeftovers(written, renewing, giveBack);
 	if (outcome.ok) await keepToOwnerLimit(call, claimStore, { change, agent, renewing });
@@ -143,8 +146,8 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 	// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
 	// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 	if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-	const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
-	if (!outcome.ok) return reply;
+	const reply = claimReply(outcome, { change, into, branch, made, source, merging, paths });
+	if (!outcome.ok) return withAsked(reply, await asking(call, judged, outcome.conflicts));
 	if (steers !== undefined) {
 		const written = piece ? { in: "backlog piece", by: piece.by } : { in: "intent", by: agent };
 		await keepSteering(ctx, repo, change, { ...written, likelihood: steers });
@@ -154,6 +157,45 @@ export async function claimChange(call: ToolCall, piece?: { by: string }) {
 		...(similar ? { similar } : {}),
 		...(steers === undefined ? {} : { steering: steeringReply(steers) }),
 	};
+}
+
+/**
+ * Another agent's change may be taken over, once its agent has gone silent, by its owner's other agents, or by anyone
+ * when it's a backlog piece (owner limits count that); another person's agents claim under a name of their own.
+ */
+async function refuseOthersChange(call: ToolCall, held: ClaimRecord) {
+	const owner = ownerOf(held.by);
+	if (!owner || owner === ownerOf(call.ctx.identity)) return;
+	const backlog = await recordLog<Work>(call.ctx, call.repo, workRef(call.repo)).read();
+	if (backlog?.commit.state.items.some((item) => item.id === held.change)) return;
+	fail(
+		403,
+		`${held.change} is ${held.agent}'s change, and only its owner's agents may take it over: claim under a ` +
+			"change name of your own",
+	);
+}
+
+/** Asks the holders of the claims in the way; a question that can't be written leaves the refusal as it is. */
+async function asking(call: ToolCall, judged: Map<string, Judged>, conflicts: { change: string }[]) {
+	return askHolders(
+		call,
+		judged,
+		conflicts.map((conflict) => conflict.change),
+	).catch((err: unknown) => {
+		console.error(`asking holders in ${call.repo} whether they're still there failed`, String(err));
+		return [];
+	});
+}
+
+function withAsked(reply: Record<string, unknown>, asked: Awaited<ReturnType<typeof askHolders>>) {
+	return asked.length ? { ...reply, asked } : reply;
+}
+
+// A claim refused because another agent holds the change's name asks that agent too, and says when to claim again.
+async function askingHolderOfName(call: ToolCall, judged: Map<string, Judged>, change: string, err: unknown) {
+	if (!(err instanceof Error) || !judged.has(change)) return err;
+	const [asked] = await asking(call, judged, [{ change }]);
+	return asked ? new Error(`${err.message}\n${asked.note}`) : err;
 }
 
 /**
@@ -254,8 +296,8 @@ async function landingBranch(call: ToolCall, change: string, agent: string) {
 	return { into, made };
 }
 
-// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, when the claim
-// may free up, and a note on a branch merge or on paths a refused claim still holds.
+// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, and a note on
+// a branch merge or on paths a refused claim still holds.
 function claimReply(
 	outcome: ClaimOutcome,
 	claimed: {
@@ -266,10 +308,9 @@ function claimReply(
 		source?: string;
 		merging?: { tip: string };
 		paths: string[];
-		claimedAt: number;
 	},
 ) {
-	const { change, into, branch, made, source, merging, paths, claimedAt } = claimed;
+	const { change, into, branch, made, source, merging, paths } = claimed;
 	// Report conflicting paths as agents wrote them, without the branch scoping.
 	const asWritten = (path: string) => presentClaim({ paths: [path] }, branch).paths[0];
 	const conflicts = outcome.ok
@@ -300,9 +341,6 @@ function claimReply(
 				}
 			: {};
 	const reply: Record<string, unknown> = { ...outcome };
-	// The soonest anyone may take its paths if its agent goes quiet: the floor after a claim (see staleness.ts). It
-	// lasts longer once something is pushed, and status's lease says exactly; claiming again renews it.
-	if (outcome.ok) reply.freeAfter = new Date(claimedAt + BUILDING_IDLE_MS).toISOString();
 	if (conflicts) reply.conflicts = conflicts;
 	if (into !== branch) reply.into = into;
 	if (made) reply.branch = made;

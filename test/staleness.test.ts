@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-	abandonableAt,
-	abandoned,
-	AGENT_TURN_IDLE_MS,
-	BUILDING_IDLE_MS,
-	type ChangeSigns,
-	waitingOn,
-} from "../src/toolkit/staleness";
+import { abandonableAt, abandoned, CHALLENGE_WINDOW_MS, type ChangeSigns, waitingOn } from "../src/toolkit/staleness";
 
-// A claim is abandoned only on its agent's turn: an agent waiting for review,
-// for its change to be checked and land, or for a person is never robbed of its paths.
+// A claim is abandoned only on its agent's turn, and only when another agent asked whether it's still there and got no
+// answer in time: an agent waiting for review, for its change to be checked and land, or for a person is never robbed
+// of its paths, and time alone frees nothing.
 
 const T0 = Date.parse("2026-10-09T00:00:00.000Z");
 const at = (ms: number) => new Date(T0 + ms).toISOString();
@@ -23,21 +17,21 @@ const signs = (over: Partial<ChangeSigns> = {}): ChangeSigns => ({
 	...over,
 });
 const minutes = (n: number) => n * 60_000;
+const day = 24 * 60 * minutes(1);
 
 describe("whose turn a change is", () => {
 	it("is its agent's until something is pushed, then the reviewers'", () => {
-		expect(waitingOn(signs({ head: null }))).toMatchObject({ turn: "agent", idleAfterMs: BUILDING_IDLE_MS });
+		expect(waitingOn(signs({ head: null }))).toEqual({ turn: "agent", why: "has nothing pushed" });
 		expect(waitingOn(signs())).toMatchObject({ turn: "reviewers" });
 	});
 
 	it("goes back to the agent when changes are asked for (failed checks count) or it's approved and not merged", () => {
-		expect(waitingOn(signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] }))).toMatchObject({
+		expect(waitingOn(signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] }))).toEqual({
 			turn: "agent",
-			since: at(minutes(5)),
+			why: "had changes asked for",
 		});
-		expect(waitingOn(signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] }))).toMatchObject({
+		expect(waitingOn(signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] }))).toEqual({
 			turn: "agent",
-			since: at(minutes(9)),
 			why: "is approved and not merged",
 		});
 	});
@@ -46,64 +40,46 @@ describe("whose turn a change is", () => {
 		expect(waitingOn(signs({ landing: true, approved: true }))).toMatchObject({ turn: "landing" });
 		expect(waitingOn(signs({ asked: true, head: null }))).toMatchObject({ turn: "person" });
 	});
-
-	it("counts from the agent's own last claim when that's later than what handed the turn back", () => {
-		expect(
-			waitingOn(signs({ active: at(minutes(20)), votes: [{ verdict: "reject", at: at(minutes(5)) }] })).since,
-		).toBe(at(minutes(20)));
-	});
 });
 
 describe("an abandoned change", () => {
-	it("is one its agent hasn't answered for longer than its turn allows", () => {
-		expect(abandoned(signs({ head: null }), T0 + BUILDING_IDLE_MS - 1).abandoned).toBe(false);
-		expect(abandoned(signs({ head: null }), T0 + BUILDING_IDLE_MS + 1).abandoned).toBe(true);
-		const failed = signs({ votes: [{ verdict: "reject", at: at(0) }] });
-		expect(abandoned(failed, T0 + AGENT_TURN_IDLE_MS - 1).abandoned).toBe(false);
-		expect(abandoned(failed, T0 + AGENT_TURN_IDLE_MS + 1).abandoned).toBe(true);
+	it("is never one nobody asked about, however long its agent is quiet", () => {
+		expect(abandoned(signs({ head: null }), T0 + day)).toMatchObject({
+			abandoned: false,
+			why: "has an agent no one has asked whether it's still there",
+		});
+		expect(abandoned(signs({ votes: [{ verdict: "reject", at: at(0) }] }), T0 + day).abandoned).toBe(false);
 	});
 
-	it("is never one waiting for review, being checked to land, or on a person, however long", () => {
-		const day = 24 * 60 * minutes(1);
-		expect(abandoned(signs(), T0 + day).abandoned).toBe(false);
-		expect(abandoned(signs({ landing: true }), T0 + day).abandoned).toBe(false);
-		expect(abandoned(signs({ asked: true, head: null }), T0 + day).abandoned).toBe(false);
+	it("is one whose agent, on its turn, didn't answer within the window after it was asked", () => {
+		const asked = signs({ head: null, challenged: at(minutes(5)) });
+		const until = T0 + minutes(5) + CHALLENGE_WINDOW_MS;
+		expect(abandoned(asked, until)).toMatchObject({ abandoned: false, why: expect.stringContaining("has until") });
+		expect(abandoned(asked, until + 1)).toMatchObject({
+			abandoned: true,
+			why: "has nothing pushed, and its agent didn't answer when asked",
+		});
 	});
 
-	it("is never sooner than the floor after its agent last claimed", () => {
-		// Handed back long ago, but the agent claimed again a minute ago: it's at work.
-		expect(
-			abandoned(
-				signs({ active: at(AGENT_TURN_IDLE_MS + minutes(9)), votes: [{ verdict: "reject", at: at(0) }] }),
-				T0 + AGENT_TURN_IDLE_MS + minutes(10),
-			).abandoned,
-		).toBe(false);
+	it("is never one waiting for review, being checked to land, or on a person, even when asked", () => {
+		const challenged = at(0);
+		expect(abandoned(signs({ challenged }), T0 + day).abandoned).toBe(false);
+		expect(abandoned(signs({ landing: true, challenged }), T0 + day).abandoned).toBe(false);
+		expect(abandoned(signs({ asked: true, head: null, challenged }), T0 + day).abandoned).toBe(false);
 	});
 });
 
 describe("when a claim frees up", () => {
-	it("is the moment after which its change counts as abandoned, worked out from the same signs", () => {
-		const rejected = signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] });
-		const approved = signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] });
-		// Handed back long ago, but claimed again since: the floor after the claim decides.
-		const claimedAgain = signs({
-			active: at(AGENT_TURN_IDLE_MS + minutes(9)),
-			votes: [{ verdict: "reject", at: at(0) }],
-		});
-		expect(abandonableAt(signs({ head: null }))).toBe(T0 + BUILDING_IDLE_MS);
-		expect(abandonableAt(rejected)).toBe(T0 + minutes(5) + AGENT_TURN_IDLE_MS);
-		expect(abandonableAt(approved)).toBe(T0 + minutes(9) + AGENT_TURN_IDLE_MS);
-		expect(abandonableAt(claimedAgain)).toBe(T0 + AGENT_TURN_IDLE_MS + minutes(9) + AGENT_TURN_IDLE_MS);
-		for (const each of [signs({ head: null }), rejected, approved, claimedAgain]) {
-			const at = abandonableAt(each)!;
-			expect(abandoned(each, at).abandoned).toBe(false);
-			expect(abandoned(each, at + 1).abandoned).toBe(true);
-		}
+	it("is the end of the window after its agent was asked, while the change waits on it", () => {
+		const challenged = at(minutes(3));
+		expect(abandonableAt(signs({ head: null, challenged }))).toBe(T0 + minutes(3) + CHALLENGE_WINDOW_MS);
+		expect(abandonableAt(signs({ approved: true, challenged }))).toBe(T0 + minutes(3) + CHALLENGE_WINDOW_MS);
 	});
 
-	it("is never while its change waits on reviewers, a landing or a person", () => {
-		expect(abandonableAt(signs())).toBeUndefined();
-		expect(abandonableAt(signs({ landing: true, approved: true }))).toBeUndefined();
-		expect(abandonableAt(signs({ asked: true, head: null }))).toBeUndefined();
+	it("is never while nobody has asked, or its change waits on reviewers, a landing or a person", () => {
+		expect(abandonableAt(signs({ head: null }))).toBeUndefined();
+		expect(abandonableAt(signs({ challenged: at(0) }))).toBeUndefined();
+		expect(abandonableAt(signs({ landing: true, approved: true, challenged: at(0) }))).toBeUndefined();
+		expect(abandonableAt(signs({ asked: true, head: null, challenged: at(0) }))).toBeUndefined();
 	});
 });

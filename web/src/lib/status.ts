@@ -203,7 +203,7 @@ export function changeState(claim: Claim, context: StateContext = {}): ClaimStat
 	return "in-review";
 }
 
-/** Whether its agent's turn has gone unanswered longer than allowed (see the toolkit's staleness.ts). */
+/** Whether its agent, on its turn, didn't answer another agent asking whether it's still there (see staleness.ts). */
 function isAbandoned(claim: Claim, votes: Vote[], landing: boolean, now: number): boolean {
 	const onHead = claim.head ? latestOn(claim.head, votes).filter((vote) => vote.reviewer !== claim.agent) : [];
 	const signs = {
@@ -214,6 +214,7 @@ function isAbandoned(claim: Claim, votes: Vote[], landing: boolean, now: number)
 		vetoed: claim.approval.vetoedBy.length > 0,
 		landing,
 		asked: false,
+		...(claim.challenged ? { challenged: claim.challenged } : {}),
 	};
 	return abandoned(signs, now).abandoned;
 }

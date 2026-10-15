@@ -227,6 +227,31 @@ describe("the audit", () => {
 		]);
 	});
 
+	it("holds a release citing a challenge to its window, and to its agent not having answered", async () => {
+		const freed = (challengedAt: string, releasedAt: string, lastActive = claimB.active) => ({
+			change: "docs-3c4d",
+			agent: "agent-b",
+			by: "agent-a",
+			at: releasedAt,
+			reason: "stale",
+			stale: true,
+			lastActive,
+			challengedAt,
+		});
+		const audited = (release: ReturnType<typeof freed>) =>
+			audit(records([], [...registry, { tip: "r3", state: at([claimA], [release]) }]));
+		// Asked five minutes after it last claimed, released once the two minutes were up: idle or not, that's fair.
+		expect(await audited(freed("2026-10-05T10:05:00.000Z", "2026-10-05T10:07:01.000Z"))).toEqual([]);
+		expect(await audited(freed("2026-10-05T10:05:00.000Z", "2026-10-05T10:06:30.000Z"))).toMatchObject([
+			{ rule: "released-others-claim", detail: expect.stringContaining("before its agent's time to answer was up") },
+		]);
+		// Its agent claimed again after it was asked: that answered.
+		const answered = freed("2026-10-05T10:05:00.000Z", "2026-10-05T10:09:00.000Z", "2026-10-05T10:06:00.000Z");
+		expect(await audited(answered)).toMatchObject([
+			{ rule: "released-others-claim", detail: expect.stringContaining("answered when asked") },
+		]);
+	});
+
 	it("reports a merge that records no checks, or checks of a different main, when checks are configured", async () => {
 		const withChecks = (m: MergeRecord) => ({ ...records([m]), verify: ["npm test"] });
 		expect(await audit(withChecks(merge({ base: "p1" })))).toEqual([

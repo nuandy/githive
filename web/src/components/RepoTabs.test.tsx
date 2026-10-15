@@ -138,7 +138,7 @@ describe("a repo", () => {
 		expect(older).not.toMatch(/claims record|Sharded claims|<dt>Claims<\/dt>|<dt>Votes<\/dt>/);
 	});
 
-	it("says when a claim frees up if its agent goes quiet, where it does at a time", () => {
+	it("says when a claim frees up if its agent doesn't answer, where it does at a time", () => {
 		const at = (hour: number, minute: number) => new Date(2026, 9, 11, hour, minute).toISOString();
 		const now = Date.parse(at(14, 0));
 		const claim = snapshot.claims[0]!;
@@ -158,7 +158,7 @@ describe("a repo", () => {
 			"c-3",
 		]);
 		expect(rows[0]).toMatch(
-			/class="(?![^"]*\btext-warn\b)[^"]*" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
+			/class="(?![^"]*\btext-warn\b)[^"]*" title="Another agent asked whether its agent is still there\. Free after 14:30 unless its agent answers\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
 		);
 		// Past its time, anyone may take it: said in the warning tone.
 		expect(rows[1]).toMatch(/class="[^"]*\btext-warn\b[^"]*"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);

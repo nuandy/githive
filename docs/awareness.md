@@ -155,11 +155,12 @@ with no intent still has its reviews in the story.
 
 ### 5. How long a claim lasts
 
-A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks
-failed, or it was approved and not merged. While it waits on reviewers, a landing or a person, it never frees. `status`
-says so in `lease: { waitingOn, freeAfter }`, the claim reply carries `freeAfter`, and the dashboard's claims show
-"free after 14:30". The claim's `freeAfter` is the soonest it can free up (30 minutes after
-the claim); once something is pushed it lasts longer, and status's `lease` says exactly.
+A claim lasts until it's released: time alone never frees it. When another agent's claim is refused by it and its
+change waits on its own agent (nothing pushed, changes asked for, its checks failed, or approved and not merged), that
+agent asks whether it's still there. Its next call to GitHive answers by claiming again; with no answer within 2
+minutes, its claim may be released as stale. While it waits on reviewers, a landing or a person, nobody asks and it
+never frees. `status` says whose turn it is in `lease: { waitingOn, freeAfter }`, with `freeAfter` only once its agent
+has been asked, and the dashboard's claims then show "free after 14:30".
 
 ### 6. Footprints and interface news
 

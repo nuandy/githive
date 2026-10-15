@@ -138,7 +138,7 @@ function ChangeRow({
 	voting,
 }: ChangeRowProps & { claim: Claim; arrived: boolean }) {
 	const status = claimStatus(claim, votes, { settings, landing, now: now ?? Date.now() });
-	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
+	// Only a claim whose agent was asked frees up at a time; the change's page says why the others don't.
 	const lease = leaseWords(claim.lease, now);
 	return (
 		<li

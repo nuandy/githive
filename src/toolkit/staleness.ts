@@ -1,12 +1,11 @@
-// When a claim counts as abandoned. A quiet agent isn't enough: one waiting for review, for its batch to land or
-// for a person is waiting its turn. Only a change waiting on its own agent can be abandoned (nothing pushed,
-// changes requested, or approved but not merged), and after a while anyone may take its paths.
+// When a claim counts as abandoned. Time alone never does it: a claim lasts until it's released, or until another agent
+// needs its paths, asks its holder whether it's still there (a challenge, see challenges.ts), and gets no answer. Only
+// a change waiting on its own agent can be abandoned (nothing pushed, changes requested, or approved but not merged):
+// one waiting for review, for its batch to land or for a person is waiting its turn, however long that takes.
 // The module has no imports so the dashboard can share it (web/tsconfig.json includes this file).
 
-/** Idle limit before anything is pushed. Claiming again resets it. */
-export const BUILDING_IDLE_MS = 30 * 60_000;
-/** Idle limit once something is pushed and the change waits on its agent to revise or merge. */
-export const AGENT_TURN_IDLE_MS = 2 * 60 * 60_000;
+/** How long a challenged holder has to answer, by claiming again (its next call to GitHive does). */
+export const CHALLENGE_WINDOW_MS = 2 * 60_000;
 
 export type Turn = "agent" | "reviewers" | "landing" | "person";
 
@@ -22,55 +21,38 @@ export interface ChangeSigns {
 	landing: boolean;
 	/** A question to a person is pending. */
 	asked: boolean;
+	/** When another agent asked its holder whether it's still there, if the holder hasn't answered since. */
+	challenged?: string;
 }
 
 export interface Waiting {
 	turn: Turn;
-	/** For the agent's turn: the later of its last claim and whatever handed the turn back. */
-	since?: string;
 	why: string;
-	idleAfterMs?: number;
 }
 
-const later = (a: string, b?: string) => (b && Date.parse(b) > Date.parse(a) ? b : a);
 const latest = (times: string[]) =>
 	times.reduce<string | undefined>((max, time) => (!max || Date.parse(time) > Date.parse(max) ? time : max), undefined);
 
 export function waitingOn(signs: ChangeSigns): Waiting {
 	if (signs.asked) return { turn: "person", why: "waits on a person" };
 	if (signs.landing) return { turn: "landing", why: "is being checked to land" };
-	if (!signs.head)
-		return { turn: "agent", since: signs.active, why: "has nothing pushed", idleAfterMs: BUILDING_IDLE_MS };
+	if (!signs.head) return { turn: "agent", why: "has nothing pushed" };
 	const rejected = latest(signs.votes.filter((v) => v.verdict === "reject").map((v) => v.at));
-	if (rejected || signs.vetoed)
-		return {
-			turn: "agent",
-			since: later(signs.active, rejected),
-			why: "had changes asked for",
-			idleAfterMs: AGENT_TURN_IDLE_MS,
-		};
-	if (signs.approved)
-		return {
-			turn: "agent",
-			since: later(signs.active, latest(signs.votes.map((v) => v.at))),
-			why: "is approved and not merged",
-			idleAfterMs: AGENT_TURN_IDLE_MS,
-		};
+	if (rejected || signs.vetoed) return { turn: "agent", why: "had changes asked for" };
+	if (signs.approved) return { turn: "agent", why: "is approved and not merged" };
 	return { turn: "reviewers", why: "waits for review" };
 }
 
 /**
- * When the change counts as abandoned if nothing more happens (its time in ms; it is abandoned after it), or
- * undefined while it waits on others, which never ends a claim. Never sooner than BUILDING_IDLE_MS after its agent's
- * last claim, the floor the audit checks every stale release against.
+ * When the change counts as abandoned if its holder doesn't answer (its time in ms; it is abandoned after it): the
+ * end of an open challenge's window, while the change waits on its agent. Undefined otherwise: then it never is.
  */
 export function abandonableAt(signs: ChangeSigns): number | undefined {
-	const waiting = waitingOn(signs);
-	if (waiting.turn !== "agent" || !waiting.since || waiting.idleAfterMs === undefined) return undefined;
-	return Math.max(Date.parse(signs.active) + BUILDING_IDLE_MS, Date.parse(waiting.since) + waiting.idleAfterMs);
+	if (waitingOn(signs).turn !== "agent" || !signs.challenged) return undefined;
+	return Date.parse(signs.challenged) + CHALLENGE_WINDOW_MS;
 }
 
-/** How long a claim lasts if its agent goes quiet: whose turn its change is on, and on its agent's turn when it frees up. */
+/** Whose turn its change is on, and while a challenge is open on its agent's turn, when the claim frees up. */
 export function leaseFor(signs: ChangeSigns): { waitingOn: Turn; freeAfter?: string } {
 	const freeAt = abandonableAt(signs);
 	return {
@@ -79,10 +61,18 @@ export function leaseFor(signs: ChangeSigns): { waitingOn: Turn; freeAfter?: str
 	};
 }
 
-/** Whether the agent's turn has gone unanswered longer than allowed (see abandonableAt). */
-export function abandoned(signs: ChangeSigns, now: number): { abandoned: boolean; waiting: Waiting; idleMs: number } {
+/** Whether the claim may be freed now: on its agent's turn, challenged, and unanswered past the window. */
+export function abandoned(signs: ChangeSigns, now: number): { abandoned: boolean; waiting: Waiting; why: string } {
 	const waiting = waitingOn(signs);
-	const idleMs = waiting.since ? now - Date.parse(waiting.since) : 0;
 	const at = abandonableAt(signs);
-	return { abandoned: at !== undefined && now > at, waiting, idleMs };
+	if (waiting.turn !== "agent") return { abandoned: false, waiting, why: waiting.why };
+	if (at === undefined)
+		return { abandoned: false, waiting, why: "has an agent no one has asked whether it's still there" };
+	if (now <= at)
+		return {
+			abandoned: false,
+			waiting,
+			why: `was asked whether it's still there, and has until ${new Date(at).toISOString()}`,
+		};
+	return { abandoned: true, waiting, why: `${waiting.why}, and its agent didn't answer when asked` };
 }

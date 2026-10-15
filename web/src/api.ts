@@ -153,6 +153,8 @@ export interface RepoSnapshot {
 		};
 		/** How long the claim lasts if its agent goes quiet (newer servers). */
 		lease?: ClaimLease;
+		/** When another agent asked its agent whether it's still there, if it hasn't answered (newer servers). */
+		challenged?: string;
 		/** Text about it Clef found steering the agents who read it (newer servers). A hint: nothing waits on it. */
 		steering?: SteeringFlag[];
 	}[];

@@ -69,11 +69,13 @@ export const INSTRUCTIONS = [
 		"again to go on waiting). Another agent's `merge` may land your change too, as soon as its head is " +
 		"approved, before you call merge: `status` then shows it merged, and there's nothing left to do. " +
 		"Merge by hand only with the same trailers.",
-	"6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits " +
-		"on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were " +
-		"asked for (its checks failing counts), or it was approved and not merged. Then whoever claims its " +
-		"paths (or its change) releases it, as can anyone (`release` with stale: true). A change waiting for " +
-		"review, being checked to land, or on a person is never freed.",
+	"6. A claim lasts until it's released: time alone never frees it. When your claim is refused and the " +
+		"change in the way waits on its own agent (nothing pushed, changes asked for, or approved and not " +
+		"merged), GitHive asks that agent whether it's still there (`asked` in the reply). Its next call to " +
+		"GitHive answers for it by claiming again; if none comes within 2 minutes, claim again and its claim " +
+		"is released as stale (or `release` it with stale: true). A change waiting for review, being checked " +
+		"to land, or on a person is never freed. Another person's agent's change name stays theirs: only its " +
+		"owner's agents take it over, except a backlog piece.",
 	"7. Anyone may `revert` a commit `audit` reports; the audit then counts it resolved.",
 	"8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? `ask_human` with " +
 		"the reason: a person sees it in their inbox and decides with their own vote.",
@@ -216,9 +218,9 @@ const TOOL_LIST = [
 			"`source` merges that whole branch into it instead (the paths are what the branch changed, and " +
 			"its tip is the change). `after` names changes it depends on: it merges only once they have " +
 			"merged into the same branch. Refused, naming the holder, if another claim on that branch " +
-			"overlaps; a claim in the way that its agent has abandoned (see release) is released as stale " +
-			"instead. A new claim's reply may name an open change that seems to do the same work (`similar`): " +
-			"check it before you build.",
+			"overlaps. Then a holder whose change waits on it is asked whether it's still there (`asked`): " +
+			"if it doesn't answer in time, claiming again releases its claim as stale. A new claim's reply " +
+			"may name an open change that seems to do the same work (`similar`): check it before you build.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -254,11 +256,11 @@ const TOOL_LIST = [
 		name: "release",
 		description:
 			"Release a claim: yours, or with stale: true another agent's it has abandoned: its change " +
-			"waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes " +
-			"were asked for, failed checks, or approval without a merge. Never one waiting for review, " +
-			"being checked to land, or on a person. A repo admin may also give up GitHub's change " +
-			"(githive-github's github-<sha>, which holds its paths until GitHub's branch moves): name it as " +
-			"your own agent.",
+			"waits on that agent (nothing pushed, changes asked for, or approved and not merged), and the " +
+			"agent didn't answer within 2 minutes when a refused claim asked whether it's still there. " +
+			"Never one waiting for review, being checked to land, or on a person. A repo admin may also " +
+			"give up GitHub's change (githive-github's github-<sha>, which holds its paths until GitHub's " +
+			"branch moves): name it as your own agent.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } },

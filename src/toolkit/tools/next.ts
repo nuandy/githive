@@ -185,7 +185,20 @@ function refusedClaim(reply: Reply, args: Args) {
 	const stuck = texts(reply.stillHeld).length
 		? `Release ${text(args.change) ?? "it"} to free the paths it still holds. `
 		: "";
-	return `${held}${stuck}Pick other work from \`backlog\`, or claim again later.`;
+	return `${held}${stuck}${askedHolders(reply)}Pick other work from \`backlog\`, or claim again later.`;
+}
+
+// Holders the refused claim asked whether they're still there, and when claiming again would free their paths.
+function askedHolders(reply: Reply) {
+	const asked = records(reply.asked);
+	const holders = asked.map((each) => nameOr(each.holder, "its agent"));
+	const latest = asked
+		.map((each) => text(each.answerBy))
+		.sort()
+		.at(-1);
+	if (!holders.length || !latest) return "";
+	const whether = holders.length === 1 ? "whether it's still there" : "whether they're still there";
+	return `Asked ${names(holders, 3)} ${whether}: with no answer by ${latest}, claiming again frees the paths. `;
 }
 
 function madeClaim(reply: Reply, args: Args) {

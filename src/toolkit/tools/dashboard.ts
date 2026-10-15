@@ -7,6 +7,7 @@ import type { SteeringFlag } from "../../steering";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { FIRST_SKIP_CHECKS } from "../check-scope";
+import type { Challenges } from "../challenges";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
 import { bringsGitHubBack, githubSync, isGitHubChange, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
@@ -23,7 +24,14 @@ import {
 } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
-import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
+import {
+	changeHead,
+	changeSigns,
+	changeSourceFor,
+	changeState,
+	type changeStatus,
+	readChallenges,
+} from "./change-state";
 import { targetBranch } from "./claim-input";
 import { type AgentAtWork, agentsAtWork, onlyAPersonCanReview } from "./no-reviewer";
 import { giveUpGitHubChange } from "./github-tools";
@@ -452,6 +460,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		votes: votes.votes,
 	});
 	const notReviewing = limitsOnce(ctx, atWork);
+	const challenges = held.claims.length ? await timing.time("challenges", () => readChallenges(ctx, repo)) : undefined;
 	const claims = await timing.time("status", () =>
 		Promise.all(
 			held.claims.map((record) =>
@@ -463,7 +472,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 					held.released,
 					record,
 					landings.get(claimInto(record, projectBranch(state))),
-					{ atWork, notReviewing },
+					{ atWork, notReviewing, challenges },
 				),
 			),
 		),
@@ -552,6 +561,8 @@ interface ClaimSnapshot extends ClaimRecord {
 	attention?: Attention;
 	waitsOn?: string[];
 	lease?: ReturnType<typeof leaseFor>;
+	/** When another agent asked its agent whether it's still there, if it hasn't answered (see challenges.ts). */
+	challenged?: string;
 	/** What Clef found steering agents in what was written about it, or in its latest push (see steering.ts). */
 	steering?: SteeringFlag[];
 }
@@ -614,7 +625,7 @@ async function claimSnapshot(
 	released: ReleaseRecord[],
 	record: ClaimRecord,
 	landing: LandingView | null | undefined,
-	reviewers: { atWork: AgentAtWork[]; notReviewing: () => Promise<Set<string>> },
+	shared: { atWork: AgentAtWork[]; notReviewing: () => Promise<Set<string>>; challenges?: Challenges | undefined },
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
 	const { status, counted } = await changeState(ctx, repo, state, async () => votes.votes, claim.change, claim);
@@ -626,12 +637,12 @@ async function claimSnapshot(
 	// can't be.
 	const policy = branchSettings(state, claim.into).policy;
 	const signs = await Promise.resolve()
-		.then(() => changeSigns({ claim, head, counted, record: votes, landing, policy }))
+		.then(() => changeSigns({ claim, head, counted, record: votes, landing, policy, challenges: shared.challenges }))
 		.catch((err: unknown) => {
 			console.error(`working out where ${claim.change} stands for the dashboard failed`, String(err));
 			return undefined;
 		});
-	const { atWork, notReviewing } = reviewers;
+	const { atWork, notReviewing } = shared;
 	const onlyAPerson = signs
 		? await onlyAPersonCanReview(
 				claim,
@@ -655,6 +666,7 @@ async function claimSnapshot(
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;
 	// How long it lasts if its agent goes quiet.
 	if (signs) snapshot.lease = leaseFor(signs);
+	if (signs?.challenged) snapshot.challenged = signs.challenged;
 	return snapshot;
 }
 

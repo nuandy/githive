@@ -137,25 +137,31 @@ describe("a change's state", () => {
 		expect(changeState(claim({ approval: approved, hosted: rejected }), { landing })).toBe("landing");
 	});
 
-	it("is abandoned once its agent's turn has gone unanswered, when the time is given", () => {
+	it("is abandoned once its agent, on its turn, didn't answer when asked, when the time is given", () => {
 		const hours = (n: number) => Date.parse("2026-10-09T00:00:00.000Z") + n * 3_600_000;
-		expect(changeState(claim({ head: null }), { now: hours(1) })).toBe("abandoned");
-		expect(changeState(claim({ head: null }))).toBe("building");
+		const asked = new Date(hours(1)).toISOString();
+		// Quiet for a day, but nobody asked: it's still its agent's.
+		expect(changeState(claim({ head: null }), { now: hours(24) })).toBe("building");
+		expect(changeState(claim({ head: null, challenged: asked }), { now: hours(1) })).toBe("building");
+		expect(changeState(claim({ head: null, challenged: asked }), { now: hours(2) })).toBe("abandoned");
+		expect(changeState(claim({ head: null, challenged: asked }))).toBe("building");
 		// Waiting for review is nobody's fault: it never frees.
-		expect(changeState(claim(), { now: hours(24) })).toBe("in-review");
+		expect(changeState(claim({ challenged: asked }), { now: hours(24) })).toBe("in-review");
 		// A question for a person comes first.
-		expect(changeState(claim({ head: null, attention: question }), { now: hours(24) })).toBe("needs-person");
-		// Approved, it's its agent's to land: in time, it's abandoned too.
+		const waiting = claim({ head: null, attention: question, challenged: asked });
+		expect(changeState(waiting, { now: hours(24) })).toBe("needs-person");
+		// Approved, it's its agent's to land: unanswered, it's abandoned too.
 		const approval = vote({ verdict: "approve" });
-		expect(changeState(claim({ approval: approved }), { votes: [approval], now: hours(1) })).toBe("approved");
-		expect(changeState(claim({ approval: approved }), { votes: [approval], now: hours(3) })).toBe("abandoned");
-		// Its checks failed, which rejects its head: handed back to its agent, then abandoned.
+		expect(changeState(claim({ approval: approved }), { votes: [approval], now: hours(3) })).toBe("approved");
+		const askedApproved = claim({ approval: approved, challenged: asked });
+		expect(changeState(askedApproved, { votes: [approval], now: hours(3) })).toBe("abandoned");
+		// Its checks failed, which rejects its head: handed back to its agent, then abandoned once asked.
 		const failed = vote({ reviewer: "githive-checks", role: "checks" });
-		expect(changeState(claim(), { votes: [failed], now: hours(3) })).toBe("abandoned");
+		expect(changeState(claim({ challenged: asked }), { votes: [failed], now: hours(3) })).toBe("abandoned");
 		// Vetoed, it's its agent's turn too, as the server reads it, though the veto's vote isn't among those read.
 		const vetoed = { approved: false, approvals: 0, required: 1, vetoedBy: ["sec-bot"] };
-		expect(changeState(claim({ approval: vetoed }), { now: hours(1) })).toBe("changes-requested");
-		expect(changeState(claim({ approval: vetoed }), { now: hours(3) })).toBe("abandoned");
+		expect(changeState(claim({ approval: vetoed }), { now: hours(3) })).toBe("changes-requested");
+		expect(changeState(claim({ approval: vetoed, challenged: asked }), { now: hours(3) })).toBe("abandoned");
 	});
 });
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
+import { challenge, type Challenges, challengesRef } from "../src/toolkit/challenges";
 import { claim, type Registry } from "../src/toolkit/claims";
 import { TOOLS, repoAudit, openCount, repoSnapshot } from "../src/toolkit/mcp";
 import { handleRpc } from "../src/mcp";
@@ -184,20 +185,22 @@ describe("GitHive's MCP tools", () => {
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
 	});
 
-	it("lets claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
+	it("lets claim take paths from a claim whose agent didn't answer when asked, releasing it as stale", async () => {
 		await call("settings", { repo: "project" });
-		const registry = new GitCasLog<Registry>(
-			async () => ({ url: server.url, token: "unused" }),
-			"project",
-			"refs/notes/githive-claims/project",
-		);
-		await claim(registry, {
+		const remote = async () => ({ url: server.url, token: "unused" });
+		const registry = new GitCasLog<Registry>(remote, "project", "refs/notes/githive-claims/project");
+		const held = await claim(registry, {
 			change: "old-1",
 			agent: "agent-gone",
 			paths: ["src/a/"],
 			intent: "abandoned",
 			now: Date.now() - 31 * 60_000,
 		});
+		expect(held).toMatchObject({ ok: true });
+		// Asked three minutes ago, a minute past its time to answer.
+		const challenges = new GitCasLog<Challenges>(remote, "project", challengesRef("project"));
+		const active = new Date(Date.now() - 31 * 60_000).toISOString();
+		await challenge(challenges, { change: "old-1", agent: "agent-gone", active }, "agent-b", Date.now() - 3 * 60_000);
 		expect(
 			await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" }),
 		).toMatchObject({ ok: true });

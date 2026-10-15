@@ -179,12 +179,15 @@ describe("a change's page, with what its agent hears", () => {
 		expect([...order].sort((a, b) => a - b)).toEqual(order);
 	});
 
-	it("says when the claim frees up if its agent goes quiet, or why it never does", () => {
+	it("says when the claim frees up if its agent doesn't answer, or why it never does", () => {
 		expect(inlineText(page(leased({ waitingOn: "agent", freeAfter: new Date(at(14, 30)).toISOString() })))).toContain(
-			"Free after 14:30 if its agent does nothing more. Claiming again renews it.",
+			"Another agent asked whether its agent is still there. Free after 14:30 unless its agent answers.",
 		);
 		expect(inlineText(page(leased({ waitingOn: "agent", freeAfter: new Date(at(13, 45)).toISOString() })))).toContain(
-			"Free since 13:45: its agent went quiet, so anyone may take its paths.",
+			"Free since 13:45: its agent didn't answer when asked, so the agent that asked may take its paths.",
+		);
+		expect(inlineText(page(leased({ waitingOn: "agent" })))).toContain(
+			"Lasts until another agent needs its paths and its agent doesn't answer.",
 		);
 		expect(inlineText(page(leased({ waitingOn: "reviewers" })))).toContain("Doesn't free up while it waits on review.");
 		expect(inlineText(page(leased({ waitingOn: "landing" })))).toContain(

@@ -1,6 +1,7 @@
 import { inLane, inLaneEntry } from "../claim-paths";
 import type { ClaimRecord, Registry, ReleaseRecord } from "./claims";
 import { decodeShard } from "./shards";
+import { CHALLENGE_WINDOW_MS } from "./staleness";
 import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
 import { settingsForBranch } from "./branch-rules";
@@ -85,7 +86,10 @@ export function mergeStampPayload(
 	});
 }
 
-/** Claims idle longer than this may be released by anyone. */
+/**
+ * A claim released as stale without citing a challenge must have been idle longer than this. Releases written before
+ * challenges (see challenges.ts) cite none; a release that cites one is held to its window instead.
+ */
 export const STALE_AFTER_MS = 30 * 60_000;
 
 export interface AuditRecords {
@@ -560,6 +564,26 @@ function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, b
 const byPerson = (release: ReleaseRecord) =>
 	/^person:[^/]+$/.test(release.by) && (!release.verifiedBy || release.verifiedBy === release.by);
 
+// A stale release that cites a challenge: its holder hadn't claimed since it was asked, and its window had passed.
+function unansweredChallenge(release: ReleaseRecord) {
+	const asked = Date.parse(release.challengedAt!);
+	const released = `${release.by} released ${release.change} (${release.agent})`;
+	if (Date.parse(release.lastActive) >= asked) return `${released}, whose agent answered when asked`;
+	const waited = Date.parse(release.at) - asked;
+	if (waited <= CHALLENGE_WINDOW_MS)
+		return `${released} ${Math.round(waited / 1000)} seconds after asking, before its agent's time to answer was up`;
+	return undefined;
+}
+
+function idleTooShort(release: ReleaseRecord, staleAfter: number) {
+	const idle = Date.parse(release.at) - Date.parse(release.lastActive);
+	if (idle > staleAfter) return undefined;
+	return (
+		`${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} ` +
+		"minutes before, not stale"
+	);
+}
+
 async function othersClaimsReleased(history: History, staleAfterMs: number | undefined, verified: Verify) {
 	const staleAfter = staleAfterMs ?? STALE_AFTER_MS;
 	const violations: Violation[] = [];
@@ -569,16 +593,8 @@ async function othersClaimsReleased(history: History, staleAfterMs: number | und
 			if (release.by === release.agent) continue;
 			if (release.agent === GITHUB_AGENT && release.stale && (await verified("release", release))) continue;
 			if (byPerson(release) && (await verified("release", release))) continue;
-			const idle = Date.parse(release.at) - Date.parse(release.lastActive);
-			if (idle <= staleAfter)
-				violations.push({
-					commit: entry.tip,
-					author: release.by,
-					rule: "released-others-claim",
-					detail:
-						`${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} ` +
-						"minutes before, not stale",
-				});
+			const why = release.challengedAt ? unansweredChallenge(release) : idleTooShort(release, staleAfter);
+			if (why) violations.push({ commit: entry.tip, author: release.by, rule: "released-others-claim", detail: why });
 		}
 		checked = entry.state.released.length;
 	}

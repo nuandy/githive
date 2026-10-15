@@ -1,6 +1,6 @@
 import type { ClaimRecord } from "../claims";
 import { isHiveAgent } from "../hive-agents";
-import { AGENT_TURN_IDLE_MS, type ChangeSigns, waitingOn } from "../staleness";
+import { type ChangeSigns, waitingOn } from "../staleness";
 import { isPerson, latestVotes, ownerOf, type VoteRecord } from "../votes";
 import { claimPolicy } from "./repo";
 import type { HostedStatus, ToolCall } from "./context";
@@ -28,7 +28,7 @@ export interface AgentAtWork {
 }
 
 /** How long an agent counts as at work after it last registered, gave up a claim or voted. */
-export const AT_WORK_MS = AGENT_TURN_IDLE_MS;
+export const AT_WORK_MS = 2 * 60 * 60_000;
 
 type Dated = AgentAtWork & { at: string };
 

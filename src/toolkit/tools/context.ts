@@ -15,17 +15,18 @@ import type { NewsItem, Notice } from "../../repo-cache";
 import { Timing } from "../../timing";
 import type { ReadHistory, SharedPlacements } from "../batch-reads";
 import { presentClaim } from "../branch-scope";
+import type { Challenges } from "../challenges";
 import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
 import type { BranchCommit } from "../git-records";
 import type { Landing } from "../landing";
 import { atMost, type BatchChange, type BatchGit, type CheckRunner } from "../merge";
-import { abandoned } from "../staleness";
+import { abandoned, waitingOn } from "../staleness";
 import type { Stamper } from "../stamp";
 import type { VoteStore } from "../vote-store";
 import { countedVotes } from "../votes";
 import type { Work } from "../work";
-import { changeHead, changeSigns, changeSourceFor } from "./change-state";
+import { changeHead, changeSigns, changeSourceFor, readChallenges } from "./change-state";
 import { keyAgent, mayActAs } from "./identity";
 import {
 	claimPolicy,
@@ -507,18 +508,20 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 	const open = inForce.claims.filter((claim) => !landedHere(claim)).map((claim) => ({ claim, head: heads(claim) }));
 	const counted = await countedVotes(votesCast.votes, registered?.stampKey);
 	const teams = (await ctx.teamsOf?.(repo)) ?? [];
-	const isAbandoned = ({ claim, head }: OpenChange) =>
-		abandoned(
-			changeSigns({
-				claim,
-				head,
-				counted,
-				record: votesCast,
-				landing: claim.into ? null : landing,
-				policy: claimPolicy(registered, claim),
-			}),
-			Date.now(),
-		).abandoned;
+	const signsOf = ({ claim, head }: OpenChange, challenges?: Challenges) =>
+		changeSigns({
+			claim,
+			head,
+			counted,
+			record: votesCast,
+			landing: claim.into ? null : landing,
+			policy: claimPolicy(registered, claim),
+			...(challenges ? { challenges } : {}),
+		});
+	// Only a change on its agent's turn can be abandoned, so the challenges are read only when one is.
+	const onAgentsTurn = open.filter((change) => waitingOn(signsOf(change)).turn === "agent");
+	const challenges = onAgentsTurn.length ? await readChallenges(ctx, repo) : undefined;
+	const isAbandoned = (change: OpenChange) => abandoned(signsOf(change, challenges), Date.now()).abandoned;
 	return {
 		agent,
 		...(stamper?.by ? { by: stamper.by } : {}),
@@ -530,7 +533,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 		votes: counted,
 		merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((claim) => claim.change)]),
 		work: backlog?.commit.state.items ?? [],
-		abandoned: new Set(open.filter(isAbandoned).map((change) => change.claim.change)),
+		abandoned: new Set(onAgentsTurn.filter(isAbandoned).map((change) => change.claim.change)),
 	};
 }
 

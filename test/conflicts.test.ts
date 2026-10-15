@@ -10,7 +10,6 @@ import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { BATCH_MERGE } from "../src/toolkit/merge-checks";
 import type { CheckRunner } from "../src/toolkit/merge";
 import { conflictFix } from "../src/toolkit/merge-ready";
-import { AGENT_TURN_IDLE_MS, BUILDING_IDLE_MS } from "../src/toolkit/staleness";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
@@ -244,44 +243,26 @@ describe("how long a claim lasts", { timeout: 60_000 }, () => {
 	const at = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
 	type Status = { claim: { active: string }; votes: { at: string }[]; lease: Record<string, unknown> };
 
-	it("status says when the claim frees up", async () => {
-		const before = Date.now();
+	it("status says whose turn the claim's change waits on, and gives no time it frees up", async () => {
 		const claimed = await call("claim", { change: "a-1", agent: "a", paths: ["src/"], intent: "a" }, "a");
-		// The claim's reply gives the soonest its paths may be freed: the floor after a claim.
-		expect(Date.parse(claimed.freeAfter as string)).toBeGreaterThanOrEqual(before + BUILDING_IDLE_MS);
-		expect(Date.parse(claimed.freeAfter as string)).toBeLessThanOrEqual(Date.now() + BUILDING_IDLE_MS);
+		expect(claimed).not.toHaveProperty("freeAfter");
 
-		// Nothing pushed: on its agent's turn, free 30 minutes after it last claimed.
+		// Nothing pushed: on its agent's turn, but nobody asked whether it's still there, so it lasts.
 		const idle = (await call("status", { change: "a-1" }, "a")) as unknown as Status;
-		expect(idle.lease).toEqual({
-			waitingOn: "agent",
-			freeAfter: at(idle.claim.active, BUILDING_IDLE_MS),
-			renew: "claim the same paths again",
-		});
-		expect(Date.parse(claimed.freeAfter as string)).toBeLessThanOrEqual(Date.parse(idle.lease.freeAfter as string));
+		expect(idle.lease).toEqual({ waitingOn: "agent", renew: "claim the same paths again" });
 
 		// Pushed and waiting for review: it lasts.
 		const head = await pushChange(server.url, work, "a", "a-1", { "src/a.txt": "a\n" });
 		const waiting = (await call("status", { change: "a-1" }, "a")) as unknown as Status;
 		expect(waiting.lease).toEqual({ waitingOn: "reviewers", renew: "claim the same paths again" });
 
-		// Changes asked for: back on its agent's turn, free two hours after that.
+		// Changes asked for: back on its agent's turn.
 		await call(
 			"vote",
 			{ commit: head, reviewer: "reviewer", role: "review", verdict: "reject", evidence: "no" },
 			"reviewer",
 		);
 		const sent = (await call("status", { change: "a-1" }, "a")) as unknown as Status;
-		expect(sent.lease).toEqual({
-			waitingOn: "agent",
-			freeAfter: at(sent.votes[0]!.at, AGENT_TURN_IDLE_MS),
-			renew: "claim the same paths again",
-		});
-		// Claiming again renews it.
-		await new Promise((resolve) => setTimeout(resolve, 5));
-		await call("claim", { change: "a-1", agent: "a", paths: ["src/"], intent: "a" }, "a");
-		const renewed = (await call("status", { change: "a-1" }, "a")) as unknown as Status;
-		expect(renewed.lease.freeAfter).toBe(at(renewed.claim.active, AGENT_TURN_IDLE_MS));
-		expect(Date.parse(renewed.lease.freeAfter as string)).toBeGreaterThan(Date.parse(sent.lease.freeAfter as string));
+		expect(sent.lease).toEqual({ waitingOn: "agent", renew: "claim the same paths again" });
 	});
 });
