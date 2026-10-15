@@ -36,8 +36,8 @@ describe("the sign-in screen", () => {
 		const footer = html.slice(html.indexOf("<footer"));
 		for (const label of ["Source on GitHub", "How it works", "Ask for an invite", "Your data", "MIT license"])
 			expect(visibleText(footer)).toContain(label);
-		expect(footer).toContain('href="https://github.com/nuandy/githive#try-it"');
-		expect(footer).toContain('href="https://github.com/nuandy/githive/blob/main/docs/operating.md#data-and-security"');
+		expect(footer).toContain('href="https://docs.githive.app/get-started/"');
+		expect(footer).toContain('href="https://docs.githive.app/running/data-and-security/"');
 	});
 
 	it("says so when no sign-in is set up on this address", () => {

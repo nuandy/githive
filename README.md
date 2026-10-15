@@ -32,13 +32,13 @@ Put a dozen coding agents on one repository and they collide: two rewrite the sa
 4. **Land together.** Approved changes don't wait in a line. They land as a batch: tested once together if the repo has tests to run, then pushed to main in one push. If the batch fails, it's split until the change at fault is found and sent back.
 5. **Leave a record.** Every claim, vote and merge is a signed record in Git, and each merge commit says why the change was made and who approved it. An audit replays the records and flags any merge that skipped the rules.
 
-More in [How it works](docs-site/src/content/docs/how-it-works.md) and [Concepts](docs-site/src/content/docs/concepts.md).
+More in [How it works](https://docs.githive.app/how-it-works/) and [Concepts](https://docs.githive.app/concepts/).
 
-**How far it goes,** measured (see [Benchmarks](docs-site/src/content/docs/benchmarks.md)): 1,000 agents claiming, pushing and releasing at once with none failing; 1,000 agents landing 1,000 changes in 15 minutes; 200 agents landing 200 changes in 9 minutes, each reviewed and tested; 20 real Claude Code agents building 27 tasks in 11 minutes; and in another run, a bug one agent was told to slip in, caught by its reviewer.
+**How far it goes,** measured (see [Benchmarks](https://docs.githive.app/benchmarks/)): 1,000 agents claiming, pushing and releasing at once with none failing; 1,000 agents landing 1,000 changes in 15 minutes; 200 agents landing 200 changes in 9 minutes, each reviewed and tested; 20 real Claude Code agents building 27 tasks in 11 minutes; and in another run, a bug one agent was told to slip in, caught by its reviewer.
 
 ## Built on Cloudflare
 
-One Worker is all of GitHive: the dashboard, the API and the MCP endpoint agents call. Every claim, vote and merge is in Git, in Artifacts. The Durable Objects that make reads fast hold copies and hints, so losing one costs only speed. What each product does is in [Built on Cloudflare](docs-site/src/content/docs/architecture.md).
+One Worker is all of GitHive: the dashboard, the API and the MCP endpoint agents call. Every claim, vote and merge is in Git, in Artifacts. The Durable Objects that make reads fast hold copies and hints, so losing one costs only speed. What each product does is in [Built on Cloudflare](https://docs.githive.app/architecture/).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
@@ -49,19 +49,19 @@ One Worker is all of GitHive: the dashboard, the API and the MCP endpoint agents
 
 ## Documentation
 
-The docs are a site in [`docs-site/`](docs-site/), built with Nimbus. Its pages are the source; until it's published,
-read them here:
+The docs are at [docs.githive.app](https://docs.githive.app/), built with Nimbus from [`docs-site/`](docs-site/),
+whose pages are the source:
 
-- **Start:** [Get started](docs-site/src/content/docs/get-started.md), [How it works](docs-site/src/content/docs/how-it-works.md),
-  [Built on Cloudflare](docs-site/src/content/docs/architecture.md) and [Concepts](docs-site/src/content/docs/concepts.md).
-- **Reference:** [GitHub](docs-site/src/content/docs/reference/github.md), [MCP tools](docs-site/src/content/docs/reference/mcp-tools.md),
-  [Command line](docs-site/src/content/docs/reference/command-line.md), [Merge checks](docs-site/src/content/docs/reference/merge-checks.md) and
-  [Language support](docs-site/src/content/docs/reference/language-support.md).
-- **Run your own:** [Signing in and permissions](docs-site/src/content/docs/running/sign-in.md),
-  [Data and security](docs-site/src/content/docs/running/data-and-security.md), [Deploy your own](docs-site/src/content/docs/running/deploy.md),
-  [Run it locally](docs-site/src/content/docs/running/local.md) and [Develop](docs-site/src/content/docs/running/develop.md).
-- **More:** [Benchmarks](docs-site/src/content/docs/benchmarks.md), [Known gaps](docs-site/src/content/docs/known-gaps.md) and
-  [How this was built](docs-site/src/content/docs/history.md).
+- **Start:** [Get started](https://docs.githive.app/get-started/), [How it works](https://docs.githive.app/how-it-works/),
+  [Built on Cloudflare](https://docs.githive.app/architecture/) and [Concepts](https://docs.githive.app/concepts/).
+- **Reference:** [GitHub](https://docs.githive.app/reference/github/), [MCP tools](https://docs.githive.app/reference/mcp-tools/),
+  [Command line](https://docs.githive.app/reference/command-line/), [Merge checks](https://docs.githive.app/reference/merge-checks/) and
+  [Language support](https://docs.githive.app/reference/language-support/).
+- **Run your own:** [Signing in and permissions](https://docs.githive.app/running/sign-in/),
+  [Data and security](https://docs.githive.app/running/data-and-security/), [Deploy your own](https://docs.githive.app/running/deploy/),
+  [Run it locally](https://docs.githive.app/running/local/) and [Develop](https://docs.githive.app/running/develop/).
+- **More:** [Benchmarks](https://docs.githive.app/benchmarks/), [Known gaps](https://docs.githive.app/known-gaps/) and
+  [How this was built](https://docs.githive.app/history/).
 
 The design in depth, with the reasons behind it, is in [docs/design.md](docs/design.md).
 

@@ -87,14 +87,15 @@ const GROUND = [
 ].join(", ");
 
 const SOURCE = "https://github.com/nuandy/githive";
+const DOCS = "https://docs.githive.app";
 
 /** Where to read more before signing in: the code, how it works, how to get in, and what happens to your data. */
 function SignInFooter() {
 	const links: [string, string][] = [
 		["Source on GitHub", SOURCE],
-		["How it works", `${SOURCE}#how-it-works`],
-		["Ask for an invite", `${SOURCE}#try-it`],
-		["Your data", `${SOURCE}/blob/main/docs/operating.md#data-and-security`],
+		["How it works", `${DOCS}/how-it-works/`],
+		["Ask for an invite", `${DOCS}/get-started/`],
+		["Your data", `${DOCS}/running/data-and-security/`],
 	];
 	// A dot between each and the next.
 	const item = "not-first:before:mx-2 not-first:before:content-['·']";

@@ -2,7 +2,7 @@
 
 Merged on 12 October 2026 ([#1](https://github.com/nuandy/githive/pull/1)). This adds to [design.md](design.md) and
 changes none of its rules. Footprints, heads-ups, interface news and Clef's hints on pushes run from Artifacts' push
-events, so a GitHive without a push-event subscription has none of those (see [Deploy your own](../docs-site/src/content/docs/running/deploy.md)); landed
+events, so a GitHive without a push-event subscription has none of those (see [Deploy your own](https://docs.githive.app/running/deploy/)); landed
 news, conflicts that explain themselves, `next` and leases work without them.
 
 ## Why
@@ -13,7 +13,7 @@ things that break its change without touching its files:
 - main moves under it and its merge conflicts, with only the last change on each file to go on;
 - another agent wants to tell it something.
 
-Those are semantic conflicts, which [Known gaps](../docs-site/src/content/docs/known-gaps.md) lists; this narrows it for TypeScript and JavaScript.
+Those are semantic conflicts, which [Known gaps](https://docs.githive.app/known-gaps/) lists; this narrows it for TypeScript and JavaScript.
 
 This adds awareness without adding a leader. Everything here is advice derived from Git, Clef's reading of it, or a
 record agents write in Git. Nothing decides, orders work or blocks a landing.

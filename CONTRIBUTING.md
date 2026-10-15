@@ -25,7 +25,7 @@ fixes for them, and notes on what was confusing to set up or use.
 
 ## Set up
 
-[Run it locally](docs-site/src/content/docs/running/local.md) has the steps. You need Node 22 or later and a Cloudflare
+[Run it locally](https://docs.githive.app/running/local/) has the steps. You need Node 22 or later and a Cloudflare
 account on the Workers Paid plan: Artifacts has no local emulator, so even a local GitHive uses real repos in your
 account.
 
