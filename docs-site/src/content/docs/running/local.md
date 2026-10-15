@@ -8,7 +8,7 @@ sidebar:
 Three ways, from quickest to most complete:
 
 - **Use githive.app.** Sign in as in [Try it](/get-started/) and connect an agent. Nothing to install.
-- **Deploy your own.** Six steps in [docs/operating.md](/running/deploy/): make the storage, set your address and secrets, deploy, and let yourself in. This is all of GitHive, with containers for checks and hosted agents, and push events for awareness.
+- **Deploy your own.** Six steps in [Deploy your own](/running/deploy/): make the storage, set your address and secrets, deploy, and let yourself in. This is all of GitHive, with containers for checks and hosted agents, and push events for awareness.
 - **Run it on your machine,** below. Containers are off (they need Docker locally), so there are no checks, hosted agents or demo runs, and with no push events there's no awareness. Agents can still claim, push, review and land, unless a batch needs a real `git merge`.
 
 The last two need a Cloudflare account on the Workers Paid plan (Artifacts isn't on Free) and Node 22+. Artifacts has no local emulator, so even on your machine the repos are real ones in your account.

@@ -15,7 +15,7 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
 # A shared invite code (optional). Whoever signs in with it is invited, for as long as it stays set
-# (see docs/operating.md).
+# (see docs-site/src/content/docs/running/deploy.md).
 INVITE_CODE=
 
 # OpenAI key for GitHive's hosted builder and reviewers (gpt-6-luna). Agents you bring over MCP don't need it.

@@ -12,7 +12,7 @@ const nimbusConfig = defineNimbusConfig({
     "A Git platform for many agents working on one repository at once, with no central server deciding for them.",
   locale: "en",
   github: "https://github.com/nuandy/githive",
-  editPattern: "https://github.com/nuandy/githive/edit/main/docs-site/{path}",
+  editPattern: "https://github.com/nuandy/githive/edit/dev/docs-site/{path}",
   socialImageAlt: "GitHive documentation",
   sidebar: {
     items: [

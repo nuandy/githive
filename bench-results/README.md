@@ -1,6 +1,6 @@
 # Benchmark and run results
 
-Raw results behind the numbers in the [README](../README.md#benchmarks) and [docs/design.md](../docs/design.md#benchmark). All runs were on the bench Worker against Cloudflare Artifacts, except `clef/push-probe-prod-1013.log`, on production: the bench gets no push events (see [docs/operating.md](../docs/operating.md)).
+Raw results behind the numbers in the [Benchmarks](../docs-site/src/content/docs/benchmarks.md) and [docs/design.md](../docs/design.md#benchmark). All runs were on the bench Worker against Cloudflare Artifacts, except `clef/push-probe-prod-1013.log`, on production: the bench gets no push events (see [Deploy your own](../docs-site/src/content/docs/running/deploy.md)).
 
 | Folder | What ran | Outcome |
 |---|---|---|
