@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claimCovering } from "../src/claim-paths";
+import { readBranch } from "../src/toolkit/tools/claim-input";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
@@ -11,6 +12,18 @@ import { toolCalls } from "./helpers/tool-calls";
 // `source`: the claim covers what the branch changed, and the branch tip is the
 // change, reviewed, checked and merged like any other. The target branch never
 // holds half of it.
+
+describe("reading a branch to merge", () => {
+	it("says the branch is missing only when the server doesn't list it, and otherwise why the read failed", async () => {
+		const project = { url: server.url, token: "test" };
+		const brokenOff = () => Promise.reject(new Error("the server broke off the pack"));
+		await expect(readBranch(project, "main", brokenOff)).rejects.toThrow(
+			/\[502\] reading main failed: the server broke off the pack/,
+		);
+		await expect(readBranch(project, "nope", brokenOff)).rejects.toThrow(/\[409\] there's no branch nope/);
+		await expect(readBranch(project, "main", async () => "read")).resolves.toBe("read");
+	});
+});
 
 describe("a claim covering a branch's changes", () => {
 	it("is the files when they fit, and their folders, deepest first, when they don't", () => {

@@ -19,8 +19,8 @@ import type { ToolContext } from "./context";
 export async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
 	if (source === into) fail(400, `a change can't merge ${into} into itself`);
 	const project = await ctx.remote(repo, "read");
-	const workspace = await Workspace.clone(project, into).catch(() => fail(409, `there's no branch ${into}`));
-	const tip = await workspace.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
+	const workspace = await readBranch(project, into, () => Workspace.clone(project, into));
+	const tip = await readBranch(project, source, () => workspace.fetch("source", project, source));
 	const base = await workspace.mergeBase(await workspace.head(), tip);
 	if (base === tip) fail(409, `${source} has nothing ${into} doesn't have`);
 	const files = await workspace.changedPaths(base, tip);
@@ -39,6 +39,24 @@ export async function branchMerge(ctx: ToolContext, repo: string, source: string
 			await workspace.pushAs(`refs/remotes/source/${source}`, to, fork).catch(pushWithHistory);
 		},
 	};
+}
+
+/** How much of a failed read's own error a reply quotes. */
+const READ_ERROR_CHARS = 300;
+
+/**
+ * `read` of `branch`, or why it failed. Only a branch the server doesn't list is missing; any other failure, such as a
+ * fetch the server broke off, keeps its own error, so it isn't taken for a branch that isn't there.
+ */
+export async function readBranch<T>(project: Remote, branch: string, read: () => Promise<T>): Promise<T> {
+	try {
+		return await read();
+	} catch (err) {
+		const head = await branchHead(project, branch).catch(() => undefined);
+		if (head === null) fail(409, `there's no branch ${branch}`);
+		const said = err instanceof Error ? err.message : String(err);
+		fail(502, `reading ${branch} failed: ${said.slice(0, READ_ERROR_CHARS)}`);
+	}
 }
 
 /** Parses a work item for add_work, given alone or as one of its items. */
