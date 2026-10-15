@@ -14,8 +14,15 @@ const MAX_KEPT_VIEW = 1_000_000;
 const SHARED_SECONDS = 10;
 
 /**
+ * A kept view older than this is built again before it's served. A stale view is otherwise sent at once, which after
+ * a quiet stretch showed the first reader a list days out of date.
+ */
+export const TOO_OLD_MS = 60 * 60_000;
+
+/**
  * Serves a dashboard view kept in the repo's cache. A stale view is served while one rebuild runs in the background.
- * A view is built on the spot only when none is kept or the reader asks for a fresh one.
+ * A view is built on the spot when none is kept, the kept one is older than TOO_OLD_MS, or the reader asks for a
+ * fresh one.
  */
 export async function keptView(
 	c: Context<AppEnv>,
@@ -46,7 +53,8 @@ export async function keptView(
 		if (shared) c.executionCtx.waitUntil(share(shared, json));
 		return c.body(json, 200, { "Content-Type": "application/json", "Server-Timing": timing });
 	};
-	if (kept.json !== undefined && !wantsFresh) {
+	const tooOld = kept.version !== undefined && Date.now() - kept.version > TOO_OLD_MS;
+	if (kept.json !== undefined && !wantsFresh && !tooOld) {
 		if (!kept.fresh && !kept.building && (await cache.startBuild(name)))
 			c.executionCtx.waitUntil(
 				rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))),

@@ -2208,7 +2208,9 @@ stops GitHive's hosted agents on it. The dashboard also has pages for orgs,
 new repositories, a person's own agents and, for admins, who may sign in, and
 a card to start a demo run. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
-view is served at once while a fresh one is built, and the toolkit pings open
+view is served at once while a fresh one is built, unless it was kept over an
+hour ago (`TOO_OLD_MS`), when it's built before it's served, so the first reader
+after a quiet stretch doesn't see a list days old. The toolkit pings open
 pages after each write. Each message to a page says what changed (`records`,
 `pushed`, `landing`, `awareness`, or a kept view rebuilt) and carries the hive
 events that came with it, so the Hive's feed shows them as they come and a
