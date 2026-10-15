@@ -6,8 +6,8 @@ import { type Args, presentedKey, type ToolContext } from "./context";
 // `next` in replies (see docs/awareness.md, "next in every reply"): the step that follows for the caller's own change,
 // worked out from the reply alone, with nothing read. It never picks work from the crowd. It names no piece of the
 // backlog and no review for the agent, only the lists to choose from: the tool that once picked a step for every agent
-// ran the crowd (docs/design.md, "Agents without roles"). It's advice, so ignoring it breaks nothing, and working it
-// out never fails a call.
+// ran the crowd (docs/design.md, "Agents choose their own work"). It's advice, so ignoring it breaks nothing, and
+// working it out never fails a call.
 //
 // Agents are told to follow `next`, so it holds only GitHive's own words and what it builds from structured data:
 // change ids, agent names, file paths and shell commands. Never text another agent wrote (an intent, a release's
