@@ -15,7 +15,7 @@ import { mergeTools } from "./tools/merge-tools";
 import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
-import { seenRings, waitTools } from "./tools/wait-tool";
+import { QUIET, seenRings, waitTools } from "./tools/wait-tool";
 import { workTools } from "./tools/work-tools";
 
 // GitHive's MCP tools (see docs/design.md). Each tool is stateless: it reads or writes the repo's records
@@ -122,6 +122,8 @@ function writtenAs(name: string, args: Args, reply: unknown): { name: string; ar
  */
 async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
 	if (!ctx.news || name === "register" || !result || typeof result !== "object" || Array.isArray(result)) return result;
+	// A wait that heard nothing ring for its agent has no news to tell.
+	if (QUIET in result) return result;
 	if (!ctx.agent && !presentedKey(args, ctx)) return result;
 	const repo = requiredString(args, "repo");
 	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo))

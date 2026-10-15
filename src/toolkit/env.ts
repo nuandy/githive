@@ -274,6 +274,7 @@ function repoCacheParts(env: Env) {
 				ringAfter: (mark, ms, agent) => rpc(cache.ringAfter(mark, ms, agent)),
 				rungFor: (agent, mark) => rpc(cache.rungFor(agent, mark)),
 				newestNotice: (agent) => cache.newestNotice(agent),
+				holdSince: (agent, since, ms) => rpc(cache.holdSince(agent, since, ms)),
 			};
 		},
 		// Claims for advice, cached so a busy repo isn't read whole on every call.

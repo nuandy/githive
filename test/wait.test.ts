@@ -128,24 +128,27 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 	const setUpCache = async () => {
 		const { RepoCache } = await import("../src/repo-cache");
 		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
-		// Each look asks for the newest notice once, so counting those counts the looks.
+		// Each look asks for the newest notice once, so counting those counts the looks. Every call to the doorbell
+		// and every read of news is counted too.
 		const looks = { count: 0 };
+		const asked = { doorbell: 0, news: 0 };
 		const doorbell: Doorbell = {
-			rings: () => cache.rings(),
-			ringAfter: (mark, ms, agent) => cache.ringAfter(mark, ms, agent),
-			rungFor: (agent, mark) => cache.rungFor(agent, mark),
+			rings: () => (asked.doorbell++, cache.rings()),
+			ringAfter: (mark, ms, agent) => (asked.doorbell++, cache.ringAfter(mark, ms, agent)),
+			rungFor: (agent, mark) => (asked.doorbell++, cache.rungFor(agent, mark)),
+			holdSince: (agent, since, ms) => (asked.doorbell++, cache.holdSince(agent, since, ms)),
 			newestNotice: (agent) => ((looks.count += 1), cache.newestNotice(agent)),
 		};
 		const tools = toolCalls(() => server, {
 			doorbell: () => doorbell,
-			news: (_repo, branch, agent, delivery) => cache.newsFor(branch, agent, delivery),
+			news: (_repo, branch, agent, delivery) => (asked.news++, cache.newsFor(branch, agent, delivery)),
 			ping: (_repo, event, tool, whom) => cache.ping("records", true, event ? [event] : [], tool, whom),
 			keptClaims: (_repo, read) => read(),
 		});
 		await tools.call("settings", { required: 1 });
 		await tools.register("author", "other");
 		await tools.call("claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" }, "author");
-		return { ...tools, cache, looks };
+		return { ...tools, cache, looks, asked };
 	};
 
 	it("ends the hold of the agent a notice is for, with the notice in the reply's news", async () => {
@@ -219,6 +222,18 @@ describe("wait and notices", { timeout: 60_000 }, () => {
 		const again = await call("wait", { agent: "author", seen: woken.seen, seconds: 1 }, "author");
 		expect(again).toEqual(expect.objectContaining({ changed: false, seen: woken.seen }));
 		expect(looks.count).toBe(0);
+	});
+
+	it("asks the doorbell once and reads no news, when nothing rang for its agent", async () => {
+		const { call, asked } = await setUpCache();
+		const quiet = await call("wait", { agent: "author", seconds: 1 }, "author");
+		// Another agent's claim rings, but for no one waiting.
+		await call("claim", { change: "o-1", agent: "other", paths: ["src/o/"], intent: "o" }, "other");
+		asked.doorbell = asked.news = 0;
+		expect(await call("wait", { agent: "author", seen: quiet.seen, seconds: 1 }, "author")).toMatchObject({
+			changed: false,
+		});
+		expect(asked).toEqual({ doorbell: 1, news: 0 });
 	});
 
 	it("looks again once its seen is a few minutes old, though nothing rang: some things change with time alone", async () => {

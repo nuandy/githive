@@ -287,6 +287,8 @@ export interface Doorbell {
 	rungFor?(agent: string, mark: number): Promise<string[] | null>;
 	/** When `agent`'s newest notice still waiting for it was noted, or null if none is (see RepoCache.notify). */
 	newestNotice?(agent: string): Promise<string | null>;
+	/** rungFor and ringAfter in one call, for a `wait` that need not look first (see RepoCache.holdSince). */
+	holdSince?(agent: string, since: number, ms: number): Promise<{ rings: number; look: boolean; reasons: string[] }>;
 }
 
 /** What the advice tools (claims, reviews, backlog) read: the claims in force and the changes merged. */

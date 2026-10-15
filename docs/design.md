@@ -1551,7 +1551,10 @@ tells; a `seen` from before the part was added still compares by its three.
 After the parts, `seen` carries the ring count they were read at: when the log
 shows nothing rang for the caller since, the call holds without reading anything
 first, and answers with the same `seen` if nothing rings for it, so an agent
-waiting in a quiet repo costs a hold and no reads. Last comes when the parts
+waiting in a quiet repo costs a hold and no reads. That check and the hold are
+one call to RepoCache (`holdSince`), and a reply made without a look reads no
+news, since news comes only with a ring for its agent; such a call took four
+RepoCache requests and two reads of the registry before. Last comes when the parts
 were read: one read more than five minutes ago is read again though nothing
 rang, since some things change with time alone and write nothing (a review's
 hold runs out, a claim gone quiet frees its piece), so a quiet repo costs a read

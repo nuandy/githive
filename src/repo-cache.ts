@@ -299,6 +299,19 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
+	 * A `wait` whose agent last saw the repo at count `since`: if nothing that concerns it rang since, holds at once
+	 * until something does or `ms` pass, in one call rather than three. `look` says whether it should look again:
+	 * something rang for it, or the log no longer reaches back to `since`.
+	 */
+	async holdSince(agent: string, since: number, ms: number) {
+		const rings = await this.rings();
+		const reasons = await this.rungFor(agent, since);
+		if (reasons === null || reasons.length) return { rings, look: true, reasons: reasons ?? [] };
+		const rung = await this.ringAfter(rings, ms, agent);
+		return rung ? { ...rung, look: true } : { rings, look: false, reasons: [] };
+	}
+
+	/**
 	 * Why the doorbell rang for `agent` (for anyone when absent) after `mark`, oldest first: empty if nothing that
 	 * concerned it rang. Null if the log no longer reaches back to `mark`.
 	 */

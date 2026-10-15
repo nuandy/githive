@@ -57,15 +57,26 @@ export const waitTools: ToolHandlers = {
 		const until = Date.now() + holdMs;
 		const given = seenOf(optionalString(args, "seen"));
 		const known = given?.state.split(".")[NOTICES] ?? "";
-		// Read the count before looking, so a ring during the look still wakes the hold.
-		let mark = await doorbell.rings();
-		let look: Look | undefined;
 		let lookedAt = given?.lookedAt;
 		let lookMs = Math.min(FIRST_LOOK_MS, holdMs / 4);
-		if (!(await stillHolds(doorbell, agent, given))) {
+		let mark: number;
+		let look: Look | undefined;
+		if (doorbell.holdSince && given?.rings !== undefined && lookedRecently(given)) {
+			// What it saw likely still holds: one call to the doorbell holds it, until something rings for it.
+			const held = await doorbell.holdSince(agent, given.rings, Math.max(0, until - Date.now() - lookMs));
+			mark = held.rings;
+			if (!held.look) return quiet({ changed: false, seen: seenAt(given.state, mark, lookedAt) });
 			lookedAt = Date.now();
-			look = await lookFor(call, agent, known);
+			look = await lookFor(await openCall(args, ctx, call.run), agent, known);
 			lookMs = Date.now() - lookedAt;
+		} else {
+			// Read the count before looking, so a ring during the look still wakes the hold.
+			mark = await doorbell.rings();
+			if (!(await stillHolds(doorbell, agent, given))) {
+				lookedAt = Date.now();
+				look = await lookFor(call, agent, known);
+				lookMs = Date.now() - lookedAt;
+			}
 		}
 		const before = given?.state ?? look!.state;
 		while (!look || !changedParts(before, look.state).length) {
@@ -79,9 +90,18 @@ export const waitTools: ToolHandlers = {
 			look = await lookFor(await openCall(args, ctx, call.run), agent, known);
 			lookMs = Date.now() - lookedAt;
 		}
-		return look ? answer(look, before, mark, lookedAt) : { changed: false, seen: seenAt(before, mark, lookedAt) };
+		if (look) return answer(look, before, mark, lookedAt);
+		return quiet({ changed: false, seen: seenAt(before, mark, lookedAt) });
 	},
 };
+
+/**
+ * Marks a reply made without a look because nothing that concerns its agent rang: there's no news for it either, since
+ * news comes only with a ring for its agent, so the reply isn't sent reading for any (see withNews in mcp.ts).
+ */
+export const QUIET = Symbol("nothing rang for the agent");
+
+const quiet = <T extends object>(reply: T) => Object.assign(reply, { [QUIET]: true });
 
 function holdSeconds(value: unknown) {
 	if (value === undefined) return LONGEST_WAIT_SECONDS;
@@ -136,11 +156,13 @@ export const seenRings = (seen: unknown) => (typeof seen === "string" ? seenOf(s
  */
 async function stillHolds(doorbell: Doorbell, agent: string, seen: Seen | undefined) {
 	if (seen?.rings === undefined || !doorbell.rungFor) return false;
-	if (seen.lookedAt === undefined) return false;
-	if (Date.now() - seen.lookedAt > LOOK_AGAIN_MS) return false;
+	if (!lookedRecently(seen)) return false;
 	const reasons = await doorbell.rungFor(agent, seen.rings);
 	return reasons !== null && reasons.length === 0;
 }
+
+/** Whether `seen` was read lately enough to stand without a look (see LOOK_AGAIN_MS). */
+const lookedRecently = (seen: Seen) => seen.lookedAt !== undefined && Date.now() - seen.lookedAt <= LOOK_AGAIN_MS;
 
 // What concerns `agent` now, and a digest of it per part. `known` is the notices part of the `seen` the caller brought.
 async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent: string, known: string): Promise<Look> {
