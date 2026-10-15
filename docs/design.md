@@ -1792,6 +1792,11 @@ shard answers with how many pages it holds, so an empty one is sent nothing.
 - **Reconnecting.** The RepoCache keeps the last 200 messages. A page that reconnects says the last it had and is
   sent what it missed, or `missed` when that's too far back, and then it reads everything again.
 
+**Browsers keep none of it.** Every JSON answer goes out with `Cache-Control: no-store`, unless it sets its own
+caching. A browser that kept one would make each tab's next read of that URL wait its turn on the cache entry, in
+Chrome for up to 20 seconds, and some reads, such as a repo's file list, take seconds to make. The shared reads above
+are kept in the Worker's cache, not the browser's.
+
 **A repo's other tabs.** Changes (one branch at a time), History (what landed on a branch and why), a map of its
 claims, its code at any branch or commit, its agents, the audit, and its settings. Settings is a page per section
 (`#/repos/<owner>/<name>/settings/<section>`): general and access, review, path rules, branch rules, checks, GitHub,

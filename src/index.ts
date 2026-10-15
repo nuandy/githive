@@ -60,6 +60,17 @@ function isCrossSiteWrite(request: Request) {
 	return request.headers.get("Origin") !== new URL(request.url).origin;
 }
 
+// The API's answers change from one read to the next, and some take seconds to make, so browsers mustn't keep them:
+// a kept answer is a cache entry that every tab's next read of that URL waits on. Answers that set their own caching,
+// and the dashboard's files, are left as they are.
+app.use("*", async (c, next) => {
+	await next();
+	const json = c.res.headers.get("Content-Type")?.startsWith("application/json");
+	if (!json || c.res.headers.has("Cache-Control")) return;
+	c.res = new Response(c.res.body, c.res);
+	c.res.headers.set("Cache-Control", "no-store");
+});
+
 // Authenticate before routing: Access, an agent token, or a session cookie (see auth/principal.ts).
 app.use("*", async (c, next) => {
 	const principal = await resolvePrincipal(c.req.raw, c.env);
