@@ -169,15 +169,12 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	/** A recheck continues the conversation of the review that rejected the change, if it was handed on. */
 	protected continuing(job: ReviewJob) {
 		const conversation = job.earlier?.conversation;
-		if (!conversation) return {};
-		const told = {
-			role: "user" as const,
-			content:
-				`The builder pushed a revision: the change is now at commit ${job.head}, checked out in a new ` +
-				`container. Check each of your findings is fixed (\`git diff ${job.earlier!.head} HEAD\` shows what ` +
-				"changed), and that the fix breaks nothing else, then call submit_verdict.",
-		};
-		return { previousResponseId: conversation.responseId, pending: [...conversation.pending, told] };
+		if (!conversation) return undefined;
+		const told =
+			`The builder pushed a revision: the change is now at commit ${job.head}, checked out in a new ` +
+			`container. Check each of your findings is fixed (\`git diff ${job.earlier!.head} HEAD\` shows what ` +
+			"changed), and that the fix breaks nothing else, then call submit_verdict.";
+		return { ...conversation, pending: [...conversation.pending, { kind: "text" as const, text: told }] };
 	}
 
 	protected async afterClone(job: ReviewJob) {

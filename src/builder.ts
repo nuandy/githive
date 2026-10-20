@@ -135,7 +135,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		state.selfChecked = false;
 		state.checklistAsked = false;
 		// The model is still owed the finish call's output, so that goes first.
-		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
+		state.pending = [...(state.pending ?? []), { kind: "text", text: feedback }];
 		this.note(state, `sent back (revision ${state.revisions}): ${firstLine(feedback).slice(0, 160)}`);
 		await this.save(state);
 		await this.ctx.storage.setAlarm(Date.now());

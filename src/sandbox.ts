@@ -1,19 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { rpc } from "./rpc";
-import OpenAI from "openai";
-import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
-import {
-	MODEL,
-	addUsage,
-	assertComplete,
-	emptyUsage,
-	openAITools,
-	runCalls,
-	tool,
-	type AgentTool,
-	type Usage,
-} from "./agent";
+import { addUsage, emptyUsage, runCall, tool, type AgentTool, type Usage } from "./agent";
+import { modelClient } from "./models/clients";
+import type { Input, ModelSettings } from "./models/model";
+import { modelSettingsFor } from "./models/payer";
+import { appendThread, clearThread, loadThread, madeWith, type Thread } from "./models/thread";
 import {
 	COMMAND_TIMEOUT_S,
 	ContainerUnresponsive,
@@ -29,8 +21,9 @@ import { staysInRepo } from "./paths";
 export { WORKDIR, clip };
 
 // Base class for hosted agents (builders and reviewers), each working in its own container
-// on a clone of one change. The loop runs from alarms in RUN_BUDGET_MS slices and keeps the
-// conversation on OpenAI's side, so long runs survive across alarms.
+// on a clone of one change. The loop runs from alarms in RUN_BUDGET_MS slices, on the model
+// of the person it works for (its job's payer), and keeps the conversation in its own storage
+// (models/thread.ts), so long runs survive across alarms.
 
 export const RUN_BUDGET_MS = 8 * 60_000; // per alarm, well under the alarm wall-clock limit
 const MAX_TURNS = 80;
@@ -55,6 +48,8 @@ export interface SandboxJob {
 	repo: string;
 	remote: string;
 	token: string;
+	/** Whose model the agent runs on: the id of the person who started it, or HOUSE (see models/payer.ts). */
+	payer?: string;
 }
 
 /** A job about one change, shared by builders and reviewers. */
@@ -97,14 +92,15 @@ export interface AgentState {
 	usage: Usage;
 	error?: string;
 	log: { at: string; event: string }[];
-	previousResponseId?: string;
-	pending?: ResponseInputItem[];
+	/** What the next turn sends: tool results the last turn is owed, and messages for the model. */
+	pending?: Input[];
+	/** The conversation came from another agent, and hasn't been continued yet (see continuing). */
+	handedOn?: boolean;
 }
 
-/** Where an agent's conversation with the model stands: its last response, and what that response is owed. */
-export interface Conversation {
-	responseId: string;
-	pending: ResponseInputItem[];
+/** Where an agent's conversation with the model stands, for another agent to continue: the thread and what it's owed. */
+export interface Conversation extends Thread {
+	pending: Input[];
 }
 
 const ReadArgs = z.strictObject({
@@ -198,10 +194,17 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			usage: emptyUsage(),
 			log: [],
 			...this.freshFields(),
-			...this.continuing(job),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
 		await this.ctx.storage.delete(this.staleKeys());
+		// A new job is a new conversation, unless another agent handed one on.
+		await clearThread(this.ctx.storage);
+		const handed = this.continuing(job);
+		if (handed) {
+			await appendThread(this.ctx.storage, handed.madeWith, 0, handed.entries);
+			fresh.pending = handed.pending;
+			fresh.handedOn = true;
+		}
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -258,7 +261,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	/** The state without the conversation plumbing. */
 	protected view(state: S) {
-		const { previousResponseId: _id, pending: _pending, ...rest } = state;
+		const { pending: _pending, handedOn: _handedOn, ...rest } = state;
 		return rest;
 	}
 
@@ -270,13 +273,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	/** Where its conversation with the model stands, for another agent to continue it, or null if it never began. */
 	async conversation(): Promise<Conversation | null> {
 		const { state } = await this.load();
-		if (!state?.previousResponseId) return null;
-		return { responseId: state.previousResponseId, pending: state.pending ?? [] };
+		const thread = await loadThread(this.ctx.storage);
+		if (!state || !thread?.entries.length) return null;
+		return { ...thread, pending: state.pending ?? [] };
 	}
 
 	/** A conversation to continue instead of starting a new one with the kickoff; none by default. */
-	protected continuing(_job: J): Pick<AgentState, "previousResponseId" | "pending"> {
-		return {};
+	protected continuing(_job: J): Conversation | undefined {
+		return undefined;
 	}
 
 	async alarm() {
@@ -389,14 +393,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			if (installed.exitCode === 0) this.note(state, `installed ${installed.toolchain}`);
 			else this.note(state, `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`);
 		}
-		if (restart)
-			state.pending = [
-				...(state.pending ?? []),
-				{
-					role: "user",
-					content: "The container restarted. Uncommitted changes were lost; the repository was cloned again.",
-				},
-			];
+		if (restart) {
+			const told = "The container restarted. Uncommitted changes were lost; the repository was cloned again.";
+			state.pending = [...(state.pending ?? []), { kind: "text", text: told }];
+		}
 	}
 
 	/** Points the snapshot's checkout at this job's remote. afterClone fetches what the job needs. */
@@ -492,52 +492,70 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		];
 	}
 
+	/** The model the agent runs on: its payer's (tests answer it instead). */
+	protected modelSettings(job: J): Promise<ModelSettings> {
+		return modelSettingsFor(this.env, job.payer);
+	}
+
+	/** The conversation so far, or none when it's new or was made with a model the payer no longer uses. */
+	private async currentThread(state: S, made: string) {
+		const thread = await loadThread(this.ctx.storage);
+		if (!thread || thread.madeWith === made) return thread;
+		this.note(state, "its model changed, so its conversation starts again");
+		await clearThread(this.ctx.storage);
+		return null;
+	}
+
 	private async turn(job: J, state: S) {
 		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS)
 			throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
-		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
+		const settings = await this.modelSettings(job);
+		const client = modelClient(settings);
+		const made = madeWith(settings);
 		const tools = this.tools(job, state);
 		const inbox = await this.peekInbox();
 		// Advice: a turn goes on without it.
 		const heard = await this.heard(job, state).catch(() => []);
-		// The first turn opens with the kickoff. Later turns send what the previous one left pending.
-		const opening: ResponseInputItem[] = state.previousResponseId
-			? (state.pending ?? [])
-			: [{ role: "user", content: this.kickoff(job) }];
-		const told = [...inbox, ...heard].map((content) => ({ role: "user" as const, content }));
-		const ask = (opening: ResponseInputItem[], previous?: string) =>
-			client.responses.create({
-				model: MODEL,
+		const told: Input[] = [...inbox, ...heard].map((text) => ({ kind: "text", text }));
+		const kickoff: Input[] = [{ kind: "text", text: this.kickoff(job) }];
+		const thread = await this.currentThread(state, made);
+		let history = (thread?.entries ?? []).map((json) => JSON.parse(json) as unknown);
+		const ask = (opening: Input[]) =>
+			client.turn({
 				instructions: this.instructions(job),
-				input: [...opening, ...told],
-				previous_response_id: previous,
-				tools: openAITools(tools),
-				reasoning: { effort: "high" },
-				max_output_tokens: 32000,
-				prompt_cache_key: promptCacheKey(this.kind, job.repo),
+				tools,
+				history,
+				inputs: [...opening, ...told],
+				cacheKey: promptCacheKey(this.kind, job.repo),
 			});
-		const handedOn = state.turns === 0 && !!state.previousResponseId;
-		const response = await ask(opening, state.previousResponseId).catch((err) => {
-			if (!handedOn) throw err;
-			// The conversation it was given can't be continued (it may have expired): start afresh.
+		// The first turn opens with the kickoff. Later turns send what the previous one left pending.
+		const result = await ask(thread ? (state.pending ?? []) : kickoff).catch(async (err) => {
+			if (!thread || !state.handedOn) throw err;
+			// The conversation it was given can't be continued: start afresh.
 			this.note(state, `couldn't continue the earlier conversation, starting afresh: ${String(err).slice(0, 160)}`);
-			return ask([{ role: "user", content: this.kickoff(job) }]);
+			await clearThread(this.ctx.storage);
+			history = [];
+			return ask(kickoff);
 		});
+		state.handedOn = false;
 		await this.acknowledgeInbox(inbox, state);
 		state.turns++;
-		addUsage(state.usage, response);
-		assertComplete(response, this.kind);
-		state.previousResponseId = response.id;
+		addUsage(state.usage, result.reply.usage);
 
-		const outputs = await runCalls(tools, response);
+		const outputs: Input[] = [];
+		for (const call of result.reply.calls)
+			outputs.push({ kind: "result", callId: call.id, output: await runCall(tools, call.name, call.arguments) });
 		state.toolCalls += outputs.length;
+		// Kept once the tools have run, just before the turn's state is saved, so the two stay in step.
+		const appended = result.append.map((entry) => JSON.stringify(entry));
+		await appendThread(this.ctx.storage, made, history.length, appended);
 		if (outputs.length) {
 			state.pending = outputs;
 			return;
 		}
 		// The model answered in text without finishing.
 		if (++state.nudges > MAX_NUDGES) throw new Error(`${this.kind} stopped calling tools without finishing`);
-		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
-		state.pending = [{ role: "user", content: this.nudge(job) }];
+		this.note(state, `nudged: ${result.reply.text.slice(0, 200)}`);
+		state.pending = [{ kind: "text", text: this.nudge(job) }];
 	}
 }

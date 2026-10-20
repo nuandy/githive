@@ -26,6 +26,7 @@
 	"license": "MIT",
 	"description": "A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers + Artifacts.",
 	"dependencies": {
+		"@anthropic-ai/sdk": "^0.135.0",
 		"@cloudflare/workers-oauth-provider": "^1.2.3",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",

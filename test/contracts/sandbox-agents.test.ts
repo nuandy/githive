@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "../fakes/env";
-import { runCall, type AgentTool } from "../../src/agent";
+import { emptyUsage, runCall, type AgentTool } from "../../src/agent";
+import { houseModel } from "../../src/demo/house";
+import { HOUSE } from "../../src/models/payer";
+import { madeWith } from "../../src/models/thread";
 import type { BuildJob, BuilderState } from "../../src/builder";
 import type { ReviewJob, ReviewerState } from "../../src/reviewer";
 import { INBOX, TURN_IN_FLIGHT } from "../../src/sandbox";
@@ -9,12 +12,8 @@ import { INBOX, TURN_IN_FLIGHT } from "../../src/sandbox";
 // only builders guard pushes, a builder at work takes a second rejection into its next turn, and a reviewer
 // rechecking a change it rejected continues that review's conversation.
 
-const openai = vi.hoisted(() => ({ create: vi.fn() }));
-vi.mock("openai", () => ({
-	default: class {
-		responses = { create: openai.create };
-	},
-}));
+const model = vi.hoisted(() => ({ turn: vi.fn() }));
+vi.mock("../../src/models/clients", () => ({ modelClient: () => ({ turn: model.turn }) }));
 
 const { Builder } = await import("../../src/builder");
 const { Reviewer } = await import("../../src/reviewer");
@@ -33,6 +32,7 @@ const job: BuildJob = {
 	intent: "Build A",
 	claim: ["src/a/"],
 	others: [],
+	payer: HOUSE,
 };
 const reviewJob: ReviewJob = { ...job, role: "tests", head: "h1", baseCommit: "b0" };
 
@@ -165,44 +165,65 @@ describe("revising", () => {
 });
 
 describe("rechecking", () => {
+	const house = madeWith(houseModel({ OPENAI_API_KEY: "test" } as never));
 	const handed = {
-		responseId: "resp-rejected",
-		pending: [{ type: "function_call_output", call_id: "c1", output: "ok" }],
+		madeWith: house,
+		entries: [JSON.stringify({ responseId: "resp-rejected" })],
+		pending: [{ kind: "result" as const, callId: "c1", output: "ok" }],
 	};
 	const recheckJob = { ...reviewJob, head: "h2", earlier: { head: "h1", findings: "no tests", conversation: handed } };
 	const reviewer = () =>
 		new Reviewer(
 			{ storage: new FakeStorage(), container: fakeContainer().container } as never,
-			{
-				OPENAI_API_KEY: "test",
-			} as never,
+			{ OPENAI_API_KEY: "test" } as never,
 		);
 	type Turning = { turn(job: ReviewJob, state: ReviewerState): Promise<void> };
-	const answered = { id: "resp-new", status: "completed", output: [], output_text: "thinking" };
+	const answered = {
+		reply: { text: "thinking", calls: [], usage: emptyUsage() },
+		append: [{ responseId: "resp-new" }],
+	};
 
 	it("continues the review that rejected the change, told what's new, instead of starting over", async () => {
 		const agent = reviewer();
 		await agent.start(recheckJob as never);
 		const conversation = await agent.conversation();
-		expect(conversation?.responseId).toBe("resp-rejected");
+		expect(conversation?.entries).toEqual(handed.entries);
 		expect(conversation?.pending[0]).toEqual(handed.pending[0]);
 		expect(JSON.stringify(conversation?.pending[1])).toContain("now at commit h2");
-		openai.create.mockResolvedValueOnce(answered);
-		const state = { ...(await agent.state())!, previousResponseId: "resp-rejected", pending: conversation!.pending };
+		model.turn.mockResolvedValueOnce(answered);
+		const state = { ...(await agent.state())!, pending: conversation!.pending, handedOn: true };
 		await (agent as unknown as Turning).turn(recheckJob as never, state as ReviewerState);
-		expect(openai.create.mock.calls[0]![0]).toMatchObject({ previous_response_id: "resp-rejected" });
+		expect(model.turn.mock.calls[0]![0]).toMatchObject({
+			history: [{ responseId: "resp-rejected" }],
+			inputs: conversation!.pending,
+		});
+		expect((await agent.conversation())?.entries).toEqual([...handed.entries, '{"responseId":"resp-new"}']);
 	});
 
 	it("starts afresh when that conversation can't be continued", async () => {
 		const agent = reviewer();
 		await agent.start(recheckJob as never);
 		const conversation = (await agent.conversation())!;
-		openai.create.mockRejectedValueOnce(new Error("Previous response not found")).mockResolvedValueOnce(answered);
-		const state = { turns: 0, log: [], usage: {}, previousResponseId: "resp-rejected", pending: conversation.pending };
+		model.turn.mockRejectedValueOnce(new Error("Previous response not found")).mockResolvedValueOnce(answered);
+		const state = { turns: 0, log: [], usage: emptyUsage(), pending: conversation.pending, handedOn: true };
 		await (agent as unknown as Turning).turn(recheckJob as never, state as unknown as ReviewerState);
-		const retried = openai.create.mock.calls[1]![0] as { previous_response_id?: string; input: { content: string }[] };
-		expect(retried.previous_response_id).toBeUndefined();
-		expect(retried.input[0]!.content).toContain("Review change a-1");
+		const retried = model.turn.mock.calls[1]![0] as { history: unknown[]; inputs: { text: string }[] };
+		expect(retried.history).toEqual([]);
+		expect(retried.inputs[0]!.text).toContain("Review change a-1");
 		expect(state.log.some((entry: { event: string }) => entry.event.includes("starting afresh"))).toBe(true);
+	});
+
+	it("starts its conversation again when its payer's model changed", async () => {
+		const agent = reviewer();
+		await agent.start({
+			...recheckJob,
+			earlier: { ...recheckJob.earlier, conversation: { ...handed, madeWith: "x" } },
+		} as never);
+		model.turn.mockResolvedValueOnce(answered);
+		const state = { turns: 0, log: [], usage: emptyUsage(), pending: handed.pending, handedOn: true };
+		await (agent as unknown as Turning).turn(recheckJob as never, state as unknown as ReviewerState);
+		const asked = model.turn.mock.calls[0]![0] as { history: unknown[]; inputs: { text: string }[] };
+		expect(asked.history).toEqual([]);
+		expect(asked.inputs[0]!.text).toContain("Review change a-1");
 	});
 });
