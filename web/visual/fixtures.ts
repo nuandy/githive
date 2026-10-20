@@ -11,17 +11,7 @@
 
 import type { RepoAccess } from "../src/api.ts";
 import type { Summaries } from "../src/lib/repos.ts";
-import {
-	AGENTS,
-	APPROVED,
-	CONNECTIONS,
-	HOSTED_USERS,
-	ME,
-	MY_ORGS,
-	OPERATOR,
-	REQUESTS,
-	orgDetails,
-} from "./fixtures/account.ts";
+import { AGENTS, APPROVED, CONNECTIONS, ME, MY_ORGS, OPERATOR, REQUESTS, orgDetails } from "./fixtures/account.ts";
 import { ROBIN } from "./fixtures/people.ts";
 import { diffOf } from "./fixtures/diffs.ts";
 import { fileAt } from "./fixtures/files.ts";
@@ -130,7 +120,6 @@ function adminAnswer(second: string | undefined, rest: string[], who: Who): Answ
 	const lists: Record<string, unknown> = {
 		invites: APPROVED,
 		"invite-requests": REQUESTS,
-		"hosted-agents": HOSTED_USERS,
 	};
 	if (second === undefined || !(second in lists)) return null;
 	return who === "visitor" ? signIn() : ok(lists[second]);

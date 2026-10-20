@@ -496,7 +496,7 @@ export type Me =
 			email: string;
 			avatarUrl: string | null;
 			by: string;
-			/** Whether they may start GitHive's hosted agents (newer servers). */ hostedAgents?: boolean;
+			/** Whether hosted agents can start for them: they've set their model (newer servers). */ hostedAgents?: boolean;
 	  }
 	/** Through Cloudflare Access, on the admin hostnames: no sign-in and no agents of their own. */
 	| { kind: "access"; label: string; by: string; hostedAgents?: boolean }
@@ -928,23 +928,13 @@ export interface InviteRequest {
 }
 
 /** Someone allowed to start GitHive's hosted agents. */
-export interface HostedUser {
-	handle: string;
-	grantedBy: string;
-	createdAt: string;
-}
-
-/** GitHive's operators, through Cloudflare Access: who may sign in, orgs' requests, and who may use hosted agents. */
+/** GitHive's operators, through Cloudflare Access: who may sign in, and orgs' requests. */
 export const admin = {
 	invites: () => call<ApprovedEmail[]>("GET", "/admin/invites"),
 	approve: (email: string) => call<{ invited: string }>("POST", "/admin/invites", { email }),
 	removeInvite: (email: string) => call<unknown>("DELETE", `/admin/invites/${encodeURIComponent(email)}`),
 	requests: () => call<InviteRequest[]>("GET", "/admin/invite-requests"),
 	decline: (email: string) => call<unknown>("DELETE", `/admin/invite-requests/${encodeURIComponent(email)}`),
-	hosted: () => call<HostedUser[]>("GET", "/admin/hosted-agents"),
-	allowHosted: (handle: string) =>
-		call<{ allowed: string }>("PUT", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
-	disallowHosted: (handle: string) => call<unknown>("DELETE", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
 };
 
 export type AdminApi = typeof admin;

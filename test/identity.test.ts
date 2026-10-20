@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { NO_MODEL } from "../src/models/payer";
 import { statusOf } from "../src/errors";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
@@ -227,23 +228,23 @@ describe("signed-in agents", () => {
 });
 
 describe("GitHive's hosted agents", () => {
-	/** A signed-in agent whose owner is, or isn't, on the admin's list. */
+	/** A signed-in agent whose owner has, or hasn't, set a model for hosted agents to run on. */
 	const listed = (allowed: boolean): ToolContext => ({
 		remote: async () => ({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		agent: "ada/builder",
-		mayUseHosted: async () => allowed,
+		hasModel: async () => allowed,
 		startBuilder: async (input) => ({ change: input.change, builder: "b" }),
 		requestReview: async () => ({ head: "h1", reviewers: ["review"] }),
 	});
 
-	it("are only for the people an admin lists: build and request_review refuse anyone else", async () => {
-		const refusal = "GitHive's hosted agents are by invitation: ask an admin to add you";
+	it("run on their owner's own model: build and request_review refuse until one is set", async () => {
+		const refusal = NO_MODEL;
 		expect(await call(listed(false), "build", { intent: "Add stats", paths: ["src/stats/"] })).toEqual({
 			error: refusal,
 		});
 		expect(await call(listed(false), "request_review", { change: "a-1" })).toEqual({ error: refusal });
-		// On the list, they get past the gate; here request_review then finds no claim.
+		// With a model, they get past the gate; here request_review then finds no claim.
 		expect(await call(listed(true), "request_review", { change: "a-1" })).toEqual({
 			error: "a-1 holds no claim: claim the change's paths first",
 		});

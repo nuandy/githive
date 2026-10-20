@@ -155,7 +155,9 @@ describe("a demo run", () => {
 		expect(started).toEqual([]);
 		expect((await run.status())?.settingUp).toBe(true);
 		await run.alarm();
-		expect(started).toEqual([{ repo: "ada--honeycomb", count: DEMO_AGENTS, minutes: RUN_MINUTES, by: "ada" }]);
+		expect(started).toEqual([
+			{ repo: "ada--honeycomb", count: DEMO_AGENTS, minutes: RUN_MINUTES, by: "ada", payer: "githive" },
+		]);
 		expect((await run.status())?.settingUp).toBeUndefined();
 	});
 

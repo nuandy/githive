@@ -14,7 +14,7 @@ import { identityStore } from "./principal";
 // client acts as. The library keeps the request server-side and binds the form to this browser. Everything the
 // client says about itself is escaped.
 
-const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+export const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
 const HIVE =
 	`<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" ` +
@@ -23,7 +23,7 @@ const HIVE =
 	`stroke-width="2.6" stroke-linecap="round" style="stroke: var(--mark-line)"/><circle cx="16" cy="16" r="4" ` +
 	`fill="#e59a0b"/></svg>`;
 
-function page(title: string, body: string, script = "") {
+export function page(title: string, body: string, script = "") {
 	return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} · GitHive</title>
@@ -46,7 +46,7 @@ export function formAction(redirectUri?: string) {
 	}
 }
 
-const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
+export const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
 	const responseHeaders = new Headers(headers);
 	responseHeaders.set("Content-Type", "text/html; charset=utf-8");
 	const scriptSource = nonce ? ` script-src 'nonce-${nonce}';` : "";

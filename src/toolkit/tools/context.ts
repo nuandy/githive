@@ -94,8 +94,8 @@ export interface ToolContext {
 	 * that were revoked. Without it, every agent is taken as able to review.
 	 */
 	notReviewing?: (agents: string[]) => Promise<Set<string>>;
-	/** Whether the caller may start hosted agents (build, request_review), which spend its model account. */
-	mayUseHosted?: () => Promise<boolean>;
+	/** Whether the caller has set a model for hosted agents (build, request_review) to run on (see models/payer.ts). */
+	hasModel?: () => Promise<boolean>;
 	/** The caller's teams in the repo's org (@<org>/<team>), recorded in their votes. */
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */

@@ -215,17 +215,3 @@ describe("someone who signed in before orgs existed", () => {
 		]);
 	});
 });
-
-describe("who may use GitHive's hosted agents", () => {
-	it("is only the people an admin lists, who must have signed in", async () => {
-		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);
-		expect(await ids.allowHosted("Ada", "admin@example.com")).toBe("ada");
-		expect(await ids.mayUseHosted(people.ada.id)).toBe(true);
-		expect(await ids.hostedUsers()).toEqual([
-			{ handle: "ada", grantedBy: "admin@example.com", createdAt: expect.any(String) },
-		]);
-		await expect(ids.allowHosted("nobody", "admin")).rejects.toThrow(/need to have signed in/);
-		await ids.disallowHosted("ada");
-		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);
-	});
-});

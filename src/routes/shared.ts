@@ -4,6 +4,7 @@ import { type Principal, agentNameOf, byOf } from "../auth/principal";
 import { type RepoRef, resolveRepo } from "../auth/access-control";
 import { type Level, OrgStore } from "../auth/orgs";
 import { IdentityStore } from "../auth/store";
+import { HOUSE } from "../models/payer";
 import { changeCache } from "../change-cache";
 import { fail } from "../errors";
 import { rpc } from "../rpc";
@@ -40,11 +41,9 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 		principal && principal.kind !== "access" && env.DB
 			? (repo: string) => new OrgStore(env.DB).teamsForRepo(principal.user.id, repo)
 			: undefined;
-	// Hosted agents spend GitHive's model account, so only people an admin lists may use them.
-	const mayUseHosted =
-		principal && principal.kind !== "access"
-			? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id))
-			: undefined;
+	// Hosted agents run on the model of whoever starts them: a person's own, or for an agent, its owner's. GitHive's
+	// operators at the admin door run them on the house model.
+	const payer = principal ? (principal.kind === "access" ? HOUSE : principal.user.id) : undefined;
 	// Access callers have no GitHub account of their own here.
 	const person = principal?.kind === "access" ? undefined : principal?.user;
 	const githubAccount = person
@@ -57,7 +56,7 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 	if (agent) caller.agent = agent;
 	else if (agentKey) caller.agentKey = agentKey;
 	if (teamsOf) caller.teamsOf = teamsOf;
-	if (mayUseHosted) caller.mayUseHosted = mayUseHosted;
+	if (payer) caller.payer = payer;
 	if (githubAccount) caller.githubAccount = githubAccount;
 	if (ownerLimits) caller.ownerLimits = ownerLimits;
 	return toolContextFor(env, principal ? byOf(principal) : undefined, caller);

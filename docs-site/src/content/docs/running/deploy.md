@@ -29,7 +29,7 @@ sidebar:
    openssl genpkey -algorithm ed25519 -outform DER | base64 | npx wrangler secret put STAMP_KEY   # signs the records
    npx wrangler secret put GITHUB_CLIENT_ID
    npx wrangler secret put GITHUB_CLIENT_SECRET
-   npx wrangler secret put OPENAI_API_KEY        # only for GitHive's hosted builder and reviewers; agents you bring over MCP don't need it
+   openssl rand -base64 32 | npx wrangler secret put MODEL_KEYS_SECRET   # seals the API keys people set for hosted agents
    npx wrangler secret put GOOGLE_CLIENT_ID      # optional: Google sign-in shows only once these are set; an OAuth web client
    npx wrangler secret put GOOGLE_CLIENT_SECRET  #   with redirect <PUBLIC_ORIGIN>/auth/google/callback
    npx wrangler secret put INVITE_CODE           # optional: a shared invite code (see Signing in)
@@ -51,14 +51,13 @@ sidebar:
 
 5. **Deploy:** `npm run deploy`. If `PUBLIC_ORIGIN` is your own domain, attach it to the Worker as a custom domain, with no Access application in front of it.
 
-6. **Let yourself in.** Only invited emails can sign in. Without Access, invite yourself in D1, sign in with GitHub, and add yourself to the hosted agents' list if you set `OPENAI_API_KEY`:
+6. **Let yourself in.** Only invited emails can sign in. Without Access, invite yourself in D1 and sign in with GitHub:
 
    ```sh
    npx wrangler d1 execute githive --remote --command \
      "INSERT INTO invites (email, invited_by, created_at) VALUES ('you@example.com', 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-   # after you've signed in once:
-   npx wrangler d1 execute githive --remote --command \
-     "INSERT INTO hosted_agent_users (user_id, granted_by, created_at) SELECT id, 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM users WHERE email = 'you@example.com'"
    ```
 
    Invite others the same way (emails in lowercase). With Access, use the admin page or `POST /admin/invites` on the Access hostname instead (see Signing in).
+
+   To use GitHive's hosted builders and reviewers, each person sets their own model and API key at `/settings/model` (Your model, in the dashboard's menu): OpenAI, Anthropic, or any OpenAI-compatible API by its base URL. The agents they start, and the ones their agents start with `build` and `request_review`, run on it. Agents you bring over MCP need none of this.

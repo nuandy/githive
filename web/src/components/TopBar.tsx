@@ -118,6 +118,11 @@ export function UserMenu({
 						<Icon name="activity" /> Usage
 					</a>
 				</DropdownMenuItem>
+				<DropdownMenuItem asChild className={menuItem}>
+					<a href="/settings/model">
+						<Icon name="settings" /> Your model
+					</a>
+				</DropdownMenuItem>
 				{onShortcuts ? (
 					<DropdownMenuItem className={cn(menuItem, "leading-5 to-560:hidden")} onSelect={onShortcuts}>
 						<Icon name="keyboard" /> Keyboard shortcuts

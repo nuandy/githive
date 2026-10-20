@@ -59,6 +59,8 @@ export interface HostedAgentState {
 	failing: number;
 	/** It has stopped: nothing left for it, its time is up, or it was stopped. */
 	done: boolean;
+	/** Whose model its builders and reviewers run on: the hive's (see Hive.payer). */
+	payer?: string;
 }
 
 /** A repo's hosted agents: who they are, until when they take work, and who started them. */
@@ -68,6 +70,8 @@ export interface Hive {
 	startedAt: number;
 	until: number;
 	by: string;
+	/** Whose model its agents, and the builders and reviewers they start, run on (see models/payer.ts). */
+	payer?: string;
 }
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -97,13 +101,14 @@ export class HostedAgent extends DurableObject<Env> {
 	// A repo's hive.
 
 	/** Starts `count` hosted agents on the repo for `minutes`; an agent already working takes the later end. */
-	async start(input: { repo: string; count: number; minutes: number; by: string }) {
+	async start(input: { repo: string; count: number; minutes: number; by: string; payer: string }) {
 		const startedAt = Date.now();
 		const until = startedAt + input.minutes * 60_000;
 		const names = hiveAgentNames(input.count);
-		const hive: Hive = { repo: input.repo, names, startedAt, until, by: input.by };
+		const hive: Hive = { repo: input.repo, names, startedAt, until, by: input.by, payer: input.payer };
 		await this.ctx.storage.put("hive", hive);
-		const begin = (name: string) => this.agentNamed(input.repo, name).work({ repo: input.repo, name, until });
+		const begin = (name: string) =>
+			this.agentNamed(input.repo, name).work({ repo: input.repo, name, until, payer: input.payer });
 		await Promise.all(names.map(begin));
 		await this.listenToRepo(input.repo);
 		return this.status();
@@ -141,10 +146,11 @@ export class HostedAgent extends DurableObject<Env> {
 	// An agent.
 
 	/** Starts this agent's loop afresh, or gives one already working the new end. */
-	async work(input: { repo: string; name: string; until: number }) {
+	async work(input: { repo: string; name: string; until: number; payer?: string }) {
 		const kept = await this.ctx.storage.get<HostedAgentState>("agent");
+		const payer = input.payer ? { payer: input.payer } : {};
 		if (kept && !kept.done) {
-			await this.ctx.storage.put("agent", { ...kept, until: Math.max(kept.until, input.until) });
+			await this.ctx.storage.put("agent", { ...kept, until: Math.max(kept.until, input.until), ...payer });
 			return;
 		}
 		// A stopped agent's account was for its last start: what it tried then may be free to try again.
@@ -157,6 +163,7 @@ export class HostedAgent extends DurableObject<Env> {
 			reviewed: 0,
 			failing: 0,
 			done: false,
+			...payer,
 		};
 		await this.ctx.storage.put("agent", fresh);
 		// Agents start together: each reads the backlog in an order of its own, and a claim another took first costs
@@ -209,16 +216,22 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** Starts GitHive's hosted builder on the agent's claimed change, which the hive reviews (tests note it instead). */
-	protected startBuilder(repo: string, change: string): Promise<unknown> {
-		return startHostedBuilder(this.env, { repo, change, hiveReviews: true });
+	protected startBuilder(repo: string, change: string, payer?: string): Promise<unknown> {
+		return startHostedBuilder(this.env, { repo, change, hiveReviews: true, ...(payer ? { payer } : {}) });
 	}
 
 	/** Starts a hosted reviewer that votes as the agent, under its own name (tests note it instead). */
-	protected startReviewer(repo: string, offer: ReviewOption, agent: string, earlier?: Rejected): Promise<unknown> {
+	protected startReviewer(
+		repo: string,
+		offer: ReviewOption,
+		agent: string,
+		earlier?: Rejected,
+		payer?: string,
+	): Promise<unknown> {
 		// It merges as soon as it approves, so an approved change doesn't wait for its author's next turn.
 		const review = { repo, change: offer.change, roles: [offer.role], reviewer: agent, mergeWhenApproved: true };
 		const recheck = earlier ? { earlier } : {};
-		return startHostedReviewers(this.env, { ...review, ...recheck });
+		return startHostedReviewers(this.env, { ...review, ...recheck, ...(payer ? { payer } : {}) });
 	}
 
 	/** Whether the agent's reviewer has voted or failed, and its findings if it rejected (tests answer it instead). */
@@ -407,7 +420,7 @@ export class HostedAgent extends DurableObject<Env> {
 			);
 			if (!taken) continue;
 			const earlier = earlierOf(offer);
-			const started = (await this.startReviewer(state.repo, offer, state.name, earlier)) as
+			const started = (await this.startReviewer(state.repo, offer, state.name, earlier, state.payer)) as
 				{ head?: string } | undefined;
 			// The reviewer is kept under the commit it fetched, which is newer than the offer's after another push.
 			const head = started?.head ?? offer.head;
@@ -432,7 +445,7 @@ export class HostedAgent extends DurableObject<Env> {
 		const piece = claimed.change;
 		state.tried.push(piece);
 		try {
-			await this.startBuilder(state.repo, piece);
+			await this.startBuilder(state.repo, piece, state.payer);
 			state.change = piece;
 			// Kept at once: the rest of the turn may yet be cut short, and the builder works on regardless.
 			await this.keep(state);

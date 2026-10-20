@@ -345,6 +345,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 							change: job.change,
 							summary: state.summary,
 							mergeWhenApproved: true,
+							...(job.payer ? { payer: job.payer } : {}),
 						});
 						this.note(state, `review started: ${reviewers.join(", ")}`);
 					} catch (err) {

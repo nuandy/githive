@@ -13,6 +13,7 @@ import { dashboardRoutes } from "./routes/dashboard";
 import { demoRoutes } from "./routes/demo";
 import { hostedAgentRoutes } from "./routes/hosted-agents";
 import { mcpResponse, mcpRoutes } from "./routes/mcp";
+import { modelSettingsRoutes } from "./routes/model-settings";
 import { repoRoutes } from "./routes/repos";
 import { siteRoutes } from "./routes/site";
 import { usageRoutes } from "./routes/usage";
@@ -36,7 +37,8 @@ export { HostedAgent } from "./hosted-agents";
 
 const app = new Hono<AppEnv>();
 
-const PUBLIC_PATHS = ["/", "/index.html", "/authorize"];
+// /settings/model shows people signed out how to sign in to set their model (see routes/model-settings.ts).
+const PUBLIC_PATHS = ["/", "/index.html", "/authorize", "/settings/model"];
 // Demo runs answer visitors too: watching is public, and starting one checks for itself (see routes/demo.ts).
 const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/", "/site/", "/demo/runs"];
 
@@ -107,6 +109,7 @@ app.onError((err, c) => {
 
 authRoutes(app);
 orgRoutes(app);
+modelSettingsRoutes(app);
 // Where an MCP client sends a person to connect it as one of their agents (OAuth).
 app.on(["GET", "POST"], "/authorize", authorize);
 

@@ -18,7 +18,11 @@ GOOGLE_CLIENT_SECRET=
 # (see https://docs.githive.app/running/deploy/).
 INVITE_CODE=
 
-# OpenAI key for GitHive's hosted builder and reviewers (gpt-6-luna). Agents you bring over MCP don't need it.
+# Seals the API keys people set at /settings/model for GitHive's hosted builder and reviewers, which run on each
+# person's own model. 32 random bytes: openssl rand -base64 32
+MODEL_KEYS_SECRET=
+
+# GitHive's own model key, only for demo runs and Access operators' hosted agents.
 OPENAI_API_KEY=
 
 # GitHive's GitHub App (optional), to connect repos to GitHub and run checks on GitHub Actions.

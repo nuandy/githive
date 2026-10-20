@@ -1,4 +1,5 @@
 import { fail, optionalString, requiredString } from "../../errors";
+import { NO_MODEL } from "../../models/payer";
 import { keepSteering, questionHints, steeringReply, voteHints } from "../clef-hints";
 import { effectivePolicy, ownPersonsWork } from "../votes";
 import { holdKey } from "../work";
@@ -125,8 +126,7 @@ export const reviewTools: ToolHandlers = {
 		return { ...(outcome as Record<string, unknown>), ...steering };
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
-		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
-			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you", askAPersonInstead(args));
+		if (ctx.hasModel && !(await ctx.hasModel())) fail(403, NO_MODEL, askAPersonInstead(args));
 		const change = requiredString(args, "change");
 		const registry = registered;
 		const claim = await claimOf(change);

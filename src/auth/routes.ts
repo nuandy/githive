@@ -4,6 +4,7 @@ import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from 
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
 import { demoRepoOf } from "../demo/demo-repo";
+import { HOUSE, hasModel } from "../models/payer";
 import { OrgStore } from "./orgs";
 import { type IdentityStore, type ProviderProfile, SESSION_DAYS, normalizeEmail, randomSecret } from "./store";
 import { fail } from "../errors";
@@ -178,9 +179,8 @@ function accountRoutes(app: Hono<AuthEnv>) {
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
 		// People who signed in before orgs existed get their personal org here.
 		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
-		let hosted = false;
-		if (principal.kind === "access") hosted = true;
-		else if (c.env.DB) hosted = await store(c.env).mayUseHosted(principal.user.id);
+		// Whether the hosted agents can start for them: they've set a model, or they're GitHive's operators.
+		const hosted = await hasModel(c.env, principal.kind === "access" ? HOUSE : principal.user.id);
 		return c.json({ ...describe(principal), hostedAgents: hosted });
 	});
 
@@ -291,21 +291,6 @@ function adminRoutes(app: Hono<AuthEnv>) {
 		requireAdmin(c.get("principal"));
 		await store(c.env).declineRequest(c.req.param("email"));
 		return c.json({ declined: c.req.param("email") });
-	});
-
-	// Who may use the hosted agents (build, request_review). They spend GitHive's model account.
-	app.get("/admin/hosted-agents", async (c) => {
-		requireAdmin(c.get("principal"));
-		return c.json(await store(c.env).hostedUsers());
-	});
-	app.put("/admin/hosted-agents/:handle", async (c) => {
-		const by = requireAdmin(c.get("principal"));
-		return c.json({ allowed: await store(c.env).allowHosted(c.req.param("handle"), by) });
-	});
-	app.delete("/admin/hosted-agents/:handle", async (c) => {
-		requireAdmin(c.get("principal"));
-		await store(c.env).disallowHosted(c.req.param("handle"));
-		return c.json({ disallowed: c.req.param("handle") });
 	});
 }
 

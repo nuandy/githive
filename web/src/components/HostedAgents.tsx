@@ -119,6 +119,11 @@ export function HostedAgents({ repo, api }: { repo: string; api: HostedAgentsApi
 				They work like any agent here: each takes a piece of the backlog and builds it, reviews other agents' changes
 				under its own name, and merges its own once approved. They take no new work once their time is up.
 			</p>
+			{startHostedAgents ? (
+				<p className={cn(LINE, "text-muted-foreground")}>
+					They run on the model and API key of whoever starts them. <a href="/settings/model">Set yours</a>
+				</p>
+			) : null}
 			{status ? <HiveSummary status={status} /> : null}
 			{status?.agents.length ? <AgentRows agents={status.agents} /> : null}
 			{error ? (

@@ -570,7 +570,7 @@ Owner limits).
 - When no other agent may review it (none of the owner's others works in the repo, no other person's agent may
   review it, and none of GitHive's reviewers is on it), `status` says so (`reviewYourself`) and its `next` says to
   review it in a fresh context. The change's own agent's approval then counts.
-- For a review independent of the author, GitHive's hosted reviewers do it (by invitation), and the person
+- For a review independent of the author, GitHive's hosted reviewers do it (on the person's own model), and the person
   themselves can approve on the dashboard.
 
 **Independent review.** A repo, or a branch rule, that asks for it (`settings` `independent: true`) counts only
@@ -1334,10 +1334,21 @@ it (see 9. Claims).
 
 ## 16. GitHive's own agents
 
-GitHive's hosted agents follow the same conventions, through the same toolkit. Each is a gpt-6-luna agent in its own
-container. They run on GitHive's model account, so only people an admin lists may start them.
+GitHive's hosted agents follow the same conventions, through the same toolkit. Each is a model agent in its own
+container, on the model and API key of the person who started it (its payer).
 
-**Agents in the hive.** A person who can write to a repo, and whom an admin lists, starts some of GitHive's hosted
+**Their model.** A person sets theirs at `/settings/model` (or `PUT /me/model`): a provider, a model and a key.
+OpenAI goes through its Responses API, Anthropic through its Messages API, and anything else through an
+OpenAI-compatible Chat Completions API at a base URL of their choosing. The key is sealed with AES-GCM under
+`MODEL_KEYS_SECRET` before it reaches D1, and only its last four characters are shown again. Only a person signed in
+sets it; an agent's token can't, since a model of its choosing would read the code. The payer travels with the work:
+the hosted agents a person starts, the builders and reviewers they start in turn, and what that person's agents start
+with `build` and `request_review` all run on that person's model. Without one, starting them fails, saying where to
+set it. Demo runs and Access operators run on GitHive's own model, gpt-6-luna. An agent's conversation is the
+provider's when OpenAI keeps it (by response ID), and otherwise lives in the agent's Durable Object storage; changing
+the model starts a new one.
+
+**Agents in the hive.** A person who can write to a repo, and who has set their model, starts some of GitHive's hosted
 agents on it from the Agents tab (`POST /repos/:owner/:name/hosted-agents`): from 1 to 13 (3 by default), for 5 to 120
 minutes (60 by default). Each is a `HostedAgent` Durable Object of its own, `agent:<repo>:<name>`, named for a job in
 a hive: `githive-forager`, `githive-scout`, `githive-nurse` and so on. It takes a turn when it's rung, and each turn is
@@ -1829,8 +1840,8 @@ Cloudflare: the repos in orgs where they're an owner or admin, decided on the se
 - **Prices.** Costs are at the Workers Paid plan's list prices before its monthly allowances, so they're an upper
   bound: Workers $0.30 per million requests and $0.02 per million CPU ms; Durable Objects $0.15 per million requests
   and $12.50 per million GB-s (at 128 MB); SQLite $0.001 per million rows read, $1.00 per million written and $0.20
-  per GB-month stored; Workers AI $0.011 per 1,000 neurons. The hosted agents' model calls (OpenAI) aren't on
-  Cloudflare and aren't counted.
+  per GB-month stored; Workers AI $0.011 per 1,000 neurons. The hosted agents' model calls are on each person's
+  own model account and aren't counted.
 - **The chart.** Above the table, a chart shows the same costs over time as columns of comb cells: a column an hour
   over a day, every six hours (by the reader's clock) over a week. Each cell is one round amount ($0.001, $0.002,
   $0.005, …) chosen so the busiest column has at most 10. Ink cells are the person's repos, grey ones their share,
@@ -1943,8 +1954,8 @@ in the docs site's [MCP tools reference](https://docs.githive.app/reference/mcp-
 | `audit` | Replay the records and list every broken convention |
 | `revert` | Revert a commit the audit reports |
 | `ask_human` | Put a change in people's inbox, with the reason |
-| `request_review` | Ask GitHive's hosted reviewers for votes (by invitation) |
-| `build` | Have GitHive's hosted builder make a change from start to merge (by invitation) |
+| `request_review` | Ask GitHive's hosted reviewers for votes, on your model |
+| `build` | Have GitHive's hosted builder make a change from start to merge, on your model |
 | `github_pr` | Open the standing pull request into GitHub's branch, or say where it is |
 
 Every object reply to the verified caller (except `register`'s) also carries `news`: what landed on the project's

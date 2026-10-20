@@ -251,50 +251,6 @@ export class IdentityStore {
 		return !!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(normalizeEmail(email)).first());
 	}
 
-	// Hosted agents
-
-	/** Who may use GitHive's hosted agents, with who allowed them. */
-	async hostedUsers() {
-		const { results } = await this.db
-			.prepare(
-				"SELECT u.handle, h.granted_by, h.created_at FROM hosted_agent_users h JOIN users u ON " +
-					"u.id = h.user_id ORDER BY u.handle",
-			)
-			.all<Row>();
-		return results.map((r) => ({
-			handle: String(r.handle),
-			grantedBy: String(r.granted_by),
-			createdAt: String(r.created_at),
-		}));
-	}
-
-	async allowHosted(handle: string, grantedBy: string) {
-		const user = await this.db
-			.prepare("SELECT id, handle FROM users WHERE handle = ?")
-			.bind(handle.trim().toLowerCase())
-			.first<Row>();
-		if (!user) fail(404, `no one is called ${handle}: they need to have signed in once`);
-		await this.db
-			.prepare(
-				"INSERT INTO hosted_agent_users (user_id, granted_by, created_at) VALUES (?, ?, ?) ON " +
-					"CONFLICT (user_id) DO NOTHING",
-			)
-			.bind(user!.id, grantedBy, this.iso())
-			.run();
-		return String(user!.handle);
-	}
-
-	async disallowHosted(handle: string) {
-		await this.db
-			.prepare("DELETE FROM hosted_agent_users WHERE user_id = (SELECT id FROM users WHERE handle = ?)")
-			.bind(handle.trim().toLowerCase())
-			.run();
-	}
-
-	async mayUseHosted(userId: string) {
-		return !!(await this.db.prepare("SELECT 1 FROM hosted_agent_users WHERE user_id = ?").bind(userId).first());
-	}
-
 	// Sign-in
 
 	/**

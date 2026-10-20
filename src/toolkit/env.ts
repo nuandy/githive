@@ -1,6 +1,7 @@
 import type { ChangeAwareness } from "../footprint-cache";
 import { AgentLimitStore, type OwnerLimits } from "../auth/agent-limits";
 import { clefOn } from "../clef";
+import { hasModel } from "../models/payer";
 import { type UsageEnv, workerName } from "../usage/analytics";
 import type { Conversation } from "../sandbox";
 import { type GitHubImportResult, githubGate } from "../gate-github";
@@ -227,7 +228,8 @@ export function toolContextFor(
 		agent?: string;
 		hosted?: boolean;
 		teamsOf?: (repo: string) => Promise<string[]>;
-		mayUseHosted?: () => Promise<boolean>;
+		/** Whose model the hosted agents the caller starts run on (see models/payer.ts). */
+		payer?: string;
 		githubAccount?: () => Promise<string | null>;
 		ownerLimits?: OwnerLimits;
 	} = {},
@@ -238,7 +240,7 @@ export function toolContextFor(
 		...repoCacheParts(env),
 		...artifactsParts(env),
 		...gateParts(env),
-		...hostedParts(env),
+		...hostedParts(env, caller.payer),
 		...githubApp(env),
 		...githubSyncParts(env),
 		...(env.AI ? { clef: clefOn(env.AI, workerName(env as unknown as UsageEnv)) } : {}),
@@ -416,7 +418,7 @@ function gateParts(env: Env) {
 }
 
 /** GitHive's hosted reviewers and builder, and the review holds they share with agents. */
-function hostedParts(env: Env) {
+function hostedParts(env: Env, payer: string | undefined) {
 	return {
 		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
 		// beside the claims and votes.
@@ -425,8 +427,10 @@ function hostedParts(env: Env) {
 			holds: (repo, bucket) => holdsLog(env, repo, bucket),
 			earlier: (repo, bucket) => holdsBeforeSpread(env, repo, bucket),
 		}),
-		requestReview: (input) => startHostedReviewers(env, input),
-		startBuilder: (input) => startHostedBuilder(env, input),
+		// The agents a caller starts run on the caller's model.
+		hasModel: () => hasModel(env, payer),
+		requestReview: (input) => startHostedReviewers(env, { ...input, payer }),
+		startBuilder: (input) => startHostedBuilder(env, { ...input, payer }),
 		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 	} satisfies Partial<ToolContext>;
 }
@@ -857,6 +861,8 @@ export async function startHostedReviewers(
 		reviewer?: string;
 		/** An earlier commit of the change the agent rejected, and its findings (see ReviewJob.earlier). */
 		earlier?: { head: string; findings: string; conversation?: Conversation };
+		/** Whose model the reviewers run on (see SandboxJob.payer). */
+		payer?: string;
 	},
 ) {
 	const { repo, change } = input;
@@ -878,6 +884,7 @@ export async function startHostedReviewers(
 		mergeWhenApproved: !!input.mergeWhenApproved,
 		...(input.reviewer ? { reviewer: input.reviewer } : {}),
 		...(input.earlier ? { earlier: input.earlier } : {}),
+		...(input.payer ? { payer: input.payer } : {}),
 	};
 	// A hive agent's review has an object of its own, apart from GitHive's reviewer for the same role and commit.
 	const nameFor = (role: string) => (input.reviewer ? `${role}:${input.reviewer}` : role);
@@ -893,7 +900,10 @@ export async function startHostedReviewers(
 }
 
 /** Starts GitHive's hosted builder on a claimed change, working on changes/<change> in the change's fork. */
-export async function startHostedBuilder(env: Env, input: { repo: string; change: string; hiveReviews?: boolean }) {
+export async function startHostedBuilder(
+	env: Env,
+	input: { repo: string; change: string; hiveReviews?: boolean; payer?: string },
+) {
 	const { repo, change } = input;
 	const { read, job, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
@@ -904,6 +914,7 @@ export async function startHostedBuilder(env: Env, input: { repo: string; change
 		token: write.token,
 		base,
 		...(input.hiveReviews ? { hiveReviews: true } : {}),
+		...(input.payer ? { payer: input.payer } : {}),
 	};
 	await env.BUILDER.getByName(changeRepoName(repo, change)).start(build);
 	return { change, builder: changeRepoName(repo, change) };

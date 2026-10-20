@@ -174,7 +174,7 @@ function hive(pieces: Piece[], options: HiveOptions = {}) {
 
 const pieces = (...ids: string[]) => ids.map((id) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] }));
 const start = (repoHive: InstanceType<typeof HostedAgent>, minutes = 45) =>
-	repoHive.start({ repo: "ada--honeycomb", count: SIX, minutes, by: "ada" });
+	repoHive.start({ repo: "ada--honeycomb", count: SIX, minutes, by: "ada", payer: "githive" });
 
 describe("a repo's hosted agents", () => {
 	it("each take a piece of their own, review one another's under their own names, and merge their own", async () => {

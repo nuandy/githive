@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import { type Principal, isPerson } from "../auth/principal";
-import { IdentityStore } from "../auth/store";
 import { fail } from "../errors";
+import { HOUSE, NO_MODEL, hasModel } from "../models/payer";
 import { rpc } from "../rpc";
 import { MOST_HIVE_AGENTS } from "../toolkit/hive-agents";
 import { type AppEnv, jsonArgs, routeRepo } from "./shared";
@@ -27,11 +27,8 @@ function inRange(value: unknown, least: number, most: number) {
 	return (value as number) <= most;
 }
 
-// They spend GitHive's model account, so only people an admin lists may start them, and GitHive's operators.
-async function mayStartHosted(env: Env, principal: Principal) {
-	if (principal.kind !== "user") return true;
-	return new IdentityStore(env.DB).mayUseHosted(principal.user.id);
-}
+/** Whose model the hive runs on: the person starting it, or the house's for GitHive's operators. */
+const payerOf = (principal: Principal) => (principal.kind === "user" ? principal.user.id : HOUSE);
 
 export function hostedAgentRoutes(app: Hono<AppEnv>) {
 	const hiveOf = (env: Env, repo: string) => env.HOSTED_AGENT.getByName(`hive:${repo}`);
@@ -45,12 +42,12 @@ export function hostedAgentRoutes(app: Hono<AppEnv>) {
 		const repo = await routeRepo(c, "write");
 		const principal = c.get("principal")!;
 		if (!isPerson(principal)) fail(403, "hosted agents are started by a person, from the dashboard");
-		if (!(await mayStartHosted(c.env, principal)))
-			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
+		const payer = payerOf(principal);
+		if (!(await hasModel(c.env, payer))) fail(403, NO_MODEL);
 		const { count, minutes } = hiveRequest(await jsonArgs(c));
 		// Their hive is shown to anyone who can read the repo, so it names a person by handle, never by email.
 		const by = principal.kind === "user" ? principal.user.handle : "GitHive";
-		const hive = { repo: repo.id, count, minutes, by };
+		const hive = { repo: repo.id, count, minutes, by, payer };
 		return c.json(await rpc(hiveOf(c.env, repo.id).start(hive)), 201);
 	});
 

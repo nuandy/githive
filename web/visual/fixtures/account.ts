@@ -1,7 +1,6 @@
 import type {
 	ApprovedEmail,
 	Connection,
-	HostedUser,
 	InviteRequest,
 	Me,
 	MyAgent,
@@ -289,10 +288,4 @@ export const REQUESTS: InviteRequest[] = [
 		createdAt: daysAgo(1, 300),
 		signIn: { provider: "github", name: "Taylor Reyes", login: "treyes", tries: 3, lastAt: ago(45) },
 	},
-];
-
-/** People allowed to start GitHive's hosted agents. */
-export const HOSTED_USERS: HostedUser[] = [
-	{ handle: ROBIN.handle, grantedBy: "ops@githive.example", createdAt: daysAgo(30) },
-	{ handle: PEOPLE.mara.handle, grantedBy: "ops@githive.example", createdAt: daysAgo(11, 60) },
 ];

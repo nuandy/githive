@@ -1,4 +1,5 @@
 import { changeId, normalizeClaim } from "../../claim-paths";
+import { NO_MODEL } from "../../models/payer";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
@@ -63,8 +64,7 @@ export const claimTools: ToolHandlers = {
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
 		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");
-		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
-			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
+		if (ctx.hasModel && !(await ctx.hasModel())) fail(403, NO_MODEL);
 		const intent = requiredString(args, "intent");
 		const change = changeId(intent);
 		const steers = await briefSteers(ctx, intent);

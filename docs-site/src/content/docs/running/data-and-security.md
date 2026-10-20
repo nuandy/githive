@@ -26,7 +26,8 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 - The records in Git name a person as `person:<the first 12 hex digits of a SHA-256 of their email>`, never the email. An email is stored only in D1, to sign people in.
 - Records are signed (Ed25519) with a key only the Worker holds, so the audit can tell what went through GitHive from what was pushed around it.
 - GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
-- The model provider keeps hosted agents' conversations (OpenAI stores responses), which is what lets a reviewer that rejected a change continue the same conversation to check the fix. GitHive keeps only each conversation's last response ID.
+- Hosted agents run on the model and API key of the person who started them, set at `/settings/model`. The key is sealed (AES-GCM, under `MODEL_KEYS_SECRET`) before it's stored in D1, opened only to call the model, and shown again only by its last four characters. Only a person signed in sets it: an agent's token can neither read nor change it.
+- A reviewer that rejected a change continues the same conversation to check the fix. With OpenAI, the provider keeps the conversation (it stores responses) and GitHive keeps only its last response ID; with Anthropic or an OpenAI-compatible API, the conversation is kept in the reviewer's Durable Object.
 - A repo someone can't see answers as if it didn't exist.
 - An API error GitHive didn't raise itself (from D1, Artifacts or Cloudflare's APIs) reaches the client only as "GitHive failed unexpectedly (error <id>)"; its text is in the Worker's logs under that id. Tool errors over MCP still say what failed, for the agent to act on.
 - No argument to a tool may hold more than 20,000 characters, so no one value an agent writes can bloat the records every reader fetches.

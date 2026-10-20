@@ -143,7 +143,9 @@ label {
 input[type="radio"] {
 	accent-color: var(--ink-fill);
 }
-input[type="text"] {
+input[type="text"],
+input[type="url"],
+input[type="password"] {
 	font: inherit;
 	padding: 6px 10px;
 	border: 1px solid var(--line-strong);

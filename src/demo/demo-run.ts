@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { statusOf } from "../errors";
 import type { HostedAgent, HostedAgentState } from "../hosted-agents";
 import { callTool } from "../toolkit/mcp";
+import { HOUSE } from "../models/payer";
 import { BACKLOG } from "./backlog";
 import { DEMO_AGENT, demoContext, gatesOf, setUpRun } from "./demo-repo";
 import {
@@ -137,7 +138,8 @@ export class DemoRun extends DurableObject<Env> {
 	}
 
 	private startAgents(run: RunState) {
-		return this.hiveOf(run.repo).start({ repo: run.repo, count: DEMO_AGENTS, minutes: RUN_MINUTES, by: run.by });
+		const hive = { repo: run.repo, count: DEMO_AGENTS, minutes: RUN_MINUTES, by: run.by, payer: HOUSE };
+		return this.hiveOf(run.repo).start(hive);
 	}
 
 	/** A reset lands within a minute or two, so a run waiting on one looks more often. */

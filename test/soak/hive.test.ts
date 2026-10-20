@@ -240,7 +240,13 @@ it("GitHive's own agents land every piece once and stop, however the store fails
 	const deadline = Date.now() + RUN_WITHIN_MS;
 	let longestGaps: number[] = [];
 	try {
-		const status = await hive.repoHive.start({ repo: "p", count: MOST_HIVE_AGENTS, minutes: 45, by: "ada" });
+		const status = await hive.repoHive.start({
+			repo: "p",
+			count: MOST_HIVE_AGENTS,
+			minutes: 45,
+			by: "ada",
+			payer: "githive",
+		});
 		const names = status!.names.map((name) => `agent:p:${name}`);
 		const run = (name: string) => runAlarms(hive.instanceFor(name), hive.storages.get(name)!, deadline);
 		longestGaps = await Promise.all(names.map(run));
@@ -271,7 +277,13 @@ it(atOnce, { timeout: 60_000 }, async () => {
 	const equal = soakPieces(MOST_HIVE_AGENTS - 1);
 	const wiring = { id: "wiring", after: [], landsAfter: equal.map((piece) => piece.id) };
 	await seedRun(hive.ctx, [...equal, wiring]);
-	const status = await hive.repoHive.start({ repo: "p", count: MOST_HIVE_AGENTS, minutes: 45, by: "ada" });
+	const status = await hive.repoHive.start({
+		repo: "p",
+		count: MOST_HIVE_AGENTS,
+		minutes: 45,
+		by: "ada",
+		payer: "githive",
+	});
 	const agents = status!.names.map((name) => hive.instanceFor(`agent:p:${name}`));
 	// Their first turns at once, as their alarms fire together.
 	await Promise.all(agents.map((agent) => agent.alarm()));
