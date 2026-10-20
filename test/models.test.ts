@@ -220,6 +220,21 @@ describe("a person's model settings", () => {
 		expect(await store.view("u1")).toBeNull();
 	});
 
+	it("asks for the key again once it was sealed under another secret", async () => {
+		const db = fakeD1();
+		await db
+			.prepare("INSERT INTO users (id, handle, email, created_at) VALUES ('u1', 'ada', 'ada@x.test', '2026-10-20')")
+			.run();
+		await new ModelSettingsStore(db as unknown as D1Database, secret).save("u1", {
+			provider: "openai",
+			model: "gpt-6-luna",
+			apiKey: "sk-12345678",
+		});
+		const replaced = btoa(String.fromCharCode(...new Uint8Array(32).fill(8)));
+		const store = new ModelSettingsStore(db as unknown as D1Database, replaced);
+		await expect(store.settings("u1")).rejects.toThrow(/set your key again at \/settings\/model/);
+	});
+
 	it("won't keep a key without the secret to seal it", async () => {
 		const store = new ModelSettingsStore(fakeD1() as unknown as D1Database, undefined);
 		await expect(store.save("u1", { provider: "openai", model: "gpt-6-luna", apiKey: "sk-12345678" })).rejects.toThrow(

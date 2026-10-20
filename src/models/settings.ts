@@ -47,11 +47,17 @@ async function seal(secret: string | undefined, apiKey: string) {
 async function open(secret: string | undefined, sealedKey: string) {
 	const [iv, sealed] = sealedKey.split(".");
 	const key = await sealingKey(secret);
-	const opened = await crypto.subtle.decrypt(
-		{ name: "AES-GCM", iv: fromBase64(iv ?? "") },
-		key,
-		fromBase64(sealed ?? ""),
-	);
+	let opened: ArrayBuffer;
+	try {
+		opened = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(iv ?? "") }, key, fromBase64(sealed ?? ""));
+	} catch {
+		// Sealed under an earlier MODEL_KEYS_SECRET: only the person can put their key back.
+		fail(
+			409,
+			"your API key can't be read any more, since this GitHive changed how it keeps keys: " +
+				"set your key again at /settings/model",
+		);
+	}
 	return new TextDecoder().decode(opened);
 }
 
