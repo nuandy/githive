@@ -11,11 +11,11 @@ import {
 	refusal,
 	runBacklog,
 	started,
-} from "../src/demo/run";
-import { topLevel } from "../src/demo/demo-repo";
-import { FakeStorage } from "./fakes/env";
+} from "../demo/run";
+import { topLevel } from "../demo/demo-repo";
+import { FakeStorage } from "../../test/fakes/env";
 
-const { DemoRun } = await import("../src/demo/demo-run");
+const { DemoRun } = await import("../demo/demo-run");
 
 // Honeycomb demo runs: GitHive's hosted agents build the game in the one demo repo while someone watches. The registry
 // lets one run at a time and up to 100 a day, and numbers them; a run starts the repo's agents, lands its reset once

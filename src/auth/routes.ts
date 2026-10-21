@@ -3,7 +3,6 @@ import { AgentLimitStore, limitsFrom } from "./agent-limits";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
-import { demoRepoOf } from "../demo/demo-repo";
 import { HOUSE, hasModel } from "../models/payer";
 import { OrgStore } from "./orgs";
 import { type IdentityStore, type ProviderProfile, SESSION_DAYS, normalizeEmail, randomSecret } from "./store";
@@ -49,8 +48,11 @@ const signedInUser = (principal: Principal | undefined) => {
 	return principal.user;
 };
 
-export function authRoutes(app: Hono<AuthEnv>) {
-	signInRoutes(app);
+/** More for the sign-in page to show, added to what /auth/providers answers. */
+export type SignInExtras = (env: Env) => Record<string, unknown>;
+
+export function authRoutes(app: Hono<AuthEnv>, signInExtras?: SignInExtras) {
+	signInRoutes(app, signInExtras);
 	accountRoutes(app);
 	adminRoutes(app);
 }
@@ -86,13 +88,12 @@ async function startSession(env: Env, profile: ProviderProfile, withInviteCode: 
 }
 
 /** Signing in with GitHub or Google, and out. */
-function signInRoutes(app: Hono<AuthEnv>) {
+function signInRoutes(app: Hono<AuthEnv>, signInExtras?: SignInExtras) {
 	app.get("/auth/providers", (c) =>
 		c.json({
 			providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)),
 			inviteCode: !!inviteCodeOf(c.env),
-			// A public repo anyone may read signed out, where GitHive's own agents work: the sign-in card links to it.
-			...(demoRepoOf(c.env) ? { demoRepo: demoRepoOf(c.env) } : {}),
+			...signInExtras?.(c.env),
 		}),
 	);
 

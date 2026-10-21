@@ -1,8 +1,8 @@
-import { fail } from "../errors";
-import type { ModelSettings } from "../models/model";
+import { fail } from "../src/errors";
+import type { ModelSettings } from "../src/models/model";
 
 // The model GitHive's own runs use: demo runs, and its operators at the admin door. githive.app runs them on OpenAI's
-// gpt-6-luna under the house key; everyone else's agents run on their own settings (see models/payer.ts).
+// gpt-6-luna under the house key; everyone else's agents run on their own settings (see src/models/payer.ts).
 
 const HOUSE_MODEL = "gpt-6-luna";
 

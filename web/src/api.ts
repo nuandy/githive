@@ -727,7 +727,7 @@ export const api = {
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */
-/** A Honeycomb demo run, as GET /demo/runs/:owner/:name answers (see the server's src/demo/run.ts). */
+/** A Honeycomb demo run, as GET /demo/runs/:owner/:name answers (see the server's app/demo/run.ts). */
 export interface DemoRunStatus {
 	id: string;
 	/** Its place among all runs. */

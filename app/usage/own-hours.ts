@@ -1,4 +1,4 @@
-import { repoTag } from "../clef";
+import { repoTag } from "../../src/clef";
 import { type Group, query, type UsageEnv, type WorkerUse, workerName } from "./analytics";
 import { keptFor } from "./kept";
 import { MONTH_MS, type OwnedRepo, PRICES, repoCost, repoOfObject, requestShare } from "./own-usage";

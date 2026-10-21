@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repoTag } from "../src/clef";
-import type { WorkerUse } from "../src/usage/analytics";
-import { keptFor } from "../src/usage/kept";
-import { hourlyCosts, type HourlyRead } from "../src/usage/own-hours";
-import { ownUsage, PRICES, repoOfObject } from "../src/usage/own-usage";
+import { repoTag } from "../../src/clef";
+import type { WorkerUse } from "../usage/analytics";
+import { keptFor } from "../usage/kept";
+import { hourlyCosts, type HourlyRead } from "../usage/own-hours";
+import { ownUsage, PRICES, repoOfObject } from "../usage/own-usage";
 
 // A person's usage is their repos' objects and Clef calls, and a share of the Worker's own requests, CPU and storage:
 // never another person's repos.

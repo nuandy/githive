@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "../fakes/env";
 import { emptyUsage, runCall, type AgentTool } from "../../src/agent";
-import { houseModel } from "../../src/demo/house";
-import { HOUSE } from "../../src/models/payer";
+import { HOUSE, useHouseModel } from "../../src/models/payer";
 import { madeWith } from "../../src/models/thread";
 import type { BuildJob, BuilderState } from "../../src/builder";
 import type { ReviewJob, ReviewerState } from "../../src/reviewer";
@@ -17,6 +16,10 @@ vi.mock("../../src/models/clients", () => ({ modelClient: () => ({ turn: model.t
 
 const { Builder } = await import("../../src/builder");
 const { Reviewer } = await import("../../src/reviewer");
+
+// GitHive's own runs need a house model, which a Worker's entry names; here it's a stand-in.
+const HOUSE_MODEL = { provider: "openai", model: "gpt-6-luna", apiKey: "test" } as const;
+useHouseModel(() => HOUSE_MODEL);
 
 const job: BuildJob = {
 	repo: "project--a-1",
@@ -165,7 +168,7 @@ describe("revising", () => {
 });
 
 describe("rechecking", () => {
-	const house = madeWith(houseModel({ OPENAI_API_KEY: "test" } as never));
+	const house = madeWith(HOUSE_MODEL);
 	const handed = {
 		madeWith: house,
 		entries: [JSON.stringify({ responseId: "resp-rejected" })],

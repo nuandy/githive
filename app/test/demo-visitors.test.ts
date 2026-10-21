@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker from "../src/index";
+import worker from "../worker";
 
 // Anyone may start a demo run, signed in or not, so a judge or visitor sees a hive at work. The limits are the
 // registry's: one at a time, up to 100 a day.
@@ -42,5 +42,17 @@ describe("a visitor starting a demo run", () => {
 
 		expect(response.status).toBe(429);
 		expect(((await response.json()) as { error: string }).error).toMatch(/going already/);
+	});
+});
+
+describe("the sign-in card", () => {
+	const providers = async (env: object) => {
+		const answer = await worker.fetch(new Request("https://githive.test/auth/providers"), env as never, {} as never);
+		return answer.json();
+	};
+
+	it("links to the demo repo when there is one", async () => {
+		expect(await providers({ DEMO_REPO: "nuandy/honeycomb" })).toMatchObject({ demoRepo: "nuandy/honeycomb" });
+		expect(await providers({ DEMO_REPO: "not a repo" })).not.toHaveProperty("demoRepo");
 	});
 });

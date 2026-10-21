@@ -1,11 +1,11 @@
 import type { Context, Hono } from "hono";
 import { BACKLOG } from "../demo/backlog";
-import { repoIdFor } from "../auth/orgs";
+import { repoIdFor } from "../../src/auth/orgs";
 import { demoRepoName } from "../demo/demo-repo";
 import { DEMO_AGENTS } from "../demo/run";
-import { fail, statusOf } from "../errors";
-import { rpc } from "../rpc";
-import type { AppEnv } from "./shared";
+import { fail, statusOf } from "../../src/errors";
+import { rpc } from "../../src/rpc";
+import type { AppEnv } from "../../src/routes/shared";
 
 // Honeycomb demo runs: GitHive's hosted agents build a small word game in the one public demo repo while whoever
 // started it watches its Hive tab (see demo/demo-repo.ts and demo/demo-run.ts). Anyone may start one, signed in or not,

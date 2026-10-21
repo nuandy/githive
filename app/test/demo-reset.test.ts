@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resetCommit } from "../src/demo/demo-repo";
-import { TEMPLATE_FILES } from "../src/demo/template-files";
-import { Workspace } from "../src/git";
-import { writeFirstCommit } from "../src/repo-init";
-import { startGitServer, type GitServer } from "./helpers/git-server";
+import { resetCommit } from "../demo/demo-repo";
+import { TEMPLATE_FILES } from "../demo/template-files";
+import { Workspace } from "../../src/git";
+import { writeFirstCommit } from "../../src/repo-init";
+import { startGitServer, type GitServer } from "../../test/helpers/git-server";
 
 // A demo run starts over by putting Honeycomb's starting files back on top of what the last run built, in one commit
 // its reset change pushes for the hive to review.

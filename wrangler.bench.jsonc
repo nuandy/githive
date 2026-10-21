@@ -5,7 +5,7 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "blueprint-bench",
-	"main": "src/index.ts",
+	"main": "app/worker.ts",
 	// The Access hostname (blueprint-bench.nuandy.workers.dev) for admins and scripts, and the public one for sign-in and OAuth.
 	"workers_dev": true,
 	"routes": [{ "pattern": "bench.githive.app", "custom_domain": true }],
@@ -26,9 +26,9 @@
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
 		"ARTIFACTS_NAMESPACE": "blueprint-bench",
-		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (src/usage/).
+		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (app/usage/).
 		"WORKER_NAME": "blueprint-bench",
-		// The one public repo demo runs build Honeycomb in (src/demo/demo-repo.ts); the first run makes it.
+		// The one public repo demo runs build Honeycomb in (app/demo/demo-repo.ts); the first run makes it.
 		"DEMO_REPO": "nuandy/honeycomb",
 		// Bench only: POST /admin/wipe may delete every repo in this namespace. Never set on production.
 		"BENCH_WIPE": "allowed",
@@ -110,7 +110,7 @@
 		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
 		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
 		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
-		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (src/demo/).
+		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (app/demo/).
 		{ "tag": "v17", "new_sqlite_classes": ["DemoRun", "HostedAgent"] },
 		// A share of the pages watching a repo's live feed, so many viewers don't slow its RepoCache.
 		{ "tag": "v18", "new_sqlite_classes": ["FeedShard"] },

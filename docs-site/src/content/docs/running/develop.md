@@ -8,7 +8,7 @@ sidebar:
 ```sh
 npm test            # the full suite (unit tests)
 npm run test:changed # only the tests touched by your changes since origin/dev
-npm run test:related -- src/usage/own-usage.ts   # the tests that import these files
+npm run test:related -- src/models/settings.ts   # the tests that import these files
 npm run test:workerd # the tests that need workerd (test/workerd), apart from npm test
 npm run test:soak   # a demo's whole life under a failing store: outside agents, then GitHive's own (about 3 min)
 npm run typecheck

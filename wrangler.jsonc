@@ -3,7 +3,7 @@
 	// GitHive. The Worker and its Artifacts namespace keep their first name, "blueprint":
 	// renaming the namespace would start it empty, and the Worker's URL stays the same.
 	"name": "blueprint",
-	"main": "src/index.ts",
+	"main": "app/worker.ts",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
@@ -23,9 +23,9 @@
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
 		"ARTIFACTS_NAMESPACE": "blueprint",
-		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (src/usage/).
+		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (app/usage/).
 		"WORKER_NAME": "blueprint",
-		// The one public repo demo runs build Honeycomb in (src/demo/demo-repo.ts); the first run makes it.
+		// The one public repo demo runs build Honeycomb in (app/demo/demo-repo.ts); the first run makes it.
 		"DEMO_REPO": "nuandy/honeycomb",
 	},
 	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
@@ -116,7 +116,7 @@
 		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
 		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
 		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
-		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (src/demo/).
+		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (app/demo/).
 		{ "tag": "v17", "new_sqlite_classes": ["DemoRun", "HostedAgent"] },
 		// A share of the pages watching a repo's live feed, so many viewers don't slow its RepoCache.
 		{ "tag": "v18", "new_sqlite_classes": ["FeedShard"] },

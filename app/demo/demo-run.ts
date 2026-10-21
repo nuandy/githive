@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import { statusOf } from "../errors";
-import type { HostedAgent, HostedAgentState } from "../hosted-agents";
-import { callTool } from "../toolkit/mcp";
-import { HOUSE } from "../models/payer";
+import { statusOf } from "../../src/errors";
+import type { HostedAgent, HostedAgentState } from "../../src/hosted-agents";
+import { callTool } from "../../src/toolkit/mcp";
+import { HOUSE } from "../../src/models/payer";
 import { BACKLOG } from "./backlog";
 import { DEMO_AGENT, demoContext, gatesOf, setUpRun } from "./demo-repo";
 import {

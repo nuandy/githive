@@ -106,12 +106,8 @@ describe("signing in with GitHub", () => {
 		expect(JSON.parse(seen[0]!.body!)).toMatchObject({ code: "abc", code_verifier: expect.any(String) });
 	});
 
-	it("names the providers set up here, and the demo repo when there is one", async () => {
+	it("names the providers set up here", async () => {
 		expect(await json(call("/auth/providers"))).toEqual({ providers: ["github"], inviteCode: false });
-		env.DEMO_REPO = "nuandy/honeycomb";
-		expect(await json(call("/auth/providers"))).toMatchObject({ demoRepo: "nuandy/honeycomb" });
-		env.DEMO_REPO = "not a repo";
-		expect(await json(call("/auth/providers"))).not.toHaveProperty("demoRepo");
 	});
 
 	it("turns away a person who isn't invited, and one whose email GitHub hasn't verified", async () => {

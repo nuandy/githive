@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityStore } from "../src/auth/store";
-import { HOUSE, hasModel, modelSettingsFor } from "../src/models/payer";
+import { HOUSE, hasModel, modelSettingsFor, useHouseModel } from "../src/models/payer";
 import { fakeD1 } from "./fakes/d1";
 
 // Where a person sets the model GitHive's hosted agents run on for them: the /settings/model page, which works
@@ -11,7 +11,7 @@ const worker = (await import("../src/index")).default;
 const ORIGIN = "https://githive.test";
 const SECRET = btoa(String.fromCharCode(...new Uint8Array(32).fill(3)));
 
-let env: { DB: ReturnType<typeof fakeD1>; MODEL_KEYS_SECRET: string; OPENAI_API_KEY?: string };
+let env: { DB: ReturnType<typeof fakeD1>; MODEL_KEYS_SECRET: string };
 let ada: { id: string; session: string; token: string };
 
 beforeEach(async () => {
@@ -105,14 +105,13 @@ describe("the /settings/model page", () => {
 });
 
 describe("whose model an agent runs on", () => {
-	it("is the house's for GitHive's own runs, and nobody's unless they set one", async () => {
-		env.OPENAI_API_KEY = "sk-house";
-		expect(await modelSettingsFor(env as never, HOUSE)).toEqual({
-			provider: "openai",
-			model: "gpt-6-luna",
-			apiKey: "sk-house",
-		});
+	it("is nobody's unless they set one, and the house's only where the Worker names one", async () => {
 		await expect(modelSettingsFor(env as never, ada.id)).rejects.toThrow(/set a provider, a model and your key/);
 		await expect(modelSettingsFor(env as never, undefined)).rejects.toThrow(/settings\/model/);
+		expect(await hasModel(env as never, HOUSE)).toBe(false);
+		await expect(modelSettingsFor(env as never, HOUSE)).rejects.toThrow(/no model of its own/);
+		const house = { provider: "openai", model: "gpt-6-luna", apiKey: "sk-house" } as const;
+		useHouseModel(() => house);
+		expect(await modelSettingsFor(env as never, HOUSE)).toEqual(house);
 	});
 });

@@ -1,4 +1,4 @@
-import { repoTag } from "../clef";
+import { repoTag } from "../../src/clef";
 import type { WorkerUse } from "./analytics";
 
 // One person's share of what the Worker used: their repos' Durable Objects, found by name (every object GitHive

@@ -15,7 +15,13 @@ const compiledWasm: Plugin = {
 };
 
 /** What no test run looks in. */
-export const SHARED_EXCLUDES = ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**", "demo/**"];
+export const SHARED_EXCLUDES = [
+	"**/node_modules/**",
+	"**/dist/**",
+	"**/.wrangler/**",
+	"**/.claude/**",
+	"app/demo/honeycomb/**",
+];
 export const SOAK = "test/soak/**";
 
 export default defineConfig({
@@ -31,7 +37,8 @@ export default defineConfig({
 	// node:sqlite stands in for D1 in tests; Node 22 still keeps it behind a flag.
 	test: {
 		// test/workerd runs in workerd, through its own config (npm run test:workerd). .claude/ holds agents' own
-		// worktrees, whose copies of the tests aren't this checkout's; demo/ holds the demo game's own node:test tests.
+		// worktrees, whose copies of the tests aren't this checkout's; app/demo/honeycomb/ holds the demo game's own node:test
+		// tests.
 		// The soak runs (test/soak) run on their own (npm run test:soak).
 		exclude: [...SHARED_EXCLUDES, "test/workerd/**", SOAK],
 		execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],

@@ -1,10 +1,10 @@
 import type { Hono } from "hono";
-import { OrgStore } from "../auth/orgs";
-import { fail } from "../errors";
+import { OrgStore } from "../../src/auth/orgs";
+import { fail } from "../../src/errors";
 import { canReadUsage, type UsageEnv, type UsageRange, workerName, workerUse } from "../usage/analytics";
 import { ownHours } from "../usage/own-hours";
 import { ownUsage } from "../usage/own-usage";
-import type { AppEnv } from "./shared";
+import type { AppEnv } from "../../src/routes/shared";
 
 // GET /usage?range=24h|7d: what the caller's own repos used on Cloudflare, and what it costs at list prices. Whose
 // repos is decided here, from who's signed in, never from the request; the Worker's whole usage never leaves.
