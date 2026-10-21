@@ -1,9 +1,9 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	// GitHive. The Worker and its Artifacts namespace keep their first name, "blueprint":
-	// renaming the namespace would start it empty, and the Worker's URL stays the same.
-	"name": "blueprint",
-	"main": "app/worker.ts",
+	// GitHive on its own. The IDs below are placeholders: make your own storage and put its IDs here first (see
+	// https://docs.githive.app/running/deploy/).
+	"name": "githive",
+	"main": "src/index.ts",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
@@ -11,36 +11,26 @@
 	// parses in this Worker (src/push-events.ts). A batch's budget (4 million characters, 200 parses) is a few seconds
 	// of parsing even on CPUs slower than the laptop it was measured on, so a full batch stays well under this, with
 	// room for its reads and tree walks. An invocation over it is killed whole: the heads were acked first, so only
-	// that batch's hints are lost. Agents' calls and the dashboard use far less, and ran under the default.
+	// that batch's hints are lost. Agents' calls use far less, and ran under the default.
 	"limits": { "cpu_ms": 60000 },
 	"workers_dev": true,
-	// githive.app: people sign in and MCP clients connect (no Access in front). blueprint.nuandy.workers.dev stays the Access door for admins and scripts.
-	"routes": [{ "pattern": "githive.app", "custom_domain": true }],
+	// To serve it on a domain of your own: "routes": [{ "pattern": "<your domain>", "custom_domain": true }],
 	"vars": {
 		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.
-		"PUBLIC_ORIGIN": "https://githive.app",
-		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
-		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
+		"PUBLIC_ORIGIN": "https://githive.<your-subdomain>.workers.dev",
+		// Cloudflare Access, for the admin door on a second hostname: its team domain and audience tag, or "" without it.
+		"ACCESS_TEAM_DOMAIN": "",
+		"ACCESS_AUD": "",
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
-		"ARTIFACTS_NAMESPACE": "blueprint",
-		// This Worker's name, as Cloudflare's analytics know it: the Usage page reads its own usage (app/usage/).
-		"WORKER_NAME": "blueprint",
-		// The one public repo demo runs build Honeycomb in (app/demo/demo-repo.ts); the first run makes it.
-		"DEMO_REPO": "nuandy/honeycomb",
-	},
-	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
-	// so API routes win; anything else falls through to these files.
-	"assets": {
-		"directory": "./web/dist",
-		"binding": "ASSETS",
-		"run_worker_first": true,
-		"not_found_handling": "single-page-application",
+		"ARTIFACTS_NAMESPACE": "githive",
+		// This Worker's name, as Cloudflare's analytics know it: Clef's calls are tagged with it, per repo.
+		"WORKER_NAME": "githive",
 	},
 	"preview_urls": false,
 	"artifacts": [
 		{
 			"binding": "ARTIFACTS",
-			"namespace": "blueprint",
+			"namespace": "githive",
 			// Artifacts has no local emulator; dev talks to the real service.
 			"remote": true,
 		},
@@ -57,7 +47,6 @@
 			{ "name": "TOKENS", "class_name": "TokenCache" },
 			{ "name": "FOOTPRINT_CACHE", "class_name": "FootprintCache" },
 			{ "name": "GITHUB_SYNC", "class_name": "GitHubSync" },
-			{ "name": "DEMO_RUN", "class_name": "DemoRun" },
 			{ "name": "HOSTED_AGENT", "class_name": "HostedAgent" },
 			{ "name": "FEED_SHARD", "class_name": "FeedShard" },
 		],
@@ -69,7 +58,7 @@
 		{
 			"binding": "DB",
 			"database_name": "githive",
-			"database_id": "d443038b-ea5c-40e5-9a5f-86adefdbc667",
+			"database_id": "<your D1 database id>",
 			"migrations_dir": "migrations",
 		},
 	],
@@ -78,11 +67,11 @@
 	"ai": { "binding": "AI" },
 	// Browser Rendering, which takes screenshots of a change's site preview for Clef to look at (see src/preview-look.ts).
 	"browser": { "binding": "BROWSER" },
-	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "9449f5dfdc074c228358d0bbcd85abf0" }],
+	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "<your KV namespace id>" }],
 	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
 	//   wrangler queues create githive-pushes
 	//   wrangler queues subscription create githive-pushes --source artifacts --events repo.pushed
-	// A queue has one consumer, so production and the bench each have their own.
+	// A queue has one consumer, so each GitHive needs its own.
 	"queues": {
 		"consumers": [{ "queue": "githive-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }],
 	},
@@ -116,9 +105,11 @@
 		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
 		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
 		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
-		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (app/demo/).
+		// GitHive's hosted agents, and Honeycomb demo runs: the registry that caps them, and one per run.
 		{ "tag": "v17", "new_sqlite_classes": ["DemoRun", "HostedAgent"] },
 		// A share of the pages watching a repo's live feed, so many viewers don't slow its RepoCache.
 		{ "tag": "v18", "new_sqlite_classes": ["FeedShard"] },
+		// Demo runs are githive.app's own, not GitHive's: their registry and runs go.
+		{ "tag": "v19", "deleted_classes": ["DemoRun"] },
 	],
 }

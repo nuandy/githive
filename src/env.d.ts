@@ -1,7 +1,5 @@
 // Secrets aren't in wrangler.jsonc, so `wrangler types` can't see them.
 interface Env {
-	/** The house model's OpenAI key, for GitHive's own runs: demo runs and its operators (see demo/house.ts). */
-	OPENAI_API_KEY?: string;
 	/** 32 bytes, base64: seals each person's model key before it's stored (see models/settings.ts). */
 	MODEL_KEYS_SECRET?: string;
 	/** GitHive's Ed25519 signing key (PKCS #8, base64): stamps records with verified identity. */

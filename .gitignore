@@ -2,12 +2,9 @@ node_modules/
 .wrangler/
 .dev.vars*
 !.dev.vars.example
-web/dist/
 
 # Agent keys written by the bench scripts
 bench-results/**/keys-*/
 # Worker log tails captured during bench runs: large, and not kept
 bench-results/**/tail-*
 
-# Screenshots from the visual regression check (web/visual)
-web/visual/out/

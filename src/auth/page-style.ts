@@ -1,4 +1,4 @@
-// The look of the sign-in and consent pages, matching the dashboard's (web/src/styles.css): ink on cool paper,
+// The look of the sign-in and consent pages, matching githive.app's dashboard: ink on cool paper,
 // ruled rather than boxed, amber and red lamps for notes and warnings.
 export const PAGE_STYLE = `
 @font-face {

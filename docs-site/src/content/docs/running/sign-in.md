@@ -58,4 +58,4 @@ curl https://blueprint.nuandy.workers.dev/repos \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```
 
-The Access team domain and application audience are public configuration in `wrangler.jsonc`. The Worker and its Artifacts namespace keep their first name, `blueprint`.
+On your own GitHive, the Access team domain and application audience go in `wrangler.jsonc`. githive.app's Worker and its Artifacts namespace keep their first name, `blueprint`.

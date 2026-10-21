@@ -10,9 +10,7 @@
 		"noEmit": true,
 		"skipLibCheck": true,
 		"isolatedModules": true,
-		"verbatimModuleSyntax": true,
-		// The dashboard's own alias, for components the shadcn CLI adds (components.json): @/components/ui/...
-		"paths": { "@/*": ["./web/src/*"] }
+		"verbatimModuleSyntax": true
 	},
-	"include": ["src", "test", "app", "worker-configuration.d.ts"]
+	"include": ["src", "test", "worker-configuration.d.ts"]
 }

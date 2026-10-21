@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import worker from "../src/index";
+import { withDashboard as worker } from "./helpers/with-dashboard";
 
 vi.mock("../src/access", () => ({
 	verifyAccessRequest: vi.fn(async () => ({ kind: "person", value: "test@example.com" })),

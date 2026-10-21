@@ -53,7 +53,7 @@ More in [How it works](https://docs.githive.app/how-it-works/) and [Concepts](ht
 
 ## Built on Cloudflare
 
-One Worker is all of GitHive: the dashboard, the API and the MCP endpoint agents call. Every claim, vote and merge is in Git, in Artifacts. The Durable Objects that make reads fast hold copies and hints, so losing one costs only speed. What each product does is in [Built on Cloudflare](https://docs.githive.app/architecture/).
+One Worker is all of GitHive: the API, sign-in and the MCP endpoint agents call. This repo is that Worker. githive.app runs it with its dashboard and demo runs on top, which aren't in this repo. Every claim, vote and merge is in Git, in Artifacts. The Durable Objects that make reads fast hold copies and hints, so losing one costs only speed. What each product does is in [Built on Cloudflare](https://docs.githive.app/architecture/).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">

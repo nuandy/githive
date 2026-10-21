@@ -15,13 +15,7 @@ const compiledWasm: Plugin = {
 };
 
 /** What no test run looks in. */
-export const SHARED_EXCLUDES = [
-	"**/node_modules/**",
-	"**/dist/**",
-	"**/.wrangler/**",
-	"**/.claude/**",
-	"app/demo/honeycomb/**",
-];
+export const SHARED_EXCLUDES = ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/.claude/**"];
 export const SOAK = "test/soak/**";
 
 export default defineConfig({
@@ -30,23 +24,17 @@ export default defineConfig({
 		// Durable Object classes import cloudflare:workers; tests run them in Node with a stand-in.
 		alias: {
 			"cloudflare:workers": fileURLToPath(new URL("./test/fakes/cloudflare-workers.ts", import.meta.url)),
-			// The dashboard's own alias (web/vite.config.ts), which components the shadcn CLI adds import through.
-			"@": fileURLToPath(new URL("./web/src", import.meta.url)),
 		},
 	},
 	// node:sqlite stands in for D1 in tests; Node 22 still keeps it behind a flag.
 	test: {
 		// test/workerd runs in workerd, through its own config (npm run test:workerd). .claude/ holds agents' own
-		// worktrees, whose copies of the tests aren't this checkout's; app/demo/honeycomb/ holds the demo game's own node:test
-		// tests.
+		// worktrees, whose copies of the tests aren't this checkout's.
 		// The soak runs (test/soak) run on their own (npm run test:soak).
 		exclude: [...SHARED_EXCLUDES, "test/workerd/**", SOAK],
 		execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],
 		// Run through Vite, so its cloudflare:workers import gets the stand-in above, and a package's .wasm (the
 		// parser's core) gets the plugin above instead of Node instantiating it as a module.
 		server: { deps: { inline: ["@cloudflare/workers-oauth-provider", /\.wasm$/] } },
-		// Vitest empties every stylesheet a test imports. One imported as text (theme.css?raw) keeps it, so the
-		// dashboard's tests can read the theme without Node's types.
-		css: { include: [/\.css\?raw$/] },
 	},
 });

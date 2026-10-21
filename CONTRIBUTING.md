@@ -54,8 +54,6 @@ GitHive's code should read as if a careful person wrote it, whoever or whatever 
 - A function does one thing and fits on a screen. A file holds one concern; split it past about 400 lines.
 - Use full words for names that live more than a few lines, and the same name for the same thing everywhere.
 - Turn a long expression into named steps. No nested ternaries.
-- The dashboard (`web/`) draws only from its theme: see [docs/dashboard-ui.md](docs/dashboard-ui.md). A new color, or
-  text on a new color, goes into the contrast test.
 
 ## Records, storage and migrations
 
@@ -64,8 +62,7 @@ Records in Git outlive the code that wrote them.
 - To change a record's shape, bump `RECORD_FORMAT` in `src/record-format.ts`, add an upgrade from the old format, and
   pin the new shape with `UPDATE_RECORD_SHAPES=1 npx vitest run test/record-shapes.test.ts`.
 - D1 migrations only add. The tests refuse one that drops, deletes or rewrites data.
-- Durable Object classes aren't deleted or renamed without a migration in `wrangler.jsonc` and
-  `wrangler.bench.jsonc`.
+- Durable Object classes aren't deleted or renamed without a migration in `wrangler.jsonc`.
 
 ## Docs
 

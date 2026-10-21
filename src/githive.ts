@@ -25,6 +25,11 @@ import type { AppEnv } from "./routes/shared";
 export interface GitHiveOptions {
 	/** Route groups of its own, after GitHive's and before the dashboard's files. */
 	routes?: Array<(app: Hono<AppEnv>) => void>;
+	/**
+	 * Where its dashboard's files are, when it has one: every path no route answers is read from there, and a repo's
+	 * API address opened in a browser goes to the repo's page.
+	 */
+	dashboard?: (env: Env) => Fetcher;
 	/** Paths that answer without signing in, by prefix: their routes check for themselves. */
 	publicPrefixes?: string[];
 	/** Lines added to the list of routes /api gives. */
@@ -35,18 +40,15 @@ export interface GitHiveOptions {
 }
 
 // /settings/model shows people signed out how to sign in to set their model (see routes/model-settings.ts).
-const PUBLIC_PATHS = ["/", "/index.html", "/authorize", "/settings/model"];
-const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/", "/site/"];
+const PUBLIC_PATHS = ["/", "/authorize", "/settings/model"];
+const PUBLIC_PREFIXES = ["/auth/", "/.well-known/", "/site/"];
 
 const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
 /** A read of one repo (/repos/:owner/:name/...). Signed out, it answers only for a public repo (see access-control). */
 const REPO_READ = /^\/repos\/[^/]+\/[^/]+(\/|$)/;
 
-/**
- * Served without signing in: the dashboard's files (the page asks people to sign in), sign-in, OAuth, and reads of
- * repos.
- */
+/** Served without signing in: the front page, sign-in, OAuth, reads of repos, and the Worker's own public prefixes. */
 function isPublic(request: Request, path: string, prefixes: string[]) {
 	if (PUBLIC_PATHS.includes(path)) return true;
 	if (SAFE_METHODS.includes(request.method) && REPO_READ.test(path)) return true;
@@ -110,7 +112,6 @@ function middleware(app: Hono<AppEnv>, publicPrefixes: string[]) {
 
 /** What /api lists. */
 const API_ROUTES = [
-	"GET  /            dashboard",
 	"POST /mcp         (the MCP front door: JSON-RPC over HTTP; repo is <owner>/<name>)",
 	"GET  /me          (who you are)",
 	"GET  /auth/:provider  (sign in with github or google)",
@@ -135,7 +136,17 @@ const API_ROUTES = [
 		"/admin/repos/:id/adopt {owner, name}, GET|POST|DELETE /admin/invites",
 ];
 
-/** GitHive's routes, then the Worker's own, then the dashboard's files. */
+/** A repo's API address opened in a browser, as people paste it, goes to its page on the dashboard. */
+function repoPages(app: Hono<AppEnv>) {
+	// The dashboard's own reads and scripts aren't page loads, so they still get the JSON.
+	app.get("/repos/:owner/:name", async (c, next) => {
+		if (c.req.header("Sec-Fetch-Mode") !== "navigate" || c.req.header("Sec-Fetch-Dest") !== "document") return next();
+		const repo = [c.req.param("owner"), c.req.param("name")].map(encodeURIComponent).join("/");
+		return c.redirect(`/#/repos/${repo}`, 302);
+	});
+}
+
+/** GitHive's routes, then the Worker's own, then the dashboard's files if it has a dashboard. */
 function appFor(options: GitHiveOptions) {
 	const app = new Hono<AppEnv>();
 	middleware(app, [...PUBLIC_PREFIXES, ...(options.publicPrefixes ?? [])]);
@@ -147,13 +158,8 @@ function appFor(options: GitHiveOptions) {
 	app.on(["GET", "POST"], "/authorize", authorize);
 	app.get("/api", (c) => c.json({ name: "githive", routes: [...API_ROUTES, ...(options.apiRoutes ?? [])] }));
 
-	// A repo's API address opened in a browser, as people paste it, goes to its page on the dashboard. The dashboard's
-	// own reads and scripts aren't page loads, so they still get the JSON.
-	app.get("/repos/:owner/:name", async (c, next) => {
-		if (c.req.header("Sec-Fetch-Mode") !== "navigate" || c.req.header("Sec-Fetch-Dest") !== "document") return next();
-		const repo = [c.req.param("owner"), c.req.param("name")].map(encodeURIComponent).join("/");
-		return c.redirect(`/#/repos/${repo}`, 302);
-	});
+	const { dashboard } = options;
+	if (dashboard) repoPages(app);
 
 	repoRoutes(app);
 	dashboardRoutes(app);
@@ -163,8 +169,8 @@ function appFor(options: GitHiveOptions) {
 	adminRoutes(app);
 	for (const routes of options.routes ?? []) routes(app);
 
-	// Everything that isn't an API route is the dashboard.
-	app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+	if (dashboard) app.get("*", (c) => dashboard(c.env).fetch(c.req.raw));
+	else app.notFound((c) => c.json({ error: `no route ${c.req.method} ${c.req.path}: GET /api lists them` }, 404));
 	return app;
 }
 

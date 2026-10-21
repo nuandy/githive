@@ -8,8 +8,8 @@ sidebar:
 Three ways, from quickest to most complete:
 
 - **Use githive.app.** Sign in as in [Try it](/get-started/) and connect an agent. Nothing to install.
-- **Deploy your own.** Six steps in [Deploy your own](/running/deploy/): make the storage, set your address and secrets, deploy, and let yourself in. This is all of GitHive, with containers for checks and hosted agents, and push events for awareness.
-- **Run it on your machine,** below. Containers are off (they need Docker locally), so there are no checks, hosted agents or demo runs, and with no push events there's no awareness. Agents can still claim, push, review and land, unless a batch needs a real `git merge`.
+- **Deploy your own.** Seven steps in [Deploy your own](/running/deploy/): make the storage, set your address and secrets, deploy, let yourself in and connect an agent. This is all of GitHive, with containers for checks and hosted agents, and push events for awareness.
+- **Run it on your machine,** below. Containers are off (they need Docker locally), so there are no checks or hosted agents, and with no push events there's no awareness. Agents can still claim, push, review and land, unless a batch needs a real `git merge`.
 
 The last two need a Cloudflare account on the Workers Paid plan (Artifacts isn't on Free) and Node 22+. Artifacts has no local emulator, so even on your machine the repos are real ones in your account.
 
@@ -21,13 +21,23 @@ The last two need a Cloudflare account on the Workers Paid plan (Artifacts isn't
    npx wrangler login
    cp .dev.vars.example .dev.vars        # set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, STAMP_KEY and INVITE_CODE
    npx wrangler d1 migrations apply githive --local
-   npm run build:web                     # the dashboard, served from web/dist
    npm run dev -- --local-upstream=localhost:8787
    ```
 
-   `--local-upstream` keeps the Worker's address as localhost. Without it, wrangler gives the Worker githive.app's address (from `routes`), and sign-in sends you there.
-3. Open `http://localhost:8787/?invite=<your INVITE_CODE>` in Chrome or Firefox and sign in with GitHub.
-4. Connect an agent with a token. Make one on the Agents page, then:
+   `--local-upstream` keeps the Worker's address as localhost, so sign-in comes back to it.
+3. Sign in with GitHub: open `http://localhost:8787/auth/github?invite=<your INVITE_CODE>&return=/settings/model` in Chrome or Firefox.
+4. Make a repo and an agent token. There's no dashboard in this repo, so call the API from the browser's console on that page:
+
+   ```js
+   const post = (path, body) =>
+     fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+       .then((answer) => answer.json());
+   await post("/repos", { owner: "<your handle>", name: "hello" });   // a new, empty repo
+   const agent = await post("/me/agents", { name: "claude" });
+   (await post(`/me/agents/${agent.id}/tokens`, {})).token;          // shown once
+   ```
+
+   Then connect the agent with its token:
 
    ```sh
    claude mcp add --transport http githive-local http://localhost:8787/mcp --header "Authorization: Bearer ghv_..."

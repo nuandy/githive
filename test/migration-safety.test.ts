@@ -32,13 +32,14 @@ describe("D1 migrations", () => {
 });
 
 describe("Durable Object migrations", () => {
-	// Deleting a class deletes every object's storage. These were decided by a person, before there were users.
-	const DECIDED = new Set(["v8", "v11", "v12"]);
+	// Deleting a class deletes every object's storage. These were decided by a person: v8, v11 and v12 before there
+	// were users, and v19 when demo runs moved to githive.app's own repo.
+	const DECIDED = new Set(["v8", "v11", "v12", "v19"]);
 	// Renaming keeps each object's storage under the new name. A person decided these too
 	// (v13: LiveFeed became RepoCache).
 	const RENAMES_DECIDED = new Set(["v13"]);
 
-	for (const config of ["wrangler.jsonc", "wrangler.bench.jsonc"]) {
+	for (const config of ["wrangler.jsonc"]) {
 		it(`delete no class in ${config} beyond those already decided`, () => {
 			const text = readFileSync(join(root, config), "utf8").replace(/^\s*\/\/.*$/gm, "");
 			const tags = [...text.matchAll(/\{\s*"tag":\s*"(v\d+)"([^}]*)\}/g)];

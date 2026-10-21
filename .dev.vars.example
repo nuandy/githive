@@ -22,9 +22,6 @@ INVITE_CODE=
 # person's own model. 32 random bytes: openssl rand -base64 32
 MODEL_KEYS_SECRET=
 
-# GitHive's own model key, only for demo runs and Access operators' hosted agents.
-OPENAI_API_KEY=
-
 # GitHive's GitHub App (optional), to connect repos to GitHub and run checks on GitHub Actions.
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=

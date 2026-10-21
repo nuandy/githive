@@ -1399,10 +1399,10 @@ the loop any agent follows, through the toolkit, as itself:
 **Their votes.** The `githive` grant counts their votes, so a repo's veto roles accept them as they accept GitHive's
 reviewers. Each votes under its own identity, so two of them approving one change count as two approvals.
 
-**The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`) builds Honeycomb, a small word game, in one
-public repo named by `DEMO_REPO` (`app/demo/demo-repo.ts`).
+**The demo run.** githive.app's "Start a demo run" (`POST /demo/runs`) builds Honeycomb, a small word game, in one
+public repo named by `DEMO_REPO`. Demo runs are githive.app's own: their code isn't in this repo.
 
-- **The first run** makes the repo from `app/demo/honeycomb/`: the game's README for people, its SPEC.md, the contract
+- **The first run** makes the repo from the game's starting files: the game's README for people, its SPEC.md, the contract
   each module keeps (which every piece's brief points to, so its reviewers review against it too), its page shell, a
   word list and its tests. It requires one approval and `npm test` before landing.
 - **Every later run starts over on top of the last**, so nothing is force-pushed and the history keeps every run. It
@@ -1410,7 +1410,7 @@ public repo named by `DEMO_REPO` (`app/demo/demo-repo.ts`).
   demo's pieces out of the backlog. Then it puts the starting files back as a change of `githive-demo`'s,
   `reset-<n>`, claiming every top-level path. Those are files the repo began with, so the reset needs no review or
   checks: the run sets the approvals required and the checks to none, merges the reset, and puts both back.
-- **Then its hosted agents start**, one for each of the run's 11 pieces (`app/demo/backlog.ts`), for 45 minutes, so
+- **Then its hosted agents start**, one for each of the run's 11 pieces, for 45 minutes, so
   every piece they build is reviewed. The pieces go into the backlog with the run's number in their ids (`board-3`),
   since a piece's id is the change that builds it and an earlier run's merge would count it as done.
 - **Watching it.** The repo's Hive tab shows how the run is going. A run's status counts the pieces that landed from
@@ -1494,7 +1494,7 @@ and `vagueEvidence` are all information of that kind. None of them reserves anyt
 for one owner's fleet on a fixed plan could be an opt-in layer on top, never the core.
 
 *Code:* `hosted-agents.ts`, `toolkit/hive-agents.ts`, `routes/hosted-agents.ts`, `builder.ts`, `reviewer.ts`,
-`app/demo/`, `github-sync.ts`.
+`github-sync.ts`.
 
 ## 17. Clef's hints
 
@@ -1785,9 +1785,11 @@ with the same sign-in: Cloudflare Access (on the Access hostnames only), an agen
 over OAuth), or a person's session. Reads of a public repo, its pages and routes need no sign-in.
 
 **GitHive, and what githive.app adds.** `githive()` (`src/githive.ts`) builds the Worker: its routes, sign-in, MCP
-over OAuth and Artifacts' push events. `src/index.ts` is GitHive on its own. githive.app's Worker, `app/worker.ts`,
-adds through `githive()`'s options what only it runs: the Honeycomb demo runs, the Usage page's numbers, the demo
-repo on the sign-in card, and a house model for its own runs. The dashboard (`web/`) is githive.app's too.
+over OAuth and Artifacts' push events. `src/index.ts` is GitHive on its own, with no dashboard: a path no route
+answers says where `/api` lists them. githive.app's Worker is built with `githive()` too, from a repo of its own, and
+adds through its options what only githive.app runs: the dashboard (served from the Worker's assets), the Honeycomb
+demo runs, the Usage page's numbers, the demo repo on the sign-in card, and a house model for its own runs. The
+dashboard described below is githive.app's.
 
 **The Hive.** The dashboard lists repos and opens each one on its Hive tab: the agents at work, what each is doing,
 what's landing (the batch being checked, and what landed or failed lately), and a live feed of claims, pushes,
@@ -1829,8 +1831,7 @@ head, or, once landed, from the landed commit's first parent, with files outside
 at 300 files, about 900 KB as JSON and 256 KB a side; binary and too-big files are marked rather than diffed.
 
 **Other pages.** People's Inbox shows every change, in every repo, that waits on the reader. There are pages for
-orgs, new repositories, a person's own agents, their usage, and for admins, who may sign in. How `web/` is styled
-(Tailwind CSS v4, the theme, motion) is in [dashboard-ui.md](dashboard-ui.md).
+orgs, new repositories, a person's own agents, their usage, and for admins, who may sign in.
 
 **Usage** (`#/usage`, `GET /usage?range=24h|7d`) shows each signed-in person what their own repos used on
 Cloudflare: the repos in orgs where they're an owner or admin, decided on the server from who's signed in.
@@ -1862,8 +1863,8 @@ answer, errors and redirects included, carries a CSP `sandbox` without `allow-sa
 opaque origin of its own and can't read GitHive's cookies or call its routes as the visitor. A private repo is never
 served, whoever asks.
 
-*Code:* `githive.ts`, `index.ts`, `app/worker.ts`, `routes/`, `routes/kept-view.ts`, `page-feed.ts`, `feed-shard.ts`,
-`hive-events.ts`, `change-diff.ts`, `routes/site.ts`, `app/usage/`, `web/`.
+*Code:* `githive.ts`, `index.ts`, `routes/`, `routes/kept-view.ts`, `page-feed.ts`, `feed-shard.ts`, `hive-events.ts`,
+`change-diff.ts`, `routes/site.ts`.
 
 ## 22. Record formats
 

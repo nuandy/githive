@@ -693,7 +693,7 @@ function attentionFor(
 /**
  * What a change waits on a person for, for the Inbox: its agent's question (or GitHive's failed builder), or, pushed
  * and not sent back, a vote as a role only people may vote as. Failed checks are its agent's to fix. The dashboard
- * decides the same (web/src/lib/status.ts, waitingOn).
+ * decides the same.
  */
 function waitingOnPerson(claim: ClaimSnapshot, votes: VoteRecord[], policy: ReviewPolicy): WaitingItem | null {
 	const { change, attention, approval, head } = claim;
@@ -749,7 +749,7 @@ const INBOX_RANK = { question: 0, steering: 1, vote: 2 } as const;
 
 /**
  * The Inbox's order, so the 20 a summary keeps are what matters most: questions, then Clef's flags, then votes; the
- * most urgent first, then the oldest. The dashboard sorts the same way (web/src/lib/needsYou.ts, byWaiting).
+ * most urgent first, then the oldest. The dashboard sorts the same way.
  */
 function inboxOrder(a: WaitingItem, b: WaitingItem) {
 	const rank = (item: WaitingItem) => INBOX_RANK[item.kind ?? "question"];

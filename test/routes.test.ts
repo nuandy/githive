@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
+import { withDashboard } from "./helpers/with-dashboard";
 
 // HTTP routes with the Durable Objects and Artifacts faked: what the Worker itself does.
 
@@ -83,7 +84,7 @@ describe("the dashboard's repos", () => {
 
 describe("a repo's address opened in a browser", () => {
 	const open = (path: string, headers: Record<string, string>) =>
-		worker.fetch(new Request(`https://githive.test${path}`, { headers }), {} as never, {} as never);
+		withDashboard.fetch(new Request(`https://githive.test${path}`, { headers }), {} as never, {} as never);
 	const pageLoad = { "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
 
 	it("goes to the repo's page on the dashboard, and the dashboard's own reads still get the JSON", async () => {
@@ -128,5 +129,15 @@ describe("the bench's wipe", () => {
 		expect(await (await post(env, "/admin/wipe", confirm)).json()).toEqual({ deleted: 3, failed: [], remaining: 0 });
 		expect(deleted).toEqual(["project", "t1--a", "fork--docs--c-1"]);
 		expect(index.clear).toHaveBeenCalled();
+	});
+});
+
+describe("GitHive without a dashboard", () => {
+	it("says where its routes are listed, for a path none answers, signed in or not", async () => {
+		for (const path of ["/", "/repos/nuandy/othello/nothing-here"]) {
+			const answer = await get({} as never, path);
+			expect(answer.status, path).toBe(404);
+			expect(await answer.json()).toEqual({ error: expect.stringMatching(/GET \/api lists them/) });
+		}
 	});
 });

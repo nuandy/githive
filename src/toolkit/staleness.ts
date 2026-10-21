@@ -2,7 +2,7 @@
 // needs its paths, asks its holder whether it's still there (a challenge, see challenges.ts), and gets no answer. Only
 // a change waiting on its own agent can be abandoned (nothing pushed, changes requested, or approved but not merged):
 // one waiting for review, for its batch to land or for a person is waiting its turn, however long that takes.
-// The module has no imports so the dashboard can share it (web/tsconfig.json includes this file).
+// The module has no imports, so a dashboard can share it.
 
 /** How long a challenged holder has to answer, by claiming again (its next call to GitHive does). */
 export const CHALLENGE_WINDOW_MS = 2 * 60_000;

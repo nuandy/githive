@@ -197,7 +197,7 @@ const peopleGrant = (holder: string) => isPerson(holder) || holder.startsWith("@
 /**
  * Whether only people may vote as a role: every one of its holders is people ("person:*") or one person. A team's
  * members' agents vote with their owners' teams (see holdsRole), so a team grant isn't people only. The dashboard
- * decides the same (web/src/lib/status.ts, peopleOnly).
+ * decides the same.
  */
 export function peopleOnly(policy: ReviewPolicy, role: string): boolean {
 	const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
